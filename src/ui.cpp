@@ -231,8 +231,15 @@ namespace bp
 		enterFolder(lastPlayed.empty() ? browseDir : parentFolder(lastPlayed), p);
 		for (size_t i = 0; i < browsePaths.size(); i++)
 			if (browsePaths[i] == lastPlayed) cursor = (int)i;
-		if (cursor < scroll) scroll = cursor;
-		if (cursor >= scroll + ROWS_SHOWN) scroll = cursor - ROWS_SHOWN + 1;
+		fitList();
+	}
+
+	void Ui::fitList()
+	{
+		int n = (int)browseRows.size();
+		cursor = std::clamp(cursor, 0, std::max(0, n - 1));
+		// the cursor in the window, and no empty rows below the list's end while there are rows above
+		scroll = std::clamp(scroll, std::max(0, cursor - ROWS_SHOWN + 1), std::min(cursor, std::max(0, n - ROWS_SHOWN)));
 	}
 
 	// the rows' ids: 1 a folder to go into, 2 a video to open, -1 nothing (a message)
@@ -276,8 +283,10 @@ namespace bp
 		if (browseRows.empty()) add(-1, "Nothing to play here", "", "");
 		auto it = placeIn.find(dir);
 		cursor = it == placeIn.end() ? 0 : std::min(it->second.first, (int)browseRows.size() - 1);
-		scroll = it == placeIn.end() ? 0 : std::min(it->second.second, cursor);
-		if (cursor >= scroll + ROWS_SHOWN) scroll = cursor - ROWS_SHOWN + 1;
+		scroll = it == placeIn.end() ? 0 : it->second.second;
+		// Recent opens at its top: the most recent first, and a place in a list that changed since means little
+		if (dir == RECENT) cursor = scroll = 0;
+		fitList();
 		browseVersion++;
 	}
 
@@ -345,8 +354,9 @@ namespace bp
 		if (!ok) p.osd("Couldn't change the folder (is the card read-only?)");
 		int c = cursor, s = scroll;
 		enterFolder(browseDir, p);	// again: it's gone from the list, or marked
-		cursor = std::min(c, (int)browseRows.size() - 1);
-		scroll = std::min(s, cursor);
+		cursor = c;
+		scroll = s;
+		fitList();
 	}
 
 	void Ui::browseUp(Player& p)

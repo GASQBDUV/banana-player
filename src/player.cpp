@@ -342,6 +342,14 @@ namespace bp
 		audioCheckAt = ticks() + 1500;
 	}
 
+	void Player::checkSongEnd()
+	{
+		if (!isAudio || !loaded || finished || !(duration > 0) || position < duration + 0.25) return;
+		if (get("lavfi-complex").empty()) return;	// no graph: mpv ends the file itself
+		if (settings.loop == LOOP_ONE) seekFraction(0);
+		else finished = true;
+	}
+
 	void Player::togglePause()
 	{
 		const char* cmd[] = {"cycle", "pause", nullptr};

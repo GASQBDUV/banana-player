@@ -44,6 +44,15 @@ namespace bp
 		bool browsing() const { return page == Page::Browse; }
 		std::string browseFolder() const { return browseDir; }
 		// a video picked in the browser, once: the caller opens it
+		// the browser's rows as they are listed (label, then note), for test runs
+		std::vector<std::string> browseLabels() const
+		{
+			std::vector<std::string> out;
+			for (size_t i = 0; i < browseRows.size(); i++)
+				out.push_back(std::string((int)i >= scroll && (int)i < scroll + ROWS_SHOWN ? "shown  " : "hidden ") +
+					(i == (size_t)cursor ? "> " : "  ") + browseRows[i].label);
+			return out;
+		}
 		// the Info or About page's lines as they are drawn, for test runs
 		std::vector<std::string> pageLines() const
 		{
@@ -84,6 +93,9 @@ namespace bp
 		Page home(const Player& p) const { return p.playing() ? Page::Main : Page::Browse; }
 		void enterFolder(std::string dir, Player& p);	// "" the first page, RECENT the recent videos
 		void browseUp(Player& p);
+		// the browser's cursor on a row and its window as full as the list allows (a list that came back shorter:
+		// a scroll from before would show its last rows only)
+		void fitList();
 		// X on a folder (or a finger held on it): Hide folder / Unhide folder (a ".hidden" file in it), Cancel
 		bool ctxOpen = false;
 		int ctxCursor = 0;

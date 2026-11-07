@@ -135,7 +135,7 @@ int main(int argc, char** argv)
 			{
 				int n = 0;
 				float v[4];
-				bool ok = buttonFromName(step) != Button::None || step == "info" || step == "page" || step == "screenshot" || step.rfind("prop:", 0) == 0 || step.rfind("shot:", 0) == 0 ||
+				bool ok = buttonFromName(step) != Button::None || step == "info" || step == "page" || step == "rows" || step == "screenshot" || step.rfind("prop:", 0) == 0 || step.rfind("shot:", 0) == 0 ||
 					(sscanf(step.c_str(), "tap:%f:%f%n", &v[0], &v[1], &n) == 2 && n == (int)step.size()) ||
 					(sscanf(step.c_str(), "hold:%f:%f%n", &v[0], &v[1], &n) == 2 && n == (int)step.size()) ||
 					(sscanf(step.c_str(), "drag:%f:%f:%f:%f%n", &v[0], &v[1], &v[2], &v[3], &n) == 4 && n == (int)step.size());
@@ -461,6 +461,7 @@ int main(int argc, char** argv)
 
 			player.pollEvents();
 			player.checkAudio();
+			player.checkSongEnd();
 			if (player.quit || ui.quitRequested) running = false;
 			if (player.finished)
 			{
@@ -549,6 +550,10 @@ int main(int argc, char** argv)
 						}
 						else if (step.rfind("prop:", 0) == 0)
 							printf("    %s = %s\n", step.c_str() + 5, player.property(step.c_str() + 5).c_str());
+						else if (step == "rows")
+						{
+							for (auto& l : ui.browseLabels()) printf("    %s\n", l.c_str());
+						}
 						else if (step == "page")
 						{
 							for (auto& l : ui.pageLines()) printf("    %s\n", l.c_str());

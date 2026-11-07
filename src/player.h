@@ -46,6 +46,10 @@ namespace bp
 		void pollEvents();
 		// called now and then: sound that didn't open is opened again
 		void checkAudio();
+		// called now and then: a song with a visualizer (or None's picture) at its end. The filter graph's picture
+		// never ends, so mpv never ends the file: the clock runs on past the song. Ended here instead (or, Loop one,
+		// started again)
+		void checkSongEnd();
 		bool frameDue();
 		void render(int w, int h);
 		void reportSwap();
