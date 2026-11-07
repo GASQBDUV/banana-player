@@ -62,7 +62,7 @@ when a new version is out and installs it for you.
 - **Play / pause:** **A**. **L / R** go to the previous or next file.
 - **Close it:** tap **<** at the top left, or press **B** twice.
 - **Menu** (recent files, settings, quit): **START**.
-- **Quick settings** (volume, brightness, quit): press **F** on its own.
+- **Quick settings** (volume, brightness, quit): press the **Menu/Function** button.
 - **Quit straight away:** **F + START**.
 
 Every button has a touch equivalent on the bottom screen. Every control, setting and format is in

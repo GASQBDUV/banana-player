@@ -59,7 +59,7 @@ its folder on that file.
 | **B** (or **Back**) **twice** | Close the video (back to the list) |
 | **F + L2** | Screenshot of both screens (saved in the card's `screenshots` folder) |
 | **F + START** | Quit Banana Player at once (anywhere; your place is kept) |
-| **F** on its own | Quick settings: volume, brightness, Same brightness for both screens, Quit |
+| **Menu/Function** (F) | Quick settings: volume, brightness, Same brightness for both screens, Quit |
 
 **By touch:**
 - **Progress bar:** touch it to jump there. Hold and drag to scrub, and the picture follows your finger.
@@ -186,7 +186,7 @@ on the card, not in the player's folder.
 
 ## Quick settings
 
-Press **F** on its own, anywhere, for a panel on the bottom screen:
+Press the **Menu/Function** button (F), anywhere, for a panel on the bottom screen:
 
 - **Volume** and **Brightness**: drag along the bar, tap **−** / **+**, or use **LEFT / RIGHT**. They change the same
   levels as BananaOS's own settings and its volume and brightness keys, and they're kept after a restart.
