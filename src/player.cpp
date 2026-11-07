@@ -826,9 +826,10 @@ namespace bp
 
 	int Player::shownMusic() const
 	{
-		// the art's choices need art: a song with none shows the visualizer (None is none either way)
-		if (settings.musicShow == SHOW_NONE) return SHOW_NONE;
-		return hasCover(tracks) ? settings.musicShow : SHOW_VIS;
+		// the art's choices need art: a song with none shows its title alone (Album art: no visualizer the person
+		// didn't pick) or the visualizer (Art + visualizer); None is none either way
+		if (settings.musicShow == SHOW_NONE || hasCover(tracks)) return settings.musicShow;
+		return settings.musicShow == SHOW_ART ? SHOW_NONE : SHOW_VIS;
 	}
 
 	std::string Player::graphFor(int vis, bool overCover)

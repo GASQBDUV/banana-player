@@ -775,6 +775,8 @@ namespace bp
 
 	bool Ui::act(int id, Player& p)
 	{
+		// "<" over what plays closes it at once (the place kept); B and Close ask twice, a pocket's press being one
+		if (id == BACK_ICON && page == Page::Main && p.playing()) return true;
 		if (id == QUIT_BTN || id == BACK_ICON) return pressAnyway(Button::B, p);
 		if (id == BACK_BTN) return press(Button::B, p);	// up a folder, out of a page, or (the first page) leave
 		if (id == SCREEN_BTN) { panel.set(false); return false; }
@@ -1277,8 +1279,10 @@ namespace bp
 	void Ui::drawBackIcon()
 	{
 		Rect b = buttonRect(BACK_ICON);
-		fill(b, pressedBtn == BACK_ICON ? PRESSED : quitArmed ? YELLOW : TEAL);
-		drawText("<", 2, quitArmed ? BG : CREAM, b.x + b.w / 2, b.y + 6, 0, 2);
+		// armed (the browser's first page: once more quits) in yellow
+		bool armed = quitArmed && page == Page::Browse;
+		fill(b, pressedBtn == BACK_ICON ? PRESSED : armed ? YELLOW : TEAL);
+		drawText("<", 2, armed ? BG : CREAM, b.x + b.w / 2, b.y + 6, 0, 2);
 	}
 
 	void Ui::drawBack(const char* label)

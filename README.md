@@ -128,7 +128,7 @@ its folder on that file.
 - **Progress bar:** touch it to jump there. Hold and drag to scrub, and the picture follows your finger.
 - **Buttons:** they act when you lift your finger, so slide off one to cancel.
 - **Lists:** tap to choose, drag to scroll.
-- **Close:** tap **<** (top left) or Close twice.
+- **Close:** tap **<** (top left) once, or Close twice.
 - **<** in the file list goes up a folder (at the top: tap twice to quit).
 
 Under the progress bar you'll see the time played, the time left (at the current speed) and the total length.
@@ -198,8 +198,9 @@ Recent. **Info** shows the photo's size, format, and when and with which camera 
 Songs show their title, artist and album on the top screen. While a song plays, three buttons change how:
 
 - **SELECT: what's shown.** **Album art** (default), **Art + visualizer** (the visualizer over the bottom of the art),
-  **Visualizer**, or **None** (just the title: the lightest on the battery). A song without art shows the visualizer.
-  Album art can be inside the song file or a `cover.jpg` in the same folder.
+  **Visualizer**, or **None** (just the title: the lightest on the battery). A song without art shows its title alone
+  on Album art, and the visualizer on Art + visualizer. Album art can be inside the song file or a `cover.jpg` in the
+  same folder.
 - **Y: the visualizer.** **Bars**, **Waves**, **Spectrum** or **Circle** (bars round a glowing ring, cyan to pink;
   with Art + visualizer, the album art sits inside the ring).
 - **X: looping.** **No loop**, **Loop all** (the folder starts again after its last song) or **Loop one** (the same

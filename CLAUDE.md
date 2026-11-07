@@ -74,7 +74,8 @@ docs/make-screenshots.sh <library>                   # the README's docs/img/scr
 - **`Ui`** is the whole bottom panel: pages (Main, Audio, Subs, Settings, Browse, Info, About, Exit), START's tabbed
   menu (`inMenu`: Recent, Settings, About, Exit), the folder context menu, Lock, Screen off. Main over a photo is
   `drawPhoto` (the pan area and `photoBtn`s, ids from `PHOTO_BTN`; `photoPointer`, a flick's glide in `tick()`; a
-  drag moves the photo or, `dragBox`, the box). `BACK_ICON` ("<", top left of the browser and of Main) is B by touch;
+  drag moves the photo or, `dragBox`, the box). `BACK_ICON` ("<", top left of the browser and of Main) is B by touch, except
+  over what plays, where one tap closes it;
   the browser has no other Back. `dropTouch()` (on `showPlayer`/`showBrowser`) swallows only a finger still down:
   swallowing the next touch regardless ate the first tap after opening a file. Settings opens on groups (`setGroup`
   -1); `settingRows()` lists a group's row ids. Layout is in fixed 640×480 logical units, scaled by `sx`/`sy`; text
