@@ -45,6 +45,9 @@ namespace bp
 		opt("framedrop", "decoder+vo");
 		opt("video-sync", "audio");
 		opt("audio-client-name", "banana-player");
+		// stereo out, mixed by mpv: ALSA's plug (BananaOS has no sound server) puts a mono track on the left speaker
+		// only, and takes a 5.1 track's first two channels (no centre: no dialogue)
+		opt("audio-channels", "stereo");
 		opt("input-default-bindings", "no");
 		opt("input-vo-keyboard", "no");
 		opt("osc", "no");
