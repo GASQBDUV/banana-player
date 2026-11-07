@@ -242,11 +242,21 @@ namespace bp
 	{
 		page = Page::Browse;
 		touchLocked = false;	// the lock is the video's
+		dropTouch();
 		// listed again either way: positions changed, a file may have come or gone
 		enterFolder(lastPlayed.empty() ? browseDir : parentFolder(lastPlayed), p);
 		for (size_t i = 0; i < browsePaths.size(); i++)
 			if (browsePaths[i] == lastPlayed) cursor = (int)i;
 		fitList();
+	}
+
+	void Ui::dropTouch()
+	{
+		// a finger still down on what's gone presses nothing on what comes
+		panTouch = panMoved = listTouch = dragging = false;
+		pressedBtn = -1;
+		flickAt = tapAt = holdAt = 0;
+		swallowTouch = true;
 	}
 
 	void Ui::fitList()
@@ -541,6 +551,8 @@ namespace bp
 			case Button::Left: scroll = std::max(0, scroll - INFO_SHOWN); break;
 			case Button::Right: scroll = std::min(maxScroll, scroll + INFO_SHOWN); break;
 			case Button::B: case Button::A:
+				// About as the menu's tab: nothing to go back to (B closes the menu)
+				if (page == Page::About && inMenu) break;
 				if (page == Page::About) { page = Page::Settings; setGroup = -1; cursor = scroll = 0; }
 				else page = home(p);
 				break;
@@ -1004,7 +1016,7 @@ namespace bp
 			photo = pb;
 		}
 		// the dots of "Loading..." go round
-		if (p.loading() || (p.playingPhoto() && !p.thumbW)) photo += "|loading" + std::to_string(SDL_GetTicks() / 400 % 4);
+		if (p.loading() || p.thumbPending()) photo += "|loading" + std::to_string(SDL_GetTicks() / 400 % 4);
 		return buf + photo + p.title + "|" + p.error + "|" + serializeSettings(p.settings) + "|bat" + std::to_string(battery.percent) + (battery.charging ? "c" : "") + (inMenu ? "|menu" + std::to_string(menuTab) : "") + (ctxOpen ? "|ctx" + std::to_string(ctxCursor) + std::to_string(pressedBtn) : "");
 	}
 
@@ -1097,6 +1109,8 @@ namespace bp
 	void Ui::draw(const Player& p, bool force)
 	{
 		if (quitArmed && SDL_GetTicks() - quitArmed >= QUIT_WINDOW_MS) quitArmed = 0;
+		// before the signature: "Again to clear" goes back to how it was when the second tap would no longer clear
+		if (clearArmed && SDL_GetTicks() - clearArmed >= QUIT_WINDOW_MS) clearArmed = 0;
 		if (!batteryAt || SDL_GetTicks() - batteryAt >= 10000) readPower();
 		// the lock held long enough: released (the finger still down presses nothing)
 		if (touchLocked && lockHoldAt && SDL_GetTicks() - lockHoldAt >= UNLOCK_HOLD_MS)
@@ -1295,10 +1309,12 @@ namespace bp
 			if (i == cursor) fill({16, y, 608, ROW_H - 4}, TEAL);
 			if (r[i].selected) drawText("*", 1, YELLOW, 32, y + 8);
 			int noteW = 0;
-			if (!r[i].note.empty())
+			// Recent's Clear row says how it stands now (the list was made before the first tap expired)
+			std::string note = page == Page::Browse && r[i].id == 3 ? (clearArmed ? "again to clear" : "tap twice") : r[i].note;
+			if (!note.empty())
 			{
 				// a resume time, a count, a root's path: right-aligned and short
-				drawText(r[i].note, 0, DIM, 608, y + 12, 200, 1);
+				drawText(note, 0, clearArmed && r[i].id == 3 ? YELLOW : DIM, 608, y + 12, 200, 1);
 				noteW = 210;
 			}
 			drawText(r[i].label, 1, r[i].id == STYLE_ROW ? YELLOW : r[i].id < 0 ? DIM : CREAM, page == Page::Browse ? 32 : 60, y + 8,
@@ -1409,7 +1425,6 @@ namespace bp
 
 	void Ui::drawSettings(const Player& p)
 	{
-		if (clearArmed && SDL_GetTicks() - clearArmed >= QUIT_WINDOW_MS) clearArmed = 0;
 		if (setGroup < 0)
 		{
 			// the groups: a name, what's in it
@@ -1530,7 +1545,8 @@ namespace bp
 
 	void Ui::drawPhoto(const Player& p)
 	{
-		drawText(p.title.empty() ? "Opening..." : p.title, 2, CREAM, 24, 24, battery.percent >= 0 ? 592 - BATTERY_W : 592);
+		std::string name = p.currentPath().substr(p.currentPath().rfind('/') + 1);
+		drawText(!p.title.empty() ? p.title : !p.error.empty() ? name : "Opening...", 2, CREAM, 24, 24, battery.percent >= 0 ? 592 - BATTERY_W : 592);
 		drawBattery(616, 26, p);
 		Rect pan = panRect(p);
 		fill(pan, SCREEN);
@@ -1570,7 +1586,8 @@ namespace bp
 				fill({bx + bw - 2, by, 2, bh}, YELLOW);
 			}
 		}
-		else drawText("Loading" + std::string(SDL_GetTicks() / 400 % 4, '.'), 1, DIM, pan.x + pan.w / 2, pan.y + pan.h / 2 - 12, 0, 2);
+		else if (p.thumbPending()) drawText("Loading" + std::string(SDL_GetTicks() / 400 % 4, '.'), 1, DIM, pan.x + pan.w / 2, pan.y + pan.h / 2 - 12, 0, 2);
+		else drawText("No preview", 1, DIM, pan.x + pan.w / 2, pan.y + pan.h / 2 - 12, 0, 2);
 
 		// under the pan area: the zoom and the size; how to use it
 		std::string zoom = "Zoom " + std::to_string((int)std::lround(v.zoom * 100)) + "%";
@@ -1617,7 +1634,8 @@ namespace bp
 	void Ui::drawMain(const Player& p)
 	{
 		if (p.playingPhoto()) { drawPhoto(p); return; }
-		drawText(p.title.empty() ? "Opening..." : p.title, 2, CREAM, 24, 24, battery.percent >= 0 ? 592 - BATTERY_W : 592);
+		std::string name = p.currentPath().substr(p.currentPath().rfind('/') + 1);
+		drawText(!p.title.empty() ? p.title : !p.error.empty() ? name : "Opening...", 2, CREAM, 24, 24, battery.percent >= 0 ? 592 - BATTERY_W : 592);
 		drawBattery(616, 26, p);
 		if (p.count() > 1)
 			drawText(std::to_string(p.index() + 1) + " / " + std::to_string(p.count()), 0, DIM, 616, 90, 0, 1);

@@ -477,6 +477,8 @@ int main(int argc, char** argv)
 			// the place is kept now and then too: a battery that runs out, a power-off after sleeping
 			bool woke = slept.exchange(false);
 			if (woke) freshUntil = SDL_GetTicks() + 2000;	// the panels back from a sleep: drawn again
+			// a photo has no Play: an animated one paused by the lid goes on at the wake (a video waits for A)
+			if (woke && player.playingPhoto()) player.unpause();
 			if (woke || (player.loaded && !player.paused && SDL_GetTicks() - savedAt > 60000))
 			{
 				player.saveResume();

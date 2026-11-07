@@ -41,9 +41,10 @@ namespace bp
 	{
 		const int w = CIRCLE_W, h = CIRCLE_H;
 		size_t bytes = (size_t)w * h * 2;
+		std::string header = "P5\n" + std::to_string(w) + " " + std::to_string(h) + "\n65535\n";
 		auto ready = [&](const std::string& path) {
 			struct stat st;
-			return stat(path.c_str(), &st) == 0 && (size_t)st.st_size > bytes;
+			return stat(path.c_str(), &st) == 0 && (size_t)st.st_size == header.size() + bytes;
 		};
 		if (ready(dir + "/" + CIRCLE_MAPS[0]) && ready(dir + "/" + CIRCLE_MAPS[1])) return true;
 		std::vector<unsigned char> xs(bytes), ys(bytes);
@@ -76,7 +77,7 @@ namespace bp
 		{
 			std::string path = dir + "/" + CIRCLE_MAPS[k], tmp = path + ".tmp";
 			std::ofstream out(tmp, std::ios::binary | std::ios::trunc);
-			out << "P5\n" << w << " " << h << "\n65535\n";
+			out << header;
 			const std::vector<unsigned char>& v = k ? ys : xs;
 			out.write((const char*)v.data(), (std::streamsize)v.size());
 			if (!out.flush()) return false;
@@ -86,10 +87,16 @@ namespace bp
 		return true;
 	}
 
-	// a path as a filter's argument: quoted (a ':' would end it); a path with a quote can't be
+	bool lavfiSafePath(const std::string& dir)
+	{
+		return !dir.empty() && dir.find_first_of(":='\\") == std::string::npos;
+	}
+
+	// a path as a filter's argument: quoted (spaces, commas, brackets, ';'); one with ':', '=', a quote or a
+	// backslash can't be named at all
 	static bool lavfiPath(const std::string& p, std::string& out)
 	{
-		if (p.find('\'') != std::string::npos || p.find('\\') != std::string::npos) return false;
+		if (!lavfiSafePath(p)) return false;
 		out = "'" + p + "'";
 		return true;
 	}

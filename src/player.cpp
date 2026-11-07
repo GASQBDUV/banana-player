@@ -243,8 +243,11 @@ namespace bp
 			if (!settings.keepPhotoZoom)
 			{
 				view.zoom = 1;
+				view.fill = false;
 				panShareX = panShareY = 0;
 			}
+			// a photo has no Play: one that opens paused (the lid closed over the last) would freeze an animation
+			prop("pause", "no");
 			view.panX = view.panY = 0;
 			// Fill is the view's (by zoom, below), so mpv fits it
 			for (auto& a : aspectProperties(AspectMode::Fit)) prop(a.first, a.second);
@@ -336,7 +339,8 @@ namespace bp
 				break;
 			}
 			case MPV_EVENT_PLAYBACK_RESTART:
-				started = true;
+				// this file's (it comes after its FILE_LOADED): one left over from the last file's seek isn't
+				if (loaded) started = true;
 				break;
 			case MPV_EVENT_SHUTDOWN:
 				quit = true;
@@ -518,7 +522,8 @@ namespace bp
 		}
 		if (w <= 0 || h <= 0 || !px || format != "bgr0" || size < (size_t)(stride * (h - 1) + w * 4)) return;
 		// the whole photo, or (some builds) already turned by its metadata
-		thumbTurnedByMpv = fileTurn % 180 == 90 && w == photoH && h == photoW;
+		// (by its shape: the screenshot is after the vf's scale, the size isn't the photo's)
+		thumbTurnedByMpv = fileTurn % 180 == 90 && photoW != photoH && (w > h) != (photoW > photoH);
 		double k = std::max({1.0, w / (double)THUMB_MAX_W, h / (double)THUMB_MAX_H});
 		int tw = std::max(1, (int)(w / k)), th = std::max(1, (int)(h / k));
 		thumb.assign((size_t)tw * th * 4, 255);
@@ -596,6 +601,11 @@ namespace bp
 	{
 		view.fill = !view.fill;
 		setPhotoView(view.zoom, view.panX, view.panY);
+	}
+
+	void Player::unpause()
+	{
+		prop("pause", "no");
 	}
 
 	void Player::togglePause()
@@ -821,14 +831,15 @@ namespace bp
 
 	std::string Player::graphFor(int vis, bool overCover)
 	{
-		// Circle's tables: made the first time it's wanted, beside the settings (or in /tmp with none kept)
+		// Circle's tables: made the first time it's wanted, beside the settings, else (none kept, or a folder a
+		// filter graph can't name) in /tmp. Tried again at the next song when they couldn't be written (a full card)
 		if (vis == VIS_CIRCLE && circleMaps.empty())
 		{
-			std::string dir = opts.stateDir.empty() ? "/tmp/banana-player" : opts.stateDir;
-			circleMaps = writeCircleMaps(dir) ? dir : "-";
-			if (circleMaps == "-") fprintf(stderr, "banana-player: Circle's tables couldn't be written in %s\n", dir.c_str());
+			std::string dir = lavfiSafePath(opts.stateDir) ? opts.stateDir : "/tmp/banana-player";
+			if (writeCircleMaps(dir)) circleMaps = dir;
+			else fprintf(stderr, "banana-player: Circle's tables couldn't be written in %s: drawn as Bars\n", dir.c_str());
 		}
-		return visualizerGraph(vis, overCover, circleMaps == "-" ? "" : circleMaps);
+		return visualizerGraph(vis, overCover, circleMaps);
 	}
 
 	void Player::applyAudioDisplay()
@@ -985,7 +996,7 @@ namespace bp
 			std::string graph = get("lavfi-complex");
 			std::string vis = graph.find("showwaves") != std::string::npos ? "Waves"
 							  : graph.find("showspectrum") != std::string::npos ? "Spectrum"
-							  : graph.find("remap") != std::string::npos ? "Circle" : "Bars";
+							  : graph.find("] remap [") != std::string::npos ? "Circle" : "Bars";
 			row("Top screen", graph == blankGraph() ? "Title only"
 				: graph.find("[vid1]") != std::string::npos ? "Album art + " + vis
 				: !graph.empty() ? "Visualizer: " + vis

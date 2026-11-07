@@ -59,6 +59,8 @@ namespace bp
 		size_t i = 2;
 		while (i + 4 <= b.size() && u8(i) == 0xFF)
 		{
+			// a marker may be padded with more 0xFF before it
+			while (i + 4 < b.size() && u8(i + 1) == 0xFF) i++;
 			unsigned marker = u8(i + 1), len = u8(i + 2) << 8 | u8(i + 3);
 			if (marker == 0xDA || len < 2) break;	// the picture's data: no EXIF before it
 			if (marker == 0xE1 && b.compare(i + 4, 6, std::string("Exif\0\0", 6)) == 0)
@@ -71,17 +73,28 @@ namespace bp
 				auto u32 = [&](size_t at) -> uint32_t {
 					return at + 4 > end ? 0 : le ? u16(at) | (uint32_t)u16(at + 2) << 16 : (uint32_t)u16(at) << 16 | u16(at + 2);
 				};
-				// an ASCII value: in the entry itself up to 4 bytes, else at its offset
+				// an offset from the TIFF header that lands in the block, past the header; 0 for any other
+				auto offset = [&](size_t at) -> size_t {
+					uint32_t o = u32(at);
+					return o >= 8 && t + o < end ? t + o : 0;
+				};
+				// an ASCII value: in the entry itself up to 4 bytes, else at its offset; printable characters only (a
+				// broken or hostile file's bytes are no name)
 				auto text = [&](size_t entry) {
 					uint32_t n = u32(entry + 4);
-					size_t at = n <= 4 ? entry + 8 : t + u32(entry + 8);
-					if (at >= end || n > 256) return std::string();
+					size_t at = n <= 4 ? entry + 8 : offset(entry + 8);
+					if (!at || at >= end || n > 256) return std::string();
 					std::string s = b.substr(at, std::min((size_t)n, end - at));
-					while (!s.empty() && (s.back() == '\0' || s.back() == ' ')) s.pop_back();
+					size_t nul = s.find('\0');
+					if (nul != std::string::npos) s.resize(nul);
+					for (char& c : s)
+						if ((unsigned char)c < 0x20 || (unsigned char)c >= 0x7F) c = '?';
+					while (!s.empty() && s.back() == ' ') s.pop_back();
 					return s;
 				};
-				uint32_t exifIfd = 0;
+				size_t exifIfd = 0;
 				auto readIfd = [&](size_t ifd) {
+					if (!ifd) return;
 					unsigned n = u16(ifd);
 					for (unsigned k = 0; k < n && k < 512; k++)
 					{
@@ -93,12 +106,12 @@ namespace bp
 						case 0x0110: out.model = text(e); break;
 						case 0x0132: if (out.taken.empty()) out.taken = text(e); break;
 						case 0x9003: out.taken = text(e); break;	// when it was taken, over when it was changed
-						case 0x8769: exifIfd = u32(e + 8); break;
+						case 0x8769: exifIfd = offset(e + 8); break;
 						}
 					}
 				};
-				readIfd(t + u32(t + 4));
-				if (exifIfd) readIfd(t + exifIfd);
+				readIfd(offset(t + 4));
+				readIfd(exifIfd);
 				if (out.orientation < 1 || out.orientation > 8) out.orientation = 1;
 				return out;
 			}
@@ -130,7 +143,14 @@ namespace bp
 	std::string exifDate(const std::string& taken)
 	{
 		// "YYYY:MM:DD HH:MM:SS"
-		if (taken.size() < 16 || taken[4] != ':' || taken[7] != ':') return taken;
+		auto digits = [&](size_t from, size_t n) {
+			for (size_t i = from; i < from + n; i++)
+				if (!isdigit((unsigned char)taken[i])) return false;
+			return true;
+		};
+		if (taken.size() < 16 || taken[4] != ':' || taken[7] != ':' || !digits(0, 4) || !digits(5, 2) || !digits(8, 2) ||
+			!digits(11, 2) || !digits(14, 2))
+			return "";
 		return taken.substr(0, 4) + "-" + taken.substr(5, 2) + "-" + taken.substr(8, 2) + " " + taken.substr(11, 5);
 	}
 }

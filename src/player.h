@@ -64,6 +64,7 @@ namespace bp
 		void reportSwap();
 
 		void togglePause();
+		void unpause();
 		// from any thread: the lid closed, the handheld slept
 		void pauseNow();
 		void seekRelative(double seconds);
@@ -140,6 +141,8 @@ namespace bp
 		std::vector<unsigned char> thumb;
 		int thumbW = 0, thumbH = 0, thumbId = 0;
 		int thumbTurn() const;
+		// the thumbnail still to come (not after an error, nor after mpv gave none ten times)
+		bool thumbPending() const { return isPhoto && !thumbW && error.empty() && thumbTries < 10; }
 
 	private:
 		void load();
@@ -148,7 +151,7 @@ namespace bp
 		// an audio file: the visualizer (Audio display) and the title, artist and album over the top panel
 		void applyAudioDisplay();
 		std::string graphFor(int vis, bool overCover);	// visualizerGraph, with Circle's tables made first
-		std::string circleMaps;	// where they are; "-": they couldn't be made
+		std::string circleMaps;	// where they are, once made
 		int shownMusic() const;	// MusicShow as it comes out for this file (its art or none)
 		void updateOverlay();
 		bool isAudio = false, isPhoto = false;

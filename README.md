@@ -178,7 +178,7 @@ Photos can put it on the right), with a box around the part you see on top. The 
 The buttons beside it do the same as the handheld's: Prev, Next, Zoom −, Zoom +, Rotate, Fit/Fill, Info and Menu.
 
 The next photo opens at the same zoom, in the same corner, which suits scanned comics page by page (turn this off with
-**Keep zoom between photos**). Photos taken sideways are shown upright, and animated GIFs play. Photos don't go into
+**Keep zoom between photos**). Camera photos (JPEG) taken sideways are shown upright, and animated GIFs play. Photos don't go into
 Recent. **Info** shows the photo's size, format, and when and with which camera it was taken.
 
 ## Picture size

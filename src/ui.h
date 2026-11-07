@@ -45,7 +45,12 @@ namespace bp
 		void showBrowser(Player& p, const std::string& lastPlayed);
 		// the row the browser's cursor is on, for test runs
 		std::string browseSelection() const { return cursor < (int)browsePaths.size() ? browsePaths[cursor] : ""; }
-		void showPlayer() { page = Page::Main; inMenu = false; }
+		void showPlayer()
+		{
+			page = Page::Main;
+			inMenu = false;
+			dropTouch();
+		}
 		bool browsing() const { return page == Page::Browse; }
 		std::string browseFolder() const { return browseDir; }
 		// a video picked in the browser, once: the caller opens it
@@ -106,6 +111,7 @@ namespace bp
 		// the browser's cursor on a row and its window as full as the list allows (a list that came back shorter:
 		// a scroll from before would show its last rows only)
 		void fitList();
+		void dropTouch();
 		// X on a folder (or a finger held on it): Hide folder / Unhide folder (a ".hidden" file in it), Cancel
 		bool ctxOpen = false;
 		int ctxCursor = 0;

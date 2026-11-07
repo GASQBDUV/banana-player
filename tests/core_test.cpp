@@ -540,6 +540,18 @@ static void testPhoto()
 	CHECK_EQ(exifRotation(e.orientation), 90);
 	CHECK_EQ(exifDate(e.taken), std::string("2024-05-01 13:45"));
 	CHECK_EQ(parseExif("not a jpeg").orientation, 1);
+	// padded with 0xFF before the marker: still found
+	std::string padded = "\xFF\xD8\xFF" + jpeg.substr(2);
+	CHECK_EQ(parseExif(padded).orientation, 6);
+	// an IFD offset out of the block: nothing read from the header's bytes
+	std::string badOff = jpeg;
+	badOff[2 + 2 + 2 + 6 + 4] = (char)0xF0;	// IFD0's offset (in the TIFF header, after "II" 42)
+	CHECK_EQ(parseExif(badOff).make, std::string());
+	CHECK_EQ(exifDate("garbage that is long"), std::string());
+	CHECK_EQ(lavfiSafePath("/data/home/.config/banana-player"), true);
+	CHECK_EQ(lavfiSafePath("/a/co:lon"), false);
+	CHECK_EQ(lavfiSafePath("/a/eq=x"), false);
+	CHECK_EQ(visualizerGraph(VIS_CIRCLE, false, "/a/co:lon").find("remap"), std::string::npos);	// as Bars
 	CHECK_EQ(exifRotation(8), 270);
 }
 

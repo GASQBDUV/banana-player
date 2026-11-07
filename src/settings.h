@@ -22,6 +22,8 @@ namespace bp
 	std::string visualizerGraph(int vis, bool overCover, const std::string& mapsDir = "");
 	// Circle's tables, remap's xmap and ymap as 16-bit PGMs, in dir (made once, kept); false if they can't be written
 	bool writeCircleMaps(const std::string& dir);
+	// a folder a filter graph can name (FFmpeg's option parser splits at ':' and '=' even inside quotes)
+	bool lavfiSafePath(const std::string& dir);
 	// Circle's picture, the panel's shape: the circle a little low, under the song's title
 	constexpr int CIRCLE_W = 640, CIRCLE_H = 480;
 	// None's picture: black, a tiny one at 5 frames a second drawn from the sound (so it ends with it): the last
