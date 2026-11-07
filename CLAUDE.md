@@ -14,7 +14,7 @@ ctest --test-dir build                               # or ./build/core-test (all
 ./build/banana-player [FILE|FOLDER]                  # two windows = the two panels; no file: the file browser
 BP_BROWSE=dir1:dir2 ./build/banana-player            # the browser's top-level places
 packaging/build-bundle.sh                            # aarch64 bundle for the handheld (Docker, arm64 Debian 12)
-docs/make-screenshots.sh <library>                   # the README's docs/img/screen-*.png
+docs/make-screenshots.sh <library>                   # the README's docs/img/screen-*.png (library layout: the script's header)
 ```
 
 - **Scripted runs** are the end-to-end test harness: `--press STEPS` runs comma-separated steps 0.8 s apart and prints
@@ -73,18 +73,21 @@ docs/make-screenshots.sh <library>                   # the README's docs/img/scr
   `video-out-params` of the last file (or the idle window) can't tell.
 - **`Ui`** is the whole bottom panel: pages (Main, Audio, Subs, Settings, Browse, Info, About, Exit), START's tabbed
   menu (`inMenu`: Recent, Settings, About, Exit), the folder context menu, Lock, Screen off. Main over a photo is
-  `drawPhoto` (the pan area and `photoBtn`s, ids from `PHOTO_BTN`; `photoPointer`, a flick's glide in `tick()`).
-  Settings opens on groups (`setGroup` -1); `settingRows()` lists a group's row ids. Layout is in fixed
-  640×480 logical units, scaled by `sx`/`sy`; text is rendered at the real panel size. It redraws only when
+  `drawPhoto` (the pan area and `photoBtn`s, ids from `PHOTO_BTN`; `photoPointer`, a flick's glide in `tick()`; a
+  drag moves the photo or, `dragBox`, the box). `BACK_ICON` ("<", top left of the browser and of Main) is B by touch;
+  the browser has no other Back. `dropTouch()` (on `showPlayer`/`showBrowser`) swallows only a finger still down:
+  swallowing the next touch regardless ate the first tap after opening a file. Settings opens on groups (`setGroup`
+  -1); `settingRows()` lists a group's row ids. Layout is in fixed 640×480 logical units, scaled by `sx`/`sy`; text
+  is rendered at the real panel size. It redraws only when
   `signature()` changes (or when forced), so any new state that affects drawing must be added to `signature()`.
   `press(Button)` and `pointer(Pointer)` return true for "leave", which `main` turns into closing the video (browser
   mode) or quitting.
 - **Library code with no window** (`aspect`, `tracks`, `format`, `substyle`, `settings`, `resume`, `history`,
-  `playlist`, `browser`, `png`, `battery`) builds as `bpcore` and is covered by `tests/core_test.cpp` (a hand-rolled `CHECK_EQ`).
+  `playlist`, `browser`, `png`, `battery`, `photo`) builds as `bpcore` and is covered by `tests/core_test.cpp` (a hand-rolled `CHECK_EQ`).
   Keep window/mpv-handle code out of these.
 - **Settings** are an INI-ish `key = value` file. New switches go in `Settings` plus the `REMEMBER` table in
   `settings.cpp`. In `ui.cpp`, the `REMEMBER`/`REMEMBER_LABELS` arrays, `TOGGLES` and the row ids (`TOGGLE_ROW`,
-  `PAN_ROW`, `CLEAR_ROW`…) in `ui.h` must be kept in step with them, and the row placed in a group in `settingRows()`.
+  `PAN_ROW`, `DRAG_ROW`, `CLEAR_ROW`…) in `ui.h` must be kept in step with them, and the row placed in a group in `settingRows()`.
 
 ## BananaOS integration (constraints, not discoverable from this repo)
 
@@ -127,5 +130,5 @@ docs/make-screenshots.sh <library>                   # the README's docs/img/scr
   libass (subtitles, titles) is built with fontconfig, and the bundle's `fonts.conf` lists only the player's own fonts.
   `BP_FONT_PROVIDER=none` shows libass the way it would be without that.
 - The icon's 32×32 grid lives in both `packaging/icon/make-icon.py` and `src/logo.h`; change them together.
-- Screenshots and the README use Blender's *Sintel* (CC BY 3.0, credited in the README). Don't use copyrighted
-  material.
+- Screenshots and the README use Blender's *Sintel* (CC BY 3.0, credited in the README); the photo screenshot is a
+  still cropped from its trailer. Don't use copyrighted material.
