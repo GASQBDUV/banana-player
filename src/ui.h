@@ -146,7 +146,7 @@ namespace bp
 		// music playing: X loop, Y visualizer, SELECT what's shown (a video: audio, subtitles, picture size)
 		bool musicKey(Button b, Player& p);
 		// a photo: the pan area (its thumbnail, the part on the top panel boxed: a finger drags the photo as on a
-		// phone, a flick glides, a double-tap zooms, a swipe at full view goes on) beside its buttons
+		// phone, a flick glides, a double-tap zooms; no swipe to the next: Prev/Next do that) beside its buttons
 		bool photoKey(Button b, Player& p);	// true: it was a photo's
 		bool photoPointer(const Pointer& pt, int x, int y, Player& p);
 		void photoZoomTo(double zoom, double panX, double panY, Player& p);

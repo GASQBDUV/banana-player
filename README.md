@@ -177,7 +177,6 @@ Photos can put it on the right), with a box around the part you see on top:
   and it glides on.
 - **Double-tap** to zoom to 200% on that spot. Double-tap again to see all of it.
 - **Tap** somewhere on the small photo to look there.
-- **Swipe** left or right while the whole photo is shown to go to the next or previous one.
 
 The buttons beside it do the same as the handheld's: Prev, Next, Zoom −, Zoom +, Rotate, Fit/Fill, Info and Menu.
 

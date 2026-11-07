@@ -710,12 +710,6 @@ namespace bp
 		panTouch = false;
 		if (panMoved)
 		{
-			// the whole photo across (nothing to drag that way): a swipe, to the next or the one before
-			if (maxPan(sc.x) <= 0 && std::abs(dx) > 48 && std::abs(dx) > 1.5 * std::abs(dy))
-			{
-				if (dx < 0 ? !p.next() : !p.prev()) p.osd(dx < 0 ? "This is the last one" : "This is the first one");
-				return false;
-			}
 			// let go while moving: it glides on
 			if (now - lastAt < 80 && std::hypot(flickVX, flickVY) > 0.3) flickAt = now;
 			return false;
@@ -1623,7 +1617,7 @@ namespace bp
 		if (p.photoWidth() > 0) zoom += "   " + std::to_string(p.photoWidth()) + " x " + std::to_string(p.photoHeight());
 		drawText(zoom, 0, CREAM, pan.x, pan.y + pan.h + 10, pan.w);
 		drawText(maxPan(sc.x) > 0 || maxPan(sc.y) > 0 ? (p.settings.dragBox ? "Drag the box · double-tap: zoom out" : "Drag to move · double-tap: zoom out")
-			: "Swipe: next · double-tap: zoom in",
+			: "Double-tap: zoom in",
 			0, DIM, pan.x, pan.y + pan.h + 36, pan.w);
 
 		bool hints = p.settings.buttonHotkeys;
