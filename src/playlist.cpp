@@ -1,0 +1,92 @@
+#include "playlist.h"
+#include <algorithm>
+#include <cctype>
+#include <dirent.h>
+#include <initializer_list>
+
+namespace bp
+{
+	static bool hasExtension(const std::string& name, std::initializer_list<const char*> exts)
+	{
+		size_t dot = name.rfind('.');
+		if (dot == std::string::npos || name[0] == '.') return false;
+		std::string ext = name.substr(dot + 1);
+		std::transform(ext.begin(), ext.end(), ext.begin(), [](unsigned char c) { return std::tolower(c); });
+		for (auto* e : exts)
+			if (ext == e) return true;
+		return false;
+	}
+
+	bool isVideoFile(const std::string& name)
+	{
+		return hasExtension(name, {"mp4", "m4v", "mkv", "webm", "avi", "mov", "ts", "m2ts", "mts", "mpg", "mpeg", "wmv",
+			"flv", "3gp", "ogv", "vob", "divx", "rm", "rmvb", "asf"});
+	}
+
+	bool isAudioFile(const std::string& name)
+	{
+		return hasExtension(name, {"mp3", "flac", "ogg", "oga", "wav", "m4a", "aac", "opus", "wma", "aiff", "aif", "ape",
+			"wv", "mka"});
+	}
+
+	bool isMediaFile(const std::string& name)
+	{
+		return isVideoFile(name) || isAudioFile(name);
+	}
+
+	bool naturalLess(const std::string& a, const std::string& b)
+	{
+		size_t i = 0, j = 0;
+		while (i < a.size() && j < b.size())
+		{
+			unsigned char ca = a[i], cb = b[j];
+			if (std::isdigit(ca) && std::isdigit(cb))
+			{
+				// whole numbers, leading zeros aside
+				size_t si = i, sj = j;
+				while (si < a.size() && a[si] == '0') si++;
+				while (sj < b.size() && b[sj] == '0') sj++;
+				size_t ei = si, ej = sj;
+				while (ei < a.size() && std::isdigit((unsigned char)a[ei])) ei++;
+				while (ej < b.size() && std::isdigit((unsigned char)b[ej])) ej++;
+				if (ei - si != ej - sj) return ei - si < ej - sj;
+				int c = a.compare(si, ei - si, b, sj, ej - sj);
+				if (c) return c < 0;
+				i = ei;
+				j = ej;
+				continue;
+			}
+			int la = std::tolower(ca), lb = std::tolower(cb);
+			if (la != lb) return la < lb;
+			i++;
+			j++;
+		}
+		if (a.size() - i != b.size() - j) return a.size() - i < b.size() - j;
+		return a < b;	// the same but for case or zeros: still one order
+	}
+
+	std::vector<std::string> siblingVideos(const std::string& path, int& index)
+	{
+		index = 0;
+		size_t slash = path.rfind('/');
+		std::string dir = slash == std::string::npos ? "." : slash == 0 ? "/" : path.substr(0, slash);
+		std::string name = slash == std::string::npos ? path : path.substr(slash + 1);
+		std::vector<std::string> names;
+		if (DIR* d = isMediaFile(name) ? opendir(dir.c_str()) : nullptr)
+		{
+			while (dirent* e = readdir(d))
+				if (isMediaFile(e->d_name)) names.push_back(e->d_name);
+			closedir(d);
+		}
+		if (std::find(names.begin(), names.end(), name) == names.end()) return {path};
+		std::sort(names.begin(), names.end(), naturalLess);
+		std::vector<std::string> out;
+		std::string prefix = slash == std::string::npos ? "" : dir == "/" ? "/" : dir + "/";
+		for (size_t i = 0; i < names.size(); i++)
+		{
+			if (names[i] == name) index = (int)i;
+			out.push_back(prefix + names[i]);
+		}
+		return out;
+	}
+}
