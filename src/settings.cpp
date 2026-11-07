@@ -1,5 +1,6 @@
 #include "settings.h"
 #include <cmath>
+#include <cstdlib>
 #include <fstream>
 #include <sstream>
 #include <sys/stat.h>
@@ -17,6 +18,7 @@ namespace bp
 		{"show-hidden-folders", &Settings::showHiddenFolders},
 		{"battery-percent", &Settings::batteryPercent},
 		{"keep-photo-zoom", &Settings::keepPhotoZoom},
+		{"check-updates", &Settings::checkUpdates},
 	};
 
 	static const char* SHOW_IDS[SHOWS] = {"art", "both", "visualizer", "none"};
@@ -175,6 +177,7 @@ namespace bp
 		for (auto& r : REMEMBER) out += std::string(r.key) + " = " + (s.*r.field ? "yes" : "no") + "\n";
 		out += std::string("pan-area = ") + (s.panRight ? "right" : "left") + "\n";
 		out += std::string("pan-drag = ") + (s.dragBox ? "box" : "photo") + "\n";
+		if (s.updateRemindAfter > 0) out += "update-remind-after = " + std::to_string(s.updateRemindAfter) + "\n";
 		return out;
 	}
 
@@ -203,6 +206,7 @@ namespace bp
 				if (key == "loop" && value == LOOP_IDS[v]) s.loop = v;
 			if (key == "pan-area" && (value == "left" || value == "right")) s.panRight = value == "right";
 			if (key == "pan-drag" && (value == "photo" || value == "box")) s.dragBox = value == "box";
+			if (key == "update-remind-after") s.updateRemindAfter = atoll(value.c_str());
 			// the one setting before 0.1.1, kept: auto, cover-bars, bars, waves, spectrum, cover
 			if (key == "audio-display")
 			{

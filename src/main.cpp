@@ -11,6 +11,7 @@
 #include "levelwatch.h"
 #include "touch.h"
 #include "ui.h"
+#include "updater.h"
 #include <SDL.h>
 #include <SDL_ttf.h>
 #include <algorithm>
@@ -135,7 +136,7 @@ int main(int argc, char** argv)
 			{
 				int n = 0;
 				float v[4];
-				bool ok = buttonFromName(step) != Button::None || step == "info" || step == "page" || step == "rows" || step == "screenshot" || step.rfind("prop:", 0) == 0 || step.rfind("shot:", 0) == 0 ||
+				bool ok = buttonFromName(step) != Button::None || step == "info" || step == "page" || step == "update" || step == "rows" || step == "screenshot" || step.rfind("prop:", 0) == 0 || step.rfind("shot:", 0) == 0 ||
 					(sscanf(step.c_str(), "tap:%f:%f%n", &v[0], &v[1], &n) == 2 && n == (int)step.size()) ||
 					(sscanf(step.c_str(), "dtap:%f:%f%n", &v[0], &v[1], &n) == 2 && n == (int)step.size()) ||
 					(sscanf(step.c_str(), "hold:%f:%f%n", &v[0], &v[1], &n) == 2 && n == (int)step.size()) ||
@@ -240,6 +241,27 @@ int main(int argc, char** argv)
 
 		Ui ui;
 		bool haveUi = bottom && ui.init(bottom, opts.fontsDir);
+		// the built-in updater: for the installed package (bin/ beside VERSION), not a build on a computer
+		// (BP_PACKAGE_DIR stands in for one in tests)
+		// never destroyed: a download under way doesn't hold up quitting (the process ends it; the next start clears
+		// what it left)
+		Updater& updater = *new Updater;
+		{
+			std::string pkg;
+			if (const char* d = getenv("BP_PACKAGE_DIR")) pkg = d;
+			else if (char* b = SDL_GetBasePath())
+			{
+				std::string base = b;
+				SDL_free(b);
+				while (!base.empty() && base.back() == '/') base.pop_back();
+				if (base.size() > 4 && base.compare(base.size() - 4, 4, "/bin") == 0) pkg = base.substr(0, base.size() - 4);
+			}
+			if (!pkg.empty() && !exists(pkg + "/VERSION")) pkg.clear();
+			updater.init(pkg, BP_VERSION);
+			ui.updater = &updater;
+		}
+		// looked for once, a little after the start, in the background (Settings › Updates › Check automatically)
+		Uint32 updateCheckAt = player.settings.checkUpdates ? SDL_GetTicks() + 4000 : 0;
 		if (bottom && !haveUi) fprintf(stderr, "the controls could not start: %s\n", SDL_GetError());
 		Uint32 bottomId = bottom ? SDL_GetWindowID(bottom) : 0;
 
@@ -479,7 +501,12 @@ int main(int argc, char** argv)
 			player.checkPhoto();
 			player.checkLoading();
 			if (haveUi) ui.tick(player);
-			if (player.quit || ui.quitRequested) running = false;
+			if (player.quit || ui.quitRequested || ui.restartRequested) running = false;
+			if (updateCheckAt && SDL_GetTicks() >= updateCheckAt)
+			{
+				updateCheckAt = 0;
+				if (updater.state() == Updater::State::Idle) updater.check();
+			}
 			if (player.finished)
 			{
 				// played to its end: next time from the start; on to the next video, or out after the last
@@ -587,6 +614,12 @@ int main(int argc, char** argv)
 						{
 							for (auto& l : ui.browseLabels()) printf("    %s\n", l.c_str());
 						}
+						else if (step == "update")
+						{
+							static const char* names[] = {"off", "idle", "checking", "up-to-date", "available", "downloading", "ready", "failed"};
+							printf("    update: %s latest=%s progress=%d %s\n", names[(int)updater.state()], updater.available().c_str(),
+								updater.progress(), updater.message().c_str());
+						}
 						else if (step == "page")
 						{
 							for (auto& l : ui.pageLines()) printf("    %s\n", l.c_str());
@@ -659,6 +692,8 @@ int main(int argc, char** argv)
 			if (haveUi) ui.draw(player, refresh);
 		}
 		if (!player.error.empty()) rc = 1;
+		// "Restart now": launch.sh starts again, the update put in place
+		if (ui.restartRequested) rc = Updater::RESTART_CODE;
 		sleepWatch.stop();
 		levelWatch.stop();
 		bottomTouch.stop();

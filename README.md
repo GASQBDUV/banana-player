@@ -49,11 +49,11 @@
 ## Install
 
 > [!TIP]
-> **Latest: [Banana Player 0.2.2](https://github.com/tonywei92/banana-player/releases/tag/v0.2.2)** (tested on an RG DS
+> **Latest: [Banana Player 0.2.3](https://github.com/tonywei92/banana-player/releases/tag/v0.2.3)** (tested on an RG DS
 > Plus with BananaOS).
 
-1. **Download** `BananaPlayer-0.2.2-aarch64.zip` from
-   [the release](https://github.com/tonywei92/banana-player/releases/tag/v0.2.2) (all versions:
+1. **Download** `BananaPlayer-0.2.3-aarch64.zip` from
+   [the release](https://github.com/tonywei92/banana-player/releases/tag/v0.2.3) (all versions:
    [Releases](https://github.com/tonywei92/banana-player/releases)).
 2. **Unzip it into `roms/ports`** on your BananaOS SD card, with a card reader or over Wi-Fi with BananaOS's file
    sharing (`\\<handheld address>\banana`). You should end up with:
@@ -68,8 +68,12 @@
 Put your videos and music anywhere on the card. A `videos` folder inside `roms` gets its own shortcut in the file
 list.
 
-**Updating:** unzip the new release over the old one (replace the files when asked). Your settings, resume positions
-and history are kept: they live in `home/.config/banana-player` on the card, not in the player's folder.
+**Updating:** Banana Player updates itself (from 0.2.3 on; Wi-Fi needed). When a new version is out, it asks in the
+file list: **Update now**, **Later** or **Not until tomorrow**. It downloads the new version, checks it, and puts it in
+place when you restart (or at the next start). You can also check in Settings › Updates. Or unzip the new release
+over the old one by hand (replace the files when asked). Your settings, resume positions and history are kept either
+way: they live in `home/.config/banana-player` on the card, not in the player's folder. The version before an update
+is kept as `roms/ports/BananaPlayer.old`.
 
 **Uninstalling:** delete `Banana Player.sh`, the `BananaPlayer` folder and `media/box/Banana Player.png` from
 `roms/ports`. To remove its settings too, delete `home/.config/banana-player`.
@@ -172,9 +176,8 @@ Four tabs. Switch with **L/R** or a tap; **B** or **START** closes it.
 Pick a photo in the file list. The bottom screen shows the photo small, in the **pan area** (on the left; Settings ›
 Photos can put it on the right), with a box around the part you see on top:
 
-- **Drag** to move the photo, as on a phone: it follows your finger on the top screen. Or, with Settings › Photos ›
-  **Drag moves: The box**, drag the box over the small photo and the top screen follows the box. Let go while moving
-  and it glides on.
+- **Drag** the box over the small photo to look around: the top screen follows it. Or, with Settings › Photos ›
+  **Drag moves: The photo**, drag the photo itself, as on a phone. Let go while moving and it glides on.
 - **Double-tap** to zoom to 200% on that spot. Double-tap again to see all of it.
 - **Tap** somewhere on the small photo to look there.
 
@@ -209,7 +212,7 @@ All three are remembered.
 
 ## Settings
 
-Settings opens on six groups; pick one with **A** or a tap, and **B** goes back to them.
+Settings opens on seven groups; pick one with **A** or a tap, and **B** goes back to them.
 
 | Group | Setting | Default | |
 |---|---|---|---|
@@ -217,7 +220,7 @@ Settings opens on six groups; pick one with **A** or a tap, and **B** goes back 
 | **Music** | Music display, Visualizer | Album art, Bars | What the top screen shows for music (also on SELECT and Y while a song plays) |
 | **Photos** | Keep zoom between photos | On | The next photo opens at the same zoom and place. Off: each opens whole |
 | | Pan area | Left | Which side of the bottom screen the photo's pan area is on |
-| | Drag moves | The photo | A drag in the pan area moves the photo (like a phone), or the box over the small photo |
+| | Drag moves | The box | A drag in the pan area moves the box over the small photo, or the photo itself (like a phone) |
 | **Remember** | Remember position | On | Reopening a video continues where you stopped (songs always start from the beginning) |
 | | Remember audio track | On | Keeps each file's audio track; a new file starts in the language you chose last |
 | | Remember subtitles | On | The same, for subtitles |
@@ -227,6 +230,9 @@ Settings opens on six groups; pick one with **A** or a tap, and **B** goes back 
 | | Clear play history | | Tap twice. Positions you stopped at are kept |
 | **Controls & screen** | Button hotkeys | On | Off: buttons can't pause, skip or close while something plays (touch still can) |
 | | Battery percentage | Off | Shows the battery's percent beside its icon (the icon, with a bolt while charging, is always there) |
+| **Updates** | Check automatically | On | Looks for a new version a few seconds after the start, in the background (Wi-Fi needed) |
+| | Check for updates | | Looks now, and shows what it found |
+| | Update to … | | Downloads the new version (shown when there's one), then **Restart now** |
 
 ## More
 

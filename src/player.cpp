@@ -235,16 +235,19 @@ namespace bp
 		bool keepGraph = !graph.empty() && graphSet == graph;
 		if (!keepGraph) prop("lavfi-complex", "");
 
-		// what this file is remembered with; mpv's options are global, so each one is set for every file
+		// what this file is remembered with, as the file's own options (loadfile's last argument: they hold for this
+		// file alone). Not set as properties beforehand: a property reaches the file still playing, and an aid it
+		// doesn't have switches its sound to nothing, which makes aid "no" for good (mpv's track switch marks the
+		// choice): the next file then opens without sound
 		const ResumeEntry* e = isPhoto ? nullptr : resume.find(path);
 		char start[32] = "none";
 		// a song always from its start (an album plays through; music isn't a film to come back to)
 		if (settings.rememberPosition && !isAudio && e && e->position >= 0) snprintf(start, sizeof start, "%.3f", e->position);
-		prop("start", start);
+		std::string fileOpts = std::string("start=") + start;
 
 		// (a graph takes the song's first audio track itself: no track to choose)
 		wantAid = graph.empty() && settings.rememberAudio && e && e->aid > 0 ? e->aid : 0;
-		if (graph.empty()) prop("aid", wantAid ? std::to_string(wantAid) : "auto");
+		if (graph.empty()) fileOpts += ",aid=" + (wantAid ? std::to_string(wantAid) : std::string("auto"));
 		std::string alang = opts.lang;
 		if (settings.rememberAudio && !resume.lastAudioLang.empty()) alang = resume.lastAudioLang + (alang.empty() ? "" : "," + alang);
 		prop("alang", alang);
@@ -257,7 +260,7 @@ namespace bp
 			sid = e->sid ? std::to_string(e->sid) : "no";
 		}
 		else if (settings.rememberSubs && !e && resume.lastSubOff) sid = "no";
-		if (graph.empty()) prop("sid", sid);
+		if (graph.empty()) fileOpts += ",sid=" + sid;
 		else wantSid = 0;
 		std::string slang = opts.lang;
 		if (settings.rememberSubs && !resume.lastSubLang.empty()) slang = resume.lastSubLang + (slang.empty() ? "" : "," + slang);
@@ -308,7 +311,8 @@ namespace bp
 			if (!opts.stateDir.empty()) writeFile(opts.stateDir + "/history.tsv", played.serialize());
 		}
 
-		const char* cmd[] = {"loadfile", path.c_str(), "replace", nullptr};
+		// (the file's options take loadfile's index argument before them: -1, "replace" has no place)
+		const char* cmd[] = {"loadfile", path.c_str(), "replace", "-1", fileOpts.c_str(), nullptr};
 		mpv_command_async(mpv, 0, cmd);
 	}
 
@@ -478,6 +482,18 @@ namespace bp
 		// try again by itself). Opened again, three times at most, each in the log
 		if (!loaded || !audioCheckAt || ticks() < audioCheckAt) return;
 		audioCheckAt = 0;
+		// a file with audio tracks and none chosen (not under a graph, which chooses its own): mpv dropped the track
+		// when the sound device wouldn't open (its error_on_track), and ao-reload does nothing with no device. The
+		// track chosen again opens the device anew. (The Audio page has no Off: this is never the person's choice)
+		if (!selected(TrackType::Audio) && !tracksOf(TrackType::Audio).empty() && graphSet.empty())
+		{
+			if (audioChecks >= 3) return;
+			audioChecks++;
+			fprintf(stderr, "banana-player: no audio track chosen; choosing it again (try %d)\n", audioChecks);
+			prop("aid", wantAid ? std::to_string(wantAid) : "auto");
+			audioCheckAt = ticks() + 1500;
+			return;
+		}
 		if (!selected(TrackType::Audio) || !get("current-ao").empty()) return;
 		if (audioChecks >= 3)
 		{

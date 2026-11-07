@@ -58,8 +58,12 @@ docs/make-screenshots.sh <library>                   # the README's docs/img/scr
   play history (`history.tsv`, 30 entries), `settings.conf`, music display (`lavfi-complex` graphs: visualizer, art +
   visualizer, a tiny black picture for None; the art choices are decided at `FILE_LOADED`, from whether there's an
   album-art track) and Loop (one: `loop-file`; all: `advance()`), and the top-panel overlays drawn as
-  ASS through `osd-overlay` (1: song title, 2: volume/brightness card, 3: idle logo). Track choices are applied by
-  setting mpv's global options (`start`, `aid`, `sid`, `alang`, `slang`) before each `loadfile`. `lavfi-complex` must
+  ASS through `osd-overlay` (1: song title, 2: volume/brightness card, 3: idle logo). A file's own choices (`start`, `aid`,
+  `sid`) go as `loadfile`'s per-file options (`loadfile <path> replace -1 start=…,aid=…,sid=…`), never as properties
+  set before it: a property reaches the file still playing, and an `aid` it doesn't have turns its sound off for good,
+  so the next file opened silent (a remembered 3rd audio track, Next from a file with 2). `alang`/`slang` stay
+  global. `checkAudio()` picks the track again when a file has audio and none is chosen (mpv drops it when the sound
+  device won't open). `lavfi-complex` must
   be cleared before setting `aid`/`sid`; taking a graph off leaves no audio track chosen (restore `aid`), and `vid`
   has to be set by id. A graph's picture never ends, so mpv never ends a song that has one (every song without art):
   `checkSongEnd()` ends it, or restarts it for Loop one, once the clock passes the duration. Circle's graph reads
@@ -95,12 +99,21 @@ docs/make-screenshots.sh <library>                   # the README's docs/img/scr
   `signature()` changes (or when forced), so any new state that affects drawing must be added to `signature()`.
   `press(Button)` and `pointer(Pointer)` return true for "leave", which `main` turns into closing the video (browser
   mode) or quitting.
+- **Updater** (`updater.*`, Ports installs; a Store install, under `/data/store`, is the Store's): a thread runs
+  BananaOS's `curl` against GitHub's `/releases/latest` (`update.cpp` parses it), downloads the zip and its
+  `.sha256`, checks the hash (SHA-256 in `update.cpp`), unpacks it (`unzip`, else `python3 -m zipfile`) and renames it
+  to `BananaPlayer.update` beside the package once whole. `launch.sh` swaps it in before the player starts (the old
+  folder kept as `BananaPlayer.old`) and starts again when the player exits with 75 ("Restart now"). The pop-up is
+  `Ui::popupShown` over the browser; "Not until tomorrow" is `updateRemindAfter` in settings.conf. Tests stand in
+  with `BP_PACKAGE_DIR` (the installed folder) and `BP_UPDATE_URL` (a `file://` answer whose asset URLs are
+  `file://` too); the `update` step prints its state. The Updater is never destroyed, so a download doesn't hold up
+  quitting.
 - **Library code with no window** (`aspect`, `tracks`, `format`, `substyle`, `settings`, `resume`, `history`,
-  `playlist`, `browser`, `png`, `battery`, `photo`) builds as `bpcore` and is covered by `tests/core_test.cpp` (a hand-rolled `CHECK_EQ`).
+  `playlist`, `browser`, `png`, `battery`, `photo`, `update`) builds as `bpcore` and is covered by `tests/core_test.cpp` (a hand-rolled `CHECK_EQ`).
   Keep window/mpv-handle code out of these.
 - **Settings** are an INI-ish `key = value` file. New switches go in `Settings` plus the `REMEMBER` table in
   `settings.cpp`. In `ui.cpp`, the `REMEMBER`/`REMEMBER_LABELS` arrays, `TOGGLES` and the row ids (`TOGGLE_ROW`,
-  `PAN_ROW`, `DRAG_ROW`, `CLEAR_ROW`…) in `ui.h` must be kept in step with them, and the row placed in a group in `settingRows()`.
+  `PAN_ROW`, `DRAG_ROW`, `CLEAR_ROW`, `CHECK_ROW`, `INSTALL_ROW`…) in `ui.h` must be kept in step with them, and the row placed in a group in `settingRows()`.
 
 ## BananaOS integration (constraints, not discoverable from this repo)
 

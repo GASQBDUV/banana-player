@@ -3,6 +3,7 @@
 #include "playlist.h"
 #include <algorithm>
 #include <cmath>
+#include <ctime>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -27,12 +28,12 @@ namespace bp
 	};
 
 	// the settings' on/off rows (TOGGLE_ROW + their index)
-	static const char* REMEMBER_LABELS[9] = {"Remember position", "Remember audio track", "Remember subtitles",
+	static const char* REMEMBER_LABELS[10] = {"Remember position", "Remember audio track", "Remember subtitles",
 		"Remember last folder", "Keep play history", "Button hotkeys", "Show hidden folders", "Battery percentage",
-		"Keep zoom between photos"};
-	static bool Settings::*const REMEMBER[9] = {&Settings::rememberPosition, &Settings::rememberAudio, &Settings::rememberSubs,
+		"Keep zoom between photos", "Check automatically"};
+	static bool Settings::*const REMEMBER[10] = {&Settings::rememberPosition, &Settings::rememberAudio, &Settings::rememberSubs,
 		&Settings::rememberFolder, &Settings::keepHistory, &Settings::buttonHotkeys, &Settings::showHiddenFolders,
-		&Settings::batteryPercent, &Settings::keepPhotoZoom};
+		&Settings::batteryPercent, &Settings::keepPhotoZoom, &Settings::checkUpdates};
 	static const struct { const char* name; const char* about; } GROUP_NAMES[] = {
 		{"Subtitles", "Font, size, colour, border"},
 		{"Music", "What's shown, visualizer"},
@@ -40,6 +41,7 @@ namespace bp
 		{"Remember", "Position, audio track, subtitles"},
 		{"Files", "Last folder, hidden folders, play history"},
 		{"Controls & screen", "Button hotkeys, battery percentage"},
+		{"Updates", "Check for a new version, update"},
 	};
 	static const char* RECENT = "\x01recent";
 	static const char* SHOW_SHORT[SHOWS] = {"Art", "Art+Viz", "Viz", "None"};	// MusicShow on a button	// the browser's recent videos: not a folder
@@ -424,6 +426,16 @@ namespace bp
 		case GROUP_REMEMBER: return {T + 0, T + 1, T + 2};
 		case GROUP_FILES: return {T + 3, T + 6, T + 4, CLEAR_ROW};
 		case GROUP_CONTROLS: return {T + 5, T + 7};
+		case GROUP_UPDATES:
+		{
+			// a Store install (or a computer's build): the status alone
+			if (!updater || updater->state() == Updater::State::Off) return {CHECK_ROW};
+			Updater::State st = updater->state();
+			bool install = st == Updater::State::Available || st == Updater::State::Downloading || st == Updater::State::Ready ||
+				(st == Updater::State::Failed && !updater->available().empty());
+			if (install) return {T + 9, CHECK_ROW, INSTALL_ROW};
+			return {T + 9, CHECK_ROW};
+		}
 		default: return {};
 		}
 	}
@@ -438,6 +450,14 @@ namespace bp
 	void Ui::changeSetting(int row, int dir, Player& p)
 	{
 		if (row == CLEAR_ROW) { clearHistory(p); return; }
+		if (row == CHECK_ROW) { if (updater) updater->check(); return; }
+		if (row == INSTALL_ROW)
+		{
+			if (!updater) return;
+			if (updater->state() == Updater::State::Ready) restartRequested = true;
+			else updater->download();
+			return;
+		}
 		Settings s = p.settings;
 		if (row - STYLE_ROW0 < STYLE_KEYS) stepStyle(s.style, (StyleKey)(row - STYLE_ROW0), dir);
 		else if (row == MUSIC_ROW) s.musicShow = ((s.musicShow + dir) % SHOWS + SHOWS) % SHOWS;
@@ -524,6 +544,7 @@ namespace bp
 		{
 			auto rows = settingRows();
 			int n = setGroup < 0 ? GROUPS : (int)rows.size();
+			cursor = std::min(cursor, n - 1);	// a group's rows can change (the updater's)
 			switch (b)
 			{
 			case Button::Up: cursor = (cursor + n - 1) % n; break;
@@ -559,6 +580,20 @@ namespace bp
 				if (page == Page::About) { page = Page::Settings; setGroup = -1; cursor = scroll = 0; }
 				else page = home(p);
 				break;
+			default: break;
+			}
+			return false;
+		}
+		if (popupShown(p))
+		{
+			int n = (int)popupItems().size();
+			popupCursor = std::min(popupCursor, n - 1);
+			switch (b)
+			{
+			case Button::Up: popupCursor = (popupCursor + n - 1) % n; break;
+			case Button::Down: popupCursor = (popupCursor + 1) % n; break;
+			case Button::A: choosePopup(popupCursor, p); break;
+			case Button::B: choosePopup(n > 1 ? 1 : 0, p); break;	// Later (or Hide, OK)
 			default: break;
 			}
 			return false;
@@ -841,6 +876,24 @@ namespace bp
 			return false;
 		}
 
+		if (popupShown(p))
+		{
+			// the updater's pop-up: a row tapped (as the finger lifts); elsewhere, nothing (it's a question)
+			int n = (int)popupItems().size();
+			if (pt.kind == Pointer::Down)
+			{
+				pressedBtn = -1;
+				for (int i = 0; i < n; i++)
+					if (popupRow(i).hit(x, y)) pressedBtn = 200 + i;
+			}
+			else if (pt.kind == Pointer::Up && pressedBtn >= 200)
+			{
+				int item = pressedBtn - 200;
+				pressedBtn = -1;
+				if (item < n && popupRow(item).hit(x, y)) choosePopup(item, p);
+			}
+			return false;
+		}
 		if (ctxOpen)
 		{
 			// the folder's menu: a row tapped (as the finger lifts), anywhere else closes it
@@ -1024,9 +1077,13 @@ namespace bp
 			snprintf(pb, sizeof pb, "|photo %.4f %.4f %.4f %d %d %d %d", v.zoom, v.panX, v.panY, v.rotate, v.fill, p.thumbId, p.photoWidth());
 			photo = pb;
 		}
+		std::string upd;
+		if (updater)
+			upd = "|upd" + std::to_string((int)updater->state()) + " " + std::to_string(updater->progress()) + " " + updater->available() +
+				" " + std::to_string(popupShown(p)) + std::to_string(popupCursor) + std::to_string(pressedBtn);
 		// the dots of "Loading..." go round
 		if (p.loading() || p.thumbPending()) photo += "|loading" + std::to_string(SDL_GetTicks() / 400 % 4);
-		return buf + photo + p.title + "|" + p.error + "|" + serializeSettings(p.settings) + "|bat" + std::to_string(battery.percent) + (battery.charging ? "c" : "") + (inMenu ? "|menu" + std::to_string(menuTab) : "") + (ctxOpen ? "|ctx" + std::to_string(ctxCursor) + std::to_string(pressedBtn) : "");
+		return buf + photo + p.title + "|" + p.error + "|" + serializeSettings(p.settings) + "|bat" + std::to_string(battery.percent) + (battery.charging ? "c" : "") + (inMenu ? "|menu" + std::to_string(menuTab) : "") + (ctxOpen ? "|ctx" + std::to_string(ctxCursor) + std::to_string(pressedBtn) : "") + upd;
 	}
 
 	SDL_Texture* Ui::text(const std::string& s, int size, SDL_Color c)
@@ -1176,6 +1233,7 @@ namespace bp
 		else drawMain(p);
 		if (inMenu) drawTabs();
 		if (ctxOpen && page == Page::Browse) drawFolderMenu();
+		if (popupShown(p)) drawUpdatePopup();
 	}
 
 	void Ui::readPower()
@@ -1212,6 +1270,116 @@ namespace bp
 			for (int r = 0; r < 7; r++)
 				for (int c = 0; c < 5; c++)
 					if (BOLT[r][c] == '#') fill({bx + c * 2, by + r * 2, 2, 2}, YELLOW);
+		}
+	}
+
+	std::string Ui::updateStatus() const
+	{
+		if (!updater || updater->state() == Updater::State::Off)
+			return updater && updater->fromStore() ? "From the Store" : std::string("This is ") + BP_VERSION;
+		switch (updater->state())
+		{
+		case Updater::State::Checking: return "Checking...";
+		case Updater::State::UpToDate: return "Up to date (" + updater->current() + ")";
+		case Updater::State::Available: case Updater::State::Downloading: return updater->available() + " is out";
+		case Updater::State::Ready: return updater->available() + " ready";
+		case Updater::State::Failed: return "Didn't work";
+		default: return "This is " + updater->current();
+		}
+	}
+
+	bool Ui::popupShown(const Player& p) const
+	{
+		if (!updater || popupClosed || page != Page::Browse || inMenu || ctxOpen) return false;
+		Updater::State st = updater->state();
+		// a release found: unless "Not until tomorrow" holds; after "Update now", what became of it
+		if (st == Updater::State::Available) return time(nullptr) >= (time_t)p.settings.updateRemindAfter;
+		return popupFollow && (st == Updater::State::Downloading || st == Updater::State::Ready || st == Updater::State::Failed);
+	}
+
+	std::vector<const char*> Ui::popupItems() const
+	{
+		switch (updater->state())
+		{
+		case Updater::State::Available: return {"Update now", "Later", "Not until tomorrow"};
+		case Updater::State::Downloading: return {"Hide"};
+		case Updater::State::Ready: return {"Restart now", "Later"};
+		default: return {"OK"};
+		}
+	}
+
+	void Ui::choosePopup(int item, Player& p)
+	{
+		Updater::State st = updater->state();
+		if (st == Updater::State::Available && item == 0)
+		{
+			updater->download();
+			popupFollow = true;
+			popupCursor = 0;
+			return;
+		}
+		if (st == Updater::State::Available && item == 2)
+		{
+			Settings s = p.settings;
+			s.updateRemindAfter = (long long)nextMidnight(time(nullptr));
+			p.setSettings(s);
+		}
+		if (st == Updater::State::Ready && item == 0)
+		{
+			restartRequested = true;
+			return;
+		}
+		// Later, Hide, OK, and Not until tomorrow: closed for this time (a download goes on; a ready update is put in
+		// place at the next start)
+		popupClosed = true;
+		popupCursor = 0;
+	}
+
+	void Ui::drawUpdatePopup()
+	{
+		fill({0, 0, W, H}, {0, 0, 0, 170});
+		auto items = popupItems();
+		int top = 150, bottom = popupRow((int)items.size() - 1).y + 60;
+		fill({112, top, 416, bottom - top}, TEAL);
+		fill({116, top + 4, 408, bottom - top - 8}, BG);
+		std::string title, sub;
+		switch (updater->state())
+		{
+		case Updater::State::Available:
+			title = "Banana Player " + updater->available() + " is out";
+			sub = "You have " + updater->current();
+			break;
+		case Updater::State::Downloading:
+		{
+			int pct = updater->progress();
+			title = "Downloading " + updater->available() + "...";
+			sub = pct >= 0 ? std::to_string(pct) + "%" : "Starting";
+			break;
+		}
+		case Updater::State::Ready:
+			title = updater->available() + " is ready";
+			sub = "Restart now, or it's in place next time";
+			break;
+		default:
+			title = "The update didn't work";
+			sub = updater->message();
+			break;
+		}
+		drawText(title, 1, YELLOW, W / 2, top + 18, 392, 2);
+		drawText(sub, 0, CREAM, W / 2, top + 56, 392, 2);
+		if (updater->state() == Updater::State::Downloading)
+		{
+			// the bar
+			int pct = std::max(0, updater->progress());
+			fill({156, top + 84, 328, 10}, TEAL);
+			fill({156, top + 84, 328 * pct / 100, 10}, YELLOW);
+		}
+		for (int i = 0; i < (int)items.size(); i++)
+		{
+			Rect r = popupRow(i);
+			bool at = i == popupCursor;
+			fill(r, pressedBtn == 200 + i ? PRESSED : at ? TEAL : BG);
+			drawText(items[i], 1, at ? YELLOW : CREAM, W / 2, r.y + 9, r.w - 10, 2);
 		}
 	}
 
@@ -1467,6 +1635,22 @@ namespace bp
 			if (at) fill({16, y, 608, SET_H - 4}, TEAL);
 			std::string label, value;
 			int k = row - STYLE_ROW0;	// a style row's key
+			if (row == CHECK_ROW || row == INSTALL_ROW)
+			{
+				// actions with a state: no arrows
+				std::string label = "Check for updates", value = updateStatus();
+				if (row == INSTALL_ROW)
+				{
+					label = "Update to " + updater->available();
+					int pct = updater->progress();
+					value = updater->state() == Updater::State::Ready ? "Restart now"
+						: updater->state() == Updater::State::Downloading ? (pct >= 0 ? std::to_string(pct) + "%" : "Downloading")
+						: updater->state() == Updater::State::Failed ? "Try again" : "Download";
+				}
+				drawText(label, 1, CREAM, 32, y + 9, 320);
+				drawText(value, 1, at ? YELLOW : DIM, 608, y + 9, 260, 1);
+				continue;
+			}
 			if (row == CLEAR_ROW)
 			{
 				// an action, not a value: no arrows
@@ -1524,6 +1708,15 @@ namespace bp
 				hint = "This video's subtitles are styled (ASS): they keep their own look";
 				hintInk = YELLOW;
 			}
+		}
+		if (setGroup == GROUP_UPDATES && updater)
+		{
+			hint = updater->fromStore() ? "Installed from the BananaOS Store: the Store updates it"
+				: updater->state() == Updater::State::Off ? "Updates are for the handheld's Ports install"
+				: updater->state() == Updater::State::Failed ? updater->message()
+				: updater->state() == Updater::State::Ready ? "Restart now, or it's put in place at the next start"
+				: "Downloads from GitHub, checked before anything changes";
+			hintInk = updater->state() == Updater::State::Failed ? YELLOW : DIM;
 		}
 		drawText(hint, 0, hintInk, 320, 444, 600, 2);
 	}

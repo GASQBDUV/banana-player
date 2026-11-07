@@ -5,6 +5,7 @@
 #include "format.h"
 #include "history.h"
 #include "photo.h"
+#include "update.h"
 #include "playlist.h"
 #include "resume.h"
 #include "settings.h"
@@ -431,10 +432,15 @@ static void testBattery()
 	Settings phb = parseSettings(serializeSettings(ph));
 	CHECK_EQ(phb.keepPhotoZoom, false);
 	CHECK_EQ(phb.panRight, true);
-	CHECK_EQ(parseSettings("").dragBox, false);	// a drag moves the photo, as on a phone
-	CHECK_EQ(parseSettings("pan-drag = box\n").dragBox, true);
-	ph.dragBox = true;
-	CHECK_EQ(parseSettings(serializeSettings(ph)).dragBox, true);
+	CHECK_EQ(parseSettings("").checkUpdates, true);
+	CHECK_EQ(parseSettings("check-updates = no\n").checkUpdates, false);
+	Settings later;
+	later.updateRemindAfter = 1794100000;
+	CHECK_EQ(parseSettings(serializeSettings(later)).updateRemindAfter, 1794100000LL);
+	CHECK_EQ(parseSettings("").dragBox, true);	// a drag moves the box over the small photo
+	CHECK_EQ(parseSettings("pan-drag = photo\n").dragBox, false);
+	ph.dragBox = false;
+	CHECK_EQ(parseSettings(serializeSettings(ph)).dragBox, false);
 	for (const char* f : {"/battery/type", "/battery/capacity", "/battery/status", "/usb/type", "/usb/online"}) unlink((d + f).c_str());
 	rmdir((d + "/battery").c_str());
 	rmdir((d + "/usb").c_str());
@@ -566,6 +572,43 @@ static void testPhoto()
 	CHECK_EQ(exifRotation(8), 270);
 }
 
+static void testUpdate()
+{
+	CHECK_EQ(compareVersions("0.2.10", "0.2.9") > 0, true);
+	CHECK_EQ(compareVersions("v0.2.2", "0.2.2"), 0);
+	CHECK_EQ(compareVersions("0.2", "0.2.1") < 0, true);
+	CHECK_EQ(compareVersions("1.0.0", "0.9.9") > 0, true);
+	CHECK_EQ(sha256Hex(""), std::string("e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"));
+	CHECK_EQ(sha256Hex("abc"), std::string("ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"));
+	// two blocks (56 bytes: the padding spills over)
+	CHECK_EQ(sha256Hex("abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq"),
+		std::string("248d6a61d20638b8e5c026930c3e6039a33ce45964ff2167f6ecedd419db06c1"));
+	CHECK_EQ(parseSha256File("BA7816BF8F01CFEA414140DE5DAE2223B00361A396177A9CB410FF61F20015AD  x.zip\n"),
+		std::string("ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"));
+	CHECK_EQ(parseSha256File("not a digest"), std::string());
+
+	// GitHub's answer, in its order: the zip's name, size, then its URL (an uploader's object between, no size)
+	std::string json = "{\"tag_name\": \"v0.3.0\", \"name\": \"Banana Player 0.3.0\", \"assets\": ["
+		"{\"name\": \"BananaPlayer-0.3.0-aarch64.zip\", \"uploader\": {\"login\": \"x\"}, \"size\": 14344040, "
+		"\"browser_download_url\": \"https:\\/\\/github.com\\/a\\/BananaPlayer-0.3.0-aarch64.zip\"},"
+		"{\"name\": \"BananaPlayer-0.3.0-aarch64.zip.sha256\", \"size\": 97, "
+		"\"browser_download_url\": \"https://github.com/a/BananaPlayer-0.3.0-aarch64.zip.sha256\"}]}";
+	Release r;
+	CHECK_EQ(parseRelease(json, r), true);
+	CHECK_EQ(r.version, std::string("0.3.0"));
+	CHECK_EQ(r.zipUrl, std::string("https://github.com/a/BananaPlayer-0.3.0-aarch64.zip"));
+	CHECK_EQ(r.shaUrl, std::string("https://github.com/a/BananaPlayer-0.3.0-aarch64.zip.sha256"));
+	CHECK_EQ(r.zipSize, (int64_t)14344040);
+	CHECK_EQ(parseRelease("{\"message\": \"API rate limit exceeded\"}", r), false);
+
+	// tomorrow: after now, within a day, at a midnight
+	time_t now = time(nullptr), m = nextMidnight(now);
+	struct tm t;
+	localtime_r(&m, &t);
+	CHECK_EQ(m > now && m - now <= 25 * 3600, true);
+	CHECK_EQ(t.tm_hour == 0 && t.tm_min == 0 && t.tm_sec == 0, true);
+}
+
 int main()
 {
 	testSpeed();
@@ -574,6 +617,7 @@ int main()
 	testResume();
 	testPlaylist();
 	testPhoto();
+	testUpdate();
 	testBrowser();
 	testHistory();
 	testBattery();

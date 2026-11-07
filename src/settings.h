@@ -54,7 +54,11 @@ namespace bp
 		bool panRight = false;
 		// a drag in the pan area moves the photo (as on a phone: it follows the finger on the top panel) or the
 		// box over the small photo (the top panel follows the box)
-		bool dragBox = false;
+		bool dragBox = true;
+		// the built-in updater (a Ports install): look for a new release at each start, in the background
+		bool checkUpdates = true;
+		// its pop-up's "Not until tomorrow": not shown before this time (seconds since 1970)
+		long long updateRemindAfter = 0;
 	};
 
 	std::string serializeSettings(const Settings& s);

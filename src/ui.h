@@ -5,6 +5,7 @@
 #include "panel.h"
 #include "player.h"
 #include "touch.h"
+#include "updater.h"
 #include <SDL.h>
 #include <SDL_ttf.h>
 #include <string>
@@ -75,6 +76,9 @@ namespace bp
 		bool browserMode = false;
 		// Settings' Quit Banana Player: out of the player, from the browser or a video
 		bool quitRequested = false;
+		// the built-in updater (main's), and "Restart now": out with Updater::RESTART_CODE (launch.sh starts again)
+		Updater* updater = nullptr;
+		bool restartRequested = false;
 
 		// the bottom panel's backlight: off from its button, on again at the next touch
 		bool screenOn() const { return panel.on(); }
@@ -101,7 +105,7 @@ namespace bp
 		void choose(int i, Player& p);
 		void changeSetting(int row, int dir, Player& p);
 		// Settings opens on its groups (setGroup -1); A or a tap opens one, B goes back to them
-		enum SetGroup { GROUP_SUBS, GROUP_MUSIC, GROUP_PHOTOS, GROUP_REMEMBER, GROUP_FILES, GROUP_CONTROLS, GROUPS };
+		enum SetGroup { GROUP_SUBS, GROUP_MUSIC, GROUP_PHOTOS, GROUP_REMEMBER, GROUP_FILES, GROUP_CONTROLS, GROUP_UPDATES, GROUPS };
 		int setGroup = -1;
 		std::vector<int> settingRows() const;	// the open group's rows, by id
 		void openGroup(int g);
@@ -120,6 +124,16 @@ namespace bp
 		void openFolderMenu(int row);
 		void chooseFolderMenu(int item, Player& p);
 		void drawFolderMenu();
+		// the updater's pop-up over the file list: a release found (Update now, Later, Not until tomorrow), then the
+		// download's progress (Hide), then Restart now / Later, or what went wrong (OK)
+		bool popupClosed = false, popupFollow = false;
+		int popupCursor = 0;
+		bool popupShown(const Player& p) const;
+		std::vector<const char*> popupItems() const;
+		void choosePopup(int item, Player& p);
+		void drawUpdatePopup();
+		Rect popupRow(int item) const { return {136, 252 + item * 50, 368, 44}; }
+		std::string updateStatus() const;	// Check now's value
 		// the battery's icon (and percent, a bolt while charging), its right edge at right; read every 10 s
 		BatteryState battery;
 		Uint32 batteryAt = 0;
@@ -229,8 +243,9 @@ namespace bp
 		// the settings' rows by id: the subtitle style's, Music display, Visualizer, the switches (REMEMBER), Pan area,
 		// Clear play history. Shown a group at a time (settingRows), after a list of the groups
 		static constexpr int STYLE_ROW0 = 0, MUSIC_ROW = STYLE_KEYS, VIS_ROW = STYLE_KEYS + 1, TOGGLE_ROW = STYLE_KEYS + 2,
-			TOGGLES = 9, PAN_ROW = TOGGLE_ROW + TOGGLES, DRAG_ROW = PAN_ROW + 1, CLEAR_ROW = DRAG_ROW + 1;
-		static constexpr int SET_Y = 92, SET_H = 46, SET_SHOWN = 7, GROUP_Y = 60, GROUP_H = 58;
+			TOGGLES = 10, PAN_ROW = TOGGLE_ROW + TOGGLES, DRAG_ROW = PAN_ROW + 1, CLEAR_ROW = DRAG_ROW + 1,
+			CHECK_ROW = CLEAR_ROW + 1, INSTALL_ROW = CHECK_ROW + 1;
+		static constexpr int SET_Y = 92, SET_H = 46, SET_SHOWN = 7, GROUP_Y = 58, GROUP_H = 54;
 		static constexpr int64_t STYLE_ROW = -2;	// the subtitle menu's last row: the settings page
 		static constexpr int QUIT_BTN = 10, BACK_BTN = 11, SCREEN_BTN = 12, INFO_BTN = 13, LOCK_BTN = 14, EXIT_BTN = 15,
 			BACK_ICON = 16;	// "<" at the top left of the browser and the player: B
