@@ -39,7 +39,9 @@ docs/make-screenshots.sh <library>                   # the README's docs/img/scr
   broken port.
 - **Releasing:**
   1. Bump `project(... VERSION x.y.z)` in `CMakeLists.txt` (the bundle's `VERSION` comes from it), and the README's
-     install links (`releases/tag/vx.y.z`, the zip's name).
+     install links (`releases/tag/vx.y.z`, the zip's name), and the `?v=x.y.z` on the README's
+     screenshot links (GitHub and browsers cache an image by its URL: a regenerated picture under the same URL shows the
+     old one).
   2. Commit and push, then run `build-bundle.sh` and `shasum -a 256` the zip into `<zip>.sha256`.
   3. `gh release create vx.y.z --target main --latest <zip> <zip>.sha256`, then prepend "Superseded by…" to the
      previous release's notes.
