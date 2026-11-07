@@ -95,7 +95,7 @@ static void usage()
 		"  -v                    mpv's verbose log\n"
 		"  --press LIST          test run: once the file is open, do these 0.8 s apart and print the state after\n"
 		"                        each, then quit: buttons (A,B,X,Y,L,R,Up,Down,Left,Right,Start,Select), taps\n"
-		"                        (tap:X:Y) and drags (drag:X1:Y1:X2:Y2) on the bottom panel's 640x480, and info\n"
+		"                        (tap:X:Y, dtap:X:Y a double-tap) and drags (drag:X1:Y1:X2:Y2) on the bottom panel's 640x480, and info\n"
 		"                        (prints the Media info page), hold:X:Y (a finger held 1.1 s), prop:NAME\n"
 		"                        (prints one of mpv's properties)\n"
 		"buttons: A play/pause, LEFT -5 s, RIGHT +10 s, L/R previous/next video, UP/DOWN speed, X audio,\n"
@@ -137,6 +137,7 @@ int main(int argc, char** argv)
 				float v[4];
 				bool ok = buttonFromName(step) != Button::None || step == "info" || step == "page" || step == "rows" || step == "screenshot" || step.rfind("prop:", 0) == 0 || step.rfind("shot:", 0) == 0 ||
 					(sscanf(step.c_str(), "tap:%f:%f%n", &v[0], &v[1], &n) == 2 && n == (int)step.size()) ||
+					(sscanf(step.c_str(), "dtap:%f:%f%n", &v[0], &v[1], &n) == 2 && n == (int)step.size()) ||
 					(sscanf(step.c_str(), "hold:%f:%f%n", &v[0], &v[1], &n) == 2 && n == (int)step.size()) ||
 					(sscanf(step.c_str(), "drag:%f:%f:%f:%f%n", &v[0], &v[1], &v[2], &v[3], &n) == 4 && n == (int)step.size());
 				if (!ok) { fprintf(stderr, "unknown step: %s\n", step.c_str()); return 2; }
@@ -358,7 +359,7 @@ int main(int argc, char** argv)
 		while (running)
 		{
 			SDL_Event e;
-			bool got = SDL_WaitEventTimeout(&e, held != Button::None ? 20 : SDL_GetTicks() < freshUntil || levelUntil ? 50 : 250);
+			bool got = SDL_WaitEventTimeout(&e, ui.animating() ? 16 : held != Button::None || player.loading() ? 20 : SDL_GetTicks() < freshUntil || levelUntil ? 50 : 250);
 			while (got)
 			{
 				if (e.type == SDL_QUIT) running = false;
@@ -390,7 +391,7 @@ int main(int argc, char** argv)
 				else if (e.type == SDL_CONTROLLERBUTTONUP) held = Button::None;
 				else if (Button b = buttonFromEvent(e); b != Button::None)
 				{
-					if (e.type == SDL_CONTROLLERBUTTONDOWN && ui.repeats(b))
+					if (e.type == SDL_CONTROLLERBUTTONDOWN && ui.repeats(b, player))
 					{
 						held = b;
 						heldNext = SDL_GetTicks() + 400;
@@ -456,12 +457,15 @@ int main(int argc, char** argv)
 			if (held != Button::None && SDL_GetTicks() >= heldNext)
 			{
 				heldNext = SDL_GetTicks() + 150;
-				if (ui.repeats(held) && ui.press(held, player)) leave();
+				if (ui.repeats(held, player) && ui.press(held, player)) leave();
 			}
 
 			player.pollEvents();
 			player.checkAudio();
 			player.checkSongEnd();
+			player.checkPhoto();
+			player.checkLoading();
+			if (haveUi) ui.tick(player);
 			if (player.quit || ui.quitRequested) running = false;
 			if (player.finished)
 			{
@@ -486,7 +490,11 @@ int main(int argc, char** argv)
 				player.open(list, index);
 				ui.showPlayer();
 			}
-			if (scripted && (player.loaded || !player.playing() || !player.error.empty()) && running)
+			// a test run's steps wait for the file to open, 3 s at most (a file that never does: a loading test)
+			static Uint32 waitFrom = 0;
+			if (player.loaded || !player.playing() || !player.error.empty()) waitFrom = 0;
+			else if (!waitFrom) waitFrom = SDL_GetTicks();
+			if (scripted && (!waitFrom || SDL_GetTicks() - waitFrom > 3000) && running)
 			{
 				static Uint32 next = SDL_GetTicks() + 800;
 				static size_t pressed = 0;
@@ -501,7 +509,17 @@ int main(int argc, char** argv)
 						auto at = [&](Pointer::Kind k, float x, float y) {
 							if (ui.pointer({k, x / Ui::W, y / Ui::H}, player)) leave();
 						};
-						if (sscanf(step.c_str(), "tap:%f:%f", &v[0], &v[1]) == 2)
+						if (sscanf(step.c_str(), "dtap:%f:%f", &v[0], &v[1]) == 2)
+						{
+							// a double-tap: two taps 120 ms apart
+							for (int i = 0; i < 2; i++)
+							{
+								if (i) SDL_Delay(120);
+								at(Pointer::Down, v[0], v[1]);
+								at(Pointer::Up, v[0], v[1]);
+							}
+						}
+						else if (sscanf(step.c_str(), "tap:%f:%f", &v[0], &v[1]) == 2)
 						{
 							at(Pointer::Down, v[0], v[1]);
 							at(Pointer::Up, v[0], v[1]);
@@ -570,6 +588,13 @@ int main(int argc, char** argv)
 							printf("press %zu: browse=%s at=%s\n", pressed, ui.browseFolder().c_str(), at.substr(at.rfind('/') + 1).c_str());
 						}
 						else if (!player.playing()) printf("press %zu: settings (from the browser)\n", pressed);
+						else if (player.playingPhoto())
+						{
+							const Player::PhotoView& v = player.photo();
+							printf("press %zu: photo=%d/%d %dx%d zoom=%.2f pan=%.3f,%.3f turn=%d %s thumb=%dx%d screen=%s\n", pressed,
+								player.index() + 1, player.count(), player.photoWidth(), player.photoHeight(), v.zoom, v.panX, v.panY,
+								v.rotate, v.fill ? "fill" : "fit", player.thumbW, player.thumbH, ui.screenOn() ? "on" : "off");
+						}
 						else printf("press %zu: file=%d/%d t=%.1f paused=%d speed=%s aspect=%s audio=%s sub=%s screen=%s%s\n", pressed,
 							player.index() + 1, player.count(), player.position, player.paused, speedLabel(player.speed).c_str(),
 							aspectName(player.aspect), a ? trackLabel(*a, (int)a->id).c_str() : "off",

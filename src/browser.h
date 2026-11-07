@@ -4,8 +4,8 @@
 
 namespace bp
 {
-	// What the browser lists: folders first, then videos and audio files, each in natural order; hidden (.) names and everything
-	// that isn't a folder or a video left out.
+	// What the browser lists: folders first, then videos, audio files and photos, each in natural order; hidden (.) names and
+	// everything the player can't open left out.
 	struct BrowseEntry
 	{
 		std::string name, path;

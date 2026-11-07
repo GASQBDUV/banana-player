@@ -38,13 +38,13 @@ tested and laid out.
 | File | What |
 |---|---|
 | `src/main.cpp` | Arguments, SDL windows and GL, the event loop, browser/playing modes, scripted runs |
-| `src/player.*` | libmpv: options, properties, playlist, resume, history, audio display, media info |
-| `src/ui.*` | The bottom panel: pages (main, tracks, settings, browser, info, about), buttons and touch |
+| `src/player.*` | libmpv: options, properties, playlist, resume, history, audio display, photo view and thumbnail, loading spinner, media info |
+| `src/ui.*` | The bottom panel: pages (main, photo, tracks, settings groups, browser, info, about), buttons and touch |
 | `src/input.*` | SDL keys and pads to the handheld's buttons (Nintendo layout: A is east) |
 | `src/touch.*` | The bottom touchscreen from evdev, one finger |
 | `src/sleepwatch.*` | Pause on the lid's `SW_LID` and on `SIGCONT` |
 | `src/panel.*` | The bottom backlight on/off, restored on quit and on a crash |
-| `src/aspect.*`, `tracks.*`, `format.*`, `substyle.*`, `settings.*`, `resume.*`, `history.*`, `playlist.*`, `browser.*` | No window code; covered by `tests/core_test.cpp` |
+| `src/aspect.*`, `tracks.*`, `format.*`, `substyle.*`, `settings.*`, `resume.*`, `history.*`, `playlist.*`, `browser.*`, `photo.*` | No window code; covered by `tests/core_test.cpp` |
 
 ### BananaOS integration
 
@@ -89,8 +89,8 @@ log), `--press LIST` (below).
 `--press` runs steps 0.8 s apart, prints the state after each, then quits. Real keyboard, mouse and touch input is
 ignored meanwhile. It works on the handheld over SSH too. The steps are:
 
-- buttons: `A,B,X,Y,L,R,Up,Down,Left,Right,Start,Select`;
-- taps and drags on the bottom panel's 640×480: `tap:X:Y`, `drag:X1:Y1:X2:Y2`;
+- buttons: `A,B,X,Y,L,R,Up,Down,Left,Right,Start,Select,L3`;
+- taps and drags on the bottom panel's 640×480: `tap:X:Y`, `dtap:X:Y` (a double-tap), `drag:X1:Y1:X2:Y2`;
 - `info`, which prints the Media info rows;
 - `page`, which prints the Info or About page as drawn.
 
@@ -99,7 +99,9 @@ ignored meanwhile. It works on the handheld over SSH too. The steps are:
 # press 3: file=1/3 t=3.2 paused=0 speed=1x aspect=Fit audio=Japanese · AAC 5.1 · Surround sub=English · SRT screen=on
 ```
 
-The state line can lag one step behind, because mpv applies changes asynchronously.
+The state line can lag one step behind, because mpv applies changes asynchronously. A photo's line is
+`photo=1/5 4000x3000 zoom=2.00 pan=-0.250,0.000 turn=90 fit thumb=560x420`. Steps wait for the file to open, 3 s at
+most, so a file that never opens (a named pipe called `x.mkv`) can test the loading spinner.
 
 ### The README's pictures
 
@@ -126,6 +128,17 @@ docker run --rm -v "$PWD":/src:ro debian:trixie bash -c "apt-get update -qq && \
 - [x] Playlist per folder, resume, remember options, file browser, play history, media info, about
 - [x] Music: audio files, album art, visualizers
 - [x] Pause on lid/sleep, bottom screen off, button hotkeys off
+- [x] **Settings in groups:** Subtitles, Music, Photos, Remember, Files, Controls & screen.
+- [x] **Photos:** JPG, PNG, WebP, GIF, BMP, TIFF, AVIF, shown by mpv (`image-display-duration=inf`, `video-zoom`,
+      `video-pan-*`, `video-rotate`, a `scale` filter to at most 4096 pixels across), upright by their rotation
+      metadata or, where FFmpeg leaves it (7.1), their EXIF orientation (`photo.cpp`). The pan area's thumbnail comes
+      from `screenshot-raw video`, asked asynchronously. Photos step through photos only, stay out of Recent and keep
+      no resume position.
+  - [ ] Pinch to zoom: `touch.cpp` reads the first finger only. Does the RG DS's touchscreen report two?
+  - [ ] Animated WebP: FFmpeg 7.1 may not decode its animation.
+  - [ ] On the handheld: L3 as SDL's `LEFTSTICK`; decode time of a 12 MP JPEG; `dscale=hermite` with
+        `correct-downscaling` on Panfrost.
+- [x] **Loading spinner** on the top panel (from 0.3 s, till mpv's `playback-restart`), for any file.
 - [ ] **On the handheld (needs the hardware):**
   - [ ] Does SDL2's KMSDRM give both panels as two displays, with a GLES window on one and a renderer on the other?
         If not, the bottom panel falls back to raw KMS, as banana-ui uses.

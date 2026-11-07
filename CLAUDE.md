@@ -19,10 +19,11 @@ docs/make-screenshots.sh <library>                   # the README's docs/img/scr
 
 - **Scripted runs** are the end-to-end test harness: `--press STEPS` runs comma-separated steps 0.8 s apart and prints
   the state after each, then quits; real keyboard/mouse/touch input is ignored meanwhile. Steps are button names
-  (`A,B,X,Y,L,R,Up,Down,Left,Right,Start,Select`), `tap:X:Y`, `drag:X1:Y1:X2:Y2`, `hold:X:Y` (in the bottom panel's
-  640×480 layout units), `info`, `page`, `rows` (the browser's rows, in view or not), `prop:NAME` (any mpv property),
+  (`A,B,X,Y,L,R,Up,Down,Left,Right,Start,Select,L3`), `tap:X:Y`, `dtap:X:Y`, `drag:X1:Y1:X2:Y2`, `hold:X:Y` (in the
+  bottom panel's 640×480 layout units), `info`, `page`, `rows` (the browser's rows, in view or not), `prop:NAME` (any mpv property),
   `shot:NAME` (both panels to `$BP_SHOTS/NAME-{top,bottom}.png`), `screenshot`. Use `--state-dir` with a scratch dir
   so runs don't share settings/resume/history. The state line can lag one step behind (mpv is asynchronous).
+  Steps wait for the file to open, 3 s at most.
 - **Test variables** that stand in for the handheld: `BP_POWER_SUPPLY` (a fake `/sys/class/power_supply`),
   `BP_OSD_FILE` (bananad's level file), `BP_FONT_PROVIDER=none` (libass with no system fonts, as on BananaOS),
   `BP_SCREENSHOTS`.
@@ -61,8 +62,17 @@ docs/make-screenshots.sh <library>                   # the README's docs/img/scr
   be cleared before setting `aid`/`sid`; taking a graph off leaves no audio track chosen (restore `aid`), and `vid`
   has to be set by id. A graph's picture never ends, so mpv never ends a song that has one (every song without art):
   `checkSongEnd()` ends it, or restarts it for Loop one, once the clock passes the duration.
+- **Photos** play through mpv too (`isPhoto`): `PhotoView` (zoom over Fit or Fill, pan in mpv's `video-pan` units,
+  a user turn) is applied as `video-zoom`/`video-pan-*`/`video-rotate`; the geometry is in `photo.cpp`. Fill is done
+  by zoom, not `panscan`. Everything set for a photo at `load()` (vf, dscale, zoom/pan/rotate) is reset for a video.
+  `video-params` is before the `vf` scale and before rotation. The thumbnail is `screenshot-raw video`, unrotated.
+  Photos have their own playlist (`siblingVideos` splits photos from videos/songs), no history and no resume.
+- **Loading:** `loading()` is true from `load()` till mpv's `PLAYBACK_RESTART`; the stale `video-params` and
+  `video-out-params` of the last file (or the idle window) can't tell.
 - **`Ui`** is the whole bottom panel: pages (Main, Audio, Subs, Settings, Browse, Info, About, Exit), START's tabbed
-  menu (`inMenu`: Recent, Settings, About, Exit), the folder context menu, Lock, Screen off. Layout is in fixed
+  menu (`inMenu`: Recent, Settings, About, Exit), the folder context menu, Lock, Screen off. Main over a photo is
+  `drawPhoto` (the pan area and `photoBtn`s, ids from `PHOTO_BTN`; `photoPointer`, a flick's glide in `tick()`).
+  Settings opens on groups (`setGroup` -1); `settingRows()` lists a group's row ids. Layout is in fixed
   640×480 logical units, scaled by `sx`/`sy`; text is rendered at the real panel size. It redraws only when
   `signature()` changes (or when forced), so any new state that affects drawing must be added to `signature()`.
   `press(Button)` and `pointer(Pointer)` return true for "leave", which `main` turns into closing the video (browser
@@ -71,8 +81,8 @@ docs/make-screenshots.sh <library>                   # the README's docs/img/scr
   `playlist`, `browser`, `png`, `battery`) builds as `bpcore` and is covered by `tests/core_test.cpp` (a hand-rolled `CHECK_EQ`).
   Keep window/mpv-handle code out of these.
 - **Settings** are an INI-ish `key = value` file. New switches go in `Settings` plus the `REMEMBER` table in
-  `settings.cpp`. In `ui.cpp`, the `REMEMBER`/`REMEMBER_LABELS` arrays and the row constants (`SET_ROWS`,
-  `TOGGLE_ROW`, `CLEAR_ROW`…) in `ui.h` must be kept in step with them.
+  `settings.cpp`. In `ui.cpp`, the `REMEMBER`/`REMEMBER_LABELS` arrays, `TOGGLES` and the row ids (`TOGGLE_ROW`,
+  `PAN_ROW`, `CLEAR_ROW`…) in `ui.h` must be kept in step with them, and the row placed in a group in `settingRows()`.
 
 ## BananaOS integration (constraints, not discoverable from this repo)
 
@@ -100,7 +110,10 @@ docs/make-screenshots.sh <library>                   # the README's docs/img/scr
   `sub-fonts-dir`/`osd-fonts-dir`, with `osd-font=Inter`).
 - Decoding is software only: BananaOS's kernel disables `CONFIG_MEDIA_SUPPORT` (see
   `docs/bananalinux-hw-decoding-request.md`).
-- The panels use the Nintendo button layout: A is the east button, which is `SDL_CONTROLLER_BUTTON_B`.
+- The panels use the Nintendo button layout: A is the east button, which is `SDL_CONTROLLER_BUTTON_B`. The RG DS Plus
+  has one stick, the left, and it clicks (L3, `SDL_CONTROLLER_BUTTON_LEFTSTICK`).
+- Photos are scaled to 4096 pixels at most: the RK3566's GPU (Mali-G52, Panfrost) may take no texture over 8192
+  (unverified), and a 50 MP photo's would be 200 MB.
 
 ## Conventions
 

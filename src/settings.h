@@ -40,6 +40,10 @@ namespace bp
 		bool showHiddenFolders = false;
 		// the battery's percent beside its icon on the bottom panel (the icon is always there)
 		bool batteryPercent = false;
+		// photos: the next one opens at the zoom (and the place in it) the last was left at; off: each at its size
+		bool keepPhotoZoom = true;
+		// the photo's pan area on the bottom panel: the left half (the default) or the right
+		bool panRight = false;
 	};
 
 	std::string serializeSettings(const Settings& s);

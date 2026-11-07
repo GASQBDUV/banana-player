@@ -25,12 +25,21 @@ namespace bp
 		{{Button::X, "X"}, {Button::Y, "Y"}, {Button::Select, "SELECT"}, {Button::Up, "UP/DOWN"}, {Button::Start, "START"}},
 	};
 
-	// the settings' on/off rows, after the style's
-	static const char* REMEMBER_LABELS[8] = {"Remember position", "Remember audio track", "Remember subtitles",
-		"Remember last folder", "Keep play history", "Button hotkeys", "Show hidden folders", "Battery percentage"};
-	static bool Settings::*const REMEMBER[8] = {&Settings::rememberPosition, &Settings::rememberAudio, &Settings::rememberSubs,
+	// the settings' on/off rows (TOGGLE_ROW + their index)
+	static const char* REMEMBER_LABELS[9] = {"Remember position", "Remember audio track", "Remember subtitles",
+		"Remember last folder", "Keep play history", "Button hotkeys", "Show hidden folders", "Battery percentage",
+		"Keep zoom between photos"};
+	static bool Settings::*const REMEMBER[9] = {&Settings::rememberPosition, &Settings::rememberAudio, &Settings::rememberSubs,
 		&Settings::rememberFolder, &Settings::keepHistory, &Settings::buttonHotkeys, &Settings::showHiddenFolders,
-		&Settings::batteryPercent};
+		&Settings::batteryPercent, &Settings::keepPhotoZoom};
+	static const struct { const char* name; const char* about; } GROUP_NAMES[] = {
+		{"Subtitles", "Font, size, colour, border"},
+		{"Music", "What's shown, visualizer"},
+		{"Photos", "Zoom, pan area"},
+		{"Remember", "Position, audio track, subtitles"},
+		{"Files", "Last folder, hidden folders, play history"},
+		{"Controls & screen", "Button hotkeys, battery percentage"},
+	};
 	static const char* RECENT = "\x01recent";
 	static const char* SHOW_SHORT[SHOWS] = {"Art", "Art+Viz", "Viz", "None"};	// MusicShow on a button	// the browser's recent videos: not a folder
 
@@ -139,6 +148,7 @@ namespace bp
 
 	Ui::~Ui()
 	{
+		if (photoTex) SDL_DestroyTexture(photoTex);
 		for (auto& c : cache) SDL_DestroyTexture(c.second);
 		for (auto* f : fonts)
 			if (f) TTF_CloseFont(f);
@@ -164,8 +174,7 @@ namespace bp
 	{
 		page = pg;
 		cursor = scroll = 0;
-		// on the first setting: Quit is one UP away, not under a stray A
-		if (pg == Page::Settings) { cursor = STYLE_ROW0; return; }
+		if (pg == Page::Settings) { setGroup = -1; return; }
 		auto r = rows(p);
 		for (size_t i = 0; i < r.size(); i++)
 			if (r[i].selected) cursor = (int)i;
@@ -200,7 +209,12 @@ namespace bp
 			}
 			return;
 		}
-		if (r[i].id == STYLE_ROW) { openMainMenu(p, TAB_SETTINGS); return; }
+		if (r[i].id == STYLE_ROW)
+		{
+			openMainMenu(p, TAB_SETTINGS);
+			openGroup(GROUP_SUBS);
+			return;
+		}
 		if (r[i].id < 0) return;
 		TrackType type = page == Page::Audio ? TrackType::Audio : TrackType::Sub;
 		p.selectTrack(type, r[i].id);
@@ -311,7 +325,7 @@ namespace bp
 			// the playing one is first: the cursor on the one after, what's likely wanted next
 			if (p.playing() && browsePaths.size() > 1 && browsePaths[0] == p.currentPath()) cursor = 1;
 			break;
-		case TAB_SETTINGS: page = Page::Settings; cursor = STYLE_ROW0; break;
+		case TAB_SETTINGS: page = Page::Settings; setGroup = -1; break;
 		case TAB_ABOUT: openAbout(p); break;
 		default: page = Page::Exit; break;
 		}
@@ -382,21 +396,50 @@ namespace bp
 		return false;
 	}
 
+	std::vector<int> Ui::settingRows() const
+	{
+		const int T = TOGGLE_ROW;
+		switch (setGroup)
+		{
+		case GROUP_SUBS:
+		{
+			std::vector<int> out;
+			for (int k = 0; k < STYLE_KEYS; k++) out.push_back(STYLE_ROW0 + k);
+			return out;
+		}
+		case GROUP_MUSIC: return {MUSIC_ROW, VIS_ROW};
+		case GROUP_PHOTOS: return {T + 8, PAN_ROW};
+		case GROUP_REMEMBER: return {T + 0, T + 1, T + 2};
+		case GROUP_FILES: return {T + 3, T + 6, T + 4, CLEAR_ROW};
+		case GROUP_CONTROLS: return {T + 5, T + 7};
+		default: return {};
+		}
+	}
+
+	void Ui::openGroup(int g)
+	{
+		page = Page::Settings;
+		setGroup = g;
+		cursor = scroll = 0;
+	}
+
 	void Ui::changeSetting(int row, int dir, Player& p)
 	{
-		if (row == QUIT_ROW) { quitRequested = true; return; }
 		if (row == CLEAR_ROW) { clearHistory(p); return; }
-		if (row == ABOUT_ROW) { openAbout(p); return; }
 		Settings s = p.settings;
 		if (row - STYLE_ROW0 < STYLE_KEYS) stepStyle(s.style, (StyleKey)(row - STYLE_ROW0), dir);
 		else if (row == MUSIC_ROW) s.musicShow = ((s.musicShow + dir) % SHOWS + SHOWS) % SHOWS;
 		else if (row == VIS_ROW) s.visualizer = ((s.visualizer + dir) % VISUALIZERS + VISUALIZERS) % VISUALIZERS;
+		else if (row == PAN_ROW) s.panRight = !s.panRight;
 		else s.*REMEMBER[row - TOGGLE_ROW] = !(s.*REMEMBER[row - TOGGLE_ROW]);
 		p.setSettings(s);
 	}
 
-	bool Ui::repeats(Button b) const
+	bool Ui::repeats(Button b, const Player& p) const
 	{
+		// a photo: on to the next, and zooming, while held
+		if (page == Page::Main && !inMenu && p.playingPhoto())
+			return b == Button::Left || b == Button::Right || b == Button::L || b == Button::R || b == Button::Up || b == Button::Down;
 		if (b == Button::Left || b == Button::Right) return page != Page::Audio && page != Page::Subs;
 		if (b == Button::L || b == Button::R) return page == Page::Browse && !inMenu;	// the browser's page jumps
 		return page != Page::Main && (b == Button::Up || b == Button::Down);
@@ -449,6 +492,13 @@ namespace bp
 		if (inMenu)
 		{
 			if (b == Button::L || b == Button::R) { showTab((menuTab + (b == Button::R ? 1 : TABS - 1)) % TABS, p); return false; }
+			// B in a settings group: back to the groups
+			if (b == Button::B && page == Page::Settings && setGroup >= 0)
+			{
+				cursor = setGroup;
+				setGroup = -1;
+				return false;
+			}
 			if (b == Button::Start || b == Button::B) { closeMenu(p); return false; }
 			if (page == Page::Exit)
 			{
@@ -459,13 +509,22 @@ namespace bp
 		}
 		if (page == Page::Settings)
 		{
+			auto rows = settingRows();
+			int n = setGroup < 0 ? GROUPS : (int)rows.size();
 			switch (b)
 			{
-			case Button::Up: cursor = (cursor + SET_ROWS - 1) % SET_ROWS; break;
-			case Button::Down: cursor = (cursor + 1) % SET_ROWS; break;
-			case Button::Left: if (cursor != QUIT_ROW) changeSetting(cursor, -1, p); break;
-			case Button::Right: case Button::A: changeSetting(cursor, 1, p); break;
-			case Button::B: case Button::Start: page = home(p); break;
+			case Button::Up: cursor = (cursor + n - 1) % n; break;
+			case Button::Down: cursor = (cursor + 1) % n; break;
+			case Button::Left: if (setGroup >= 0) changeSetting(rows[cursor], -1, p); break;
+			case Button::Right: case Button::A:
+				if (setGroup < 0) openGroup(cursor);
+				else changeSetting(rows[cursor], 1, p);
+				break;
+			case Button::B:
+				if (setGroup >= 0) { cursor = setGroup; setGroup = -1; }
+				else page = home(p);
+				break;
+			case Button::Start: page = home(p); break;
 			default: break;
 			}
 			if (cursor < scroll) scroll = cursor;
@@ -482,7 +541,7 @@ namespace bp
 			case Button::Left: scroll = std::max(0, scroll - INFO_SHOWN); break;
 			case Button::Right: scroll = std::min(maxScroll, scroll + INFO_SHOWN); break;
 			case Button::B: case Button::A:
-				if (page == Page::About) { page = Page::Settings; cursor = ABOUT_ROW; scroll = SET_ROWS - SET_SHOWN; }
+				if (page == Page::About) { page = Page::Settings; setGroup = -1; cursor = scroll = 0; }
 				else page = home(p);
 				break;
 			default: break;
@@ -530,6 +589,7 @@ namespace bp
 			if (cursor >= scroll + ROWS_SHOWN) scroll = cursor - ROWS_SHOWN + 1;
 			return false;
 		}
+		if (p.playingPhoto() && photoKey(b, p)) return false;
 		switch (b)
 		{
 		case Button::A: p.togglePause(); break;
@@ -564,8 +624,126 @@ namespace bp
 		return false;
 	}
 
+	bool Ui::photoKey(Button b, Player& p)
+	{
+		flickAt = 0;
+		const Player::PhotoView& v = p.photo();
+		switch (b)
+		{
+		case Button::A:
+		{
+			// Fit and 2x, as a double-tap: zoomed in, out; else in on the middle
+			bool zoomed = v.zoom > 1.001;
+			photoZoomTo(zoomed ? 1 : 2, v.panX, v.panY, p);
+			return true;
+		}
+		case Button::Left: case Button::L: if (!p.prev()) p.osd("This is the first one"); return true;
+		case Button::Right: case Button::R: if (!p.next()) p.osd("This is the last one"); return true;
+		case Button::Up: case Button::Down: photoZoomTo(stepZoom(v.zoom, b == Button::Up ? 1 : -1), v.panX, v.panY, p); return true;
+		case Button::L3: p.rotatePhoto(); p.osd("Turned " + std::to_string(p.photo().rotate) + "°", 800); return true;
+		case Button::Select: p.togglePhotoFill(); p.osd(p.photo().fill ? "Fill" : "Fit", 800); return true;
+		case Button::X: case Button::Y: return true;	// nothing for a photo
+		default: return false;	// B and START: as over a video
+		}
+	}
+
+	void Ui::photoZoomTo(double zoom, double panX, double panY, Player& p)
+	{
+		p.setPhotoView(zoom, panX, panY);
+		p.osd("Zoom " + std::to_string((int)std::lround(p.photo().zoom * 100)) + "%", 800);
+	}
+
+	Ui::Rect Ui::thumbRect(const Player& p) const
+	{
+		Rect pan = panRect(p);
+		double a = p.photoWidth() > 0 ? p.photoWidth() / (double)p.photoHeight() : 4.0 / 3;
+		int w = pan.w, h = (int)std::lround(pan.w / a);
+		if (h > pan.h)
+		{
+			h = pan.h;
+			w = (int)std::lround(pan.h * a);
+		}
+		return {pan.x + (pan.w - w) / 2, pan.y + (pan.h - h) / 2, w, h};
+	}
+
+	bool Ui::photoPointer(const Pointer& pt, int x, int y, Player& p)
+	{
+		Uint32 now = SDL_GetTicks();
+		PhotoScale sc = p.photoScaleNow();
+		const Player::PhotoView& v = p.photo();
+		int dx = x - panDownX, dy = y - panDownY;
+		if (pt.kind == Pointer::Move)
+		{
+			if (std::abs(dx) > 8 || std::abs(dy) > 8) panMoved = true;
+			if (!panMoved) return false;
+			// the photo goes with the finger: the pan area stands for the top panel
+			p.setPhotoView(v.zoom, panStartX + dx / (double)PAN_W / sc.x, panStartY + dy / (double)PAN_H / sc.y);
+			// its speed, smoothed over the last moves, for a flick
+			Uint32 dt = std::max<Uint32>(1, now - lastAt);
+			flickVX = 0.6 * (x - lastX) / (double)dt + 0.4 * flickVX;
+			flickVY = 0.6 * (y - lastY) / (double)dt + 0.4 * flickVY;
+			lastX = x;
+			lastY = y;
+			lastAt = now;
+			return false;
+		}
+		if (pt.kind != Pointer::Up) return false;
+		panTouch = false;
+		if (panMoved)
+		{
+			// the whole photo across (nothing to drag that way): a swipe, to the next or the one before
+			if (maxPan(sc.x) <= 0 && std::abs(dx) > 48 && std::abs(dx) > 1.5 * std::abs(dy))
+			{
+				if (dx < 0 ? !p.next() : !p.prev()) p.osd(dx < 0 ? "This is the last one" : "This is the first one");
+				return false;
+			}
+			// let go while moving: it glides on
+			if (now - lastAt < 80 && std::hypot(flickVX, flickVY) > 0.3) flickAt = now;
+			return false;
+		}
+		Rect tr = thumbRect(p);
+		double u = std::clamp((x - tr.x) / (double)tr.w, 0.0, 1.0) - 0.5, w = std::clamp((y - tr.y) / (double)tr.h, 0.0, 1.0) - 0.5;
+		if (tapAt && now - tapAt < 350 && std::abs(x - tapX) < 40 && std::abs(y - tapY) < 40)
+		{
+			// a double-tap: in to 2x on that spot, or (zoomed) back out
+			tapAt = 0;
+			bool zoomed = v.zoom > 1.001;
+			photoZoomTo(zoomed ? 1 : 2, zoomed ? 0 : -u, zoomed ? 0 : -w, p);
+			return false;
+		}
+		tapAt = now;
+		tapX = x;
+		tapY = y;
+		// a tap on the thumbnail, zoomed in: the view there
+		if ((sc.x > 1.001 || sc.y > 1.001) && tr.hit(x, y)) p.setPhotoView(v.zoom, -u, -w);
+		return false;
+	}
+
+	void Ui::tick(Player& p)
+	{
+		if (!flickAt) return;
+		if (!p.playingPhoto() || page != Page::Main || panTouch)
+		{
+			flickAt = 0;
+			return;
+		}
+		Uint32 now = SDL_GetTicks(), dt = now - flickAt;
+		if (!dt) return;
+		flickAt = now;
+		PhotoScale sc = p.photoScaleNow();
+		const Player::PhotoView& v = p.photo();
+		double x0 = v.panX, y0 = v.panY;
+		p.setPhotoView(v.zoom, x0 + flickVX * dt / PAN_W / sc.x, y0 + flickVY * dt / PAN_H / sc.y);
+		// slowing, and stopped at an edge
+		double decay = std::exp(-(double)dt / 300);
+		flickVX = p.photo().panX == x0 ? 0 : flickVX * decay;
+		flickVY = p.photo().panY == y0 ? 0 : flickVY * decay;
+		if (std::hypot(flickVX, flickVY) < 0.02) flickAt = 0;
+	}
+
 	Ui::Rect Ui::buttonRect(int id) const
 	{
+		if (id >= PHOTO_BTN) return {0, 0, 0, 0};	// photoBtn's: they move with the pan area
 		if (id == QUIT_BTN) return {508, 434, 108, 38};
 		if (id == BACK_BTN) return {508, 10, 108, 40};
 		if (id == SCREEN_BTN) return {388, 434, 108, 38};
@@ -586,6 +764,14 @@ namespace bp
 			touchLocked = true;
 			p.osd("Touch locked: hold the lock 1 s to unlock");
 			return false;
+		}
+		if (id >= PHOTO_BTN && id < PHOTO_BTN + PHOTO_BTNS)
+		{
+			static const Button PHOTO_KEYS[PHOTO_BTNS] = {Button::L, Button::R, Button::Down, Button::Up, Button::L3,
+				Button::Select, Button::None, Button::Start};
+			Button b = PHOTO_KEYS[id - PHOTO_BTN];
+			if (b != Button::None) return pressAnyway(b, p);
+			id = INFO_BTN;
 		}
 		if (id == INFO_BTN)
 		{
@@ -624,7 +810,7 @@ namespace bp
 		auto barFraction = [&] { return std::clamp((x - BAR.x) / (double)BAR.w, 0.0, 1.0); };
 
 		// locked, over a video: Screen off goes through; a hold on the lock (draw() times it) releases it; nothing else
-		if (touchLocked && p.playing() && page == Page::Main && pressedBtn != SCREEN_BTN)
+		if (touchLocked && p.playing() && !p.playingPhoto() && page == Page::Main && pressedBtn != SCREEN_BTN)
 		{
 			if (pt.kind == Pointer::Down && buttonRect(LOCK_BTN).hit(x, y)) lockHoldAt = SDL_GetTicks();
 			else if (pt.kind == Pointer::Down && buttonRect(SCREEN_BTN).hit(x, y)) pressedBtn = SCREEN_BTN;
@@ -673,12 +859,13 @@ namespace bp
 			}
 			return false;
 		}
+		if (panTouch) return photoPointer(pt, x, y, p);
 		if (listTouch)
 		{
 			// a list (the tracks, the browser, the settings): a drag scrolls it, a tap acts as the finger lifts
 			bool set = page == Page::Settings, info = page == Page::Info || page == Page::About;
-			int n = set ? SET_ROWS : info ? (int)infoLines.size() : (int)rows(p).size();
-			int rowH = set ? SET_H : info ? INFO_H : ROW_H, shown = set ? SET_SHOWN : info ? INFO_SHOWN : ROWS_SHOWN;
+			int n = set ? (setGroup < 0 ? GROUPS : (int)settingRows().size()) : info ? (int)infoLines.size() : (int)rows(p).size();
+			int rowH = set ? (setGroup < 0 ? GROUP_H : SET_H) : info ? INFO_H : ROW_H, shown = set ? SET_SHOWN : info ? INFO_SHOWN : ROWS_SHOWN;
 			if (pt.kind == Pointer::Move && (listScrolled || std::abs(y - touchStartY) > 12))
 			{
 				listScrolled = true;
@@ -693,7 +880,8 @@ namespace bp
 				holdAt = 0;
 				if (listScrolled || info) return false;	// the info page only scrolls
 				// a setting: the left of its value (its arrow) steps back, the rest of the row on
-				if (set) changeSetting(cursor, touchX >= SET_ARROW_X - 12 && touchX < 490 ? -1 : 1, p);
+				if (set && setGroup < 0) openGroup(cursor);
+				else if (set) changeSetting(settingRows()[cursor], touchX >= SET_ARROW_X - 12 && touchX < 490 ? -1 : 1, p);
 				else choose(cursor, p);
 			}
 			return false;
@@ -704,7 +892,8 @@ namespace bp
 			int id = pressedBtn;
 			pressedBtn = -1;
 			// let go off the button: nothing (a finger that slid away changed its mind)
-			return buttonRect(id).hit(x, y) && act(id, p);
+			Rect r = id >= PHOTO_BTN && id < PHOTO_BTN + PHOTO_BTNS ? photoBtn(id - PHOTO_BTN, p) : buttonRect(id);
+			return r.hit(x, y) && act(id, p);
 		}
 		if (pt.kind != Pointer::Down) return false;
 		if (inMenu && y < 52)
@@ -736,8 +925,10 @@ namespace bp
 		}
 		if (page == Page::Settings)
 		{
-			int row = scroll + (y - SET_Y) / SET_H;
-			if (y < SET_Y || y >= SET_Y + SET_SHOWN * SET_H || row >= SET_ROWS) return false;
+			int top = setGroup < 0 ? GROUP_Y : SET_Y, h = setGroup < 0 ? GROUP_H : SET_H;
+			int n = setGroup < 0 ? GROUPS : (int)settingRows().size();
+			int row = scroll + (y - top) / h;
+			if (y < top || y >= top + SET_SHOWN * h || row >= n) return false;
 			cursor = row;
 			listTouch = true;
 			listScrolled = false;
@@ -757,6 +948,26 @@ namespace bp
 			touchStartY = y;
 			scrollStart = scroll;
 			holdAt = page == Page::Browse && !inMenu && folderRow(i) ? SDL_GetTicks() : 0;
+			return false;
+		}
+		if (p.playingPhoto())
+		{
+			if (panRect(p).hit(x, y))
+			{
+				panTouch = true;
+				panMoved = false;
+				flickAt = 0;
+				flickVX = flickVY = 0;
+				panDownX = lastX = x;
+				panDownY = lastY = y;
+				lastAt = SDL_GetTicks();
+				panStartX = p.photo().panX;
+				panStartY = p.photo().panY;
+				return false;
+			}
+			for (int i = 0; i < PHOTO_BTNS; i++)
+				if (photoBtn(i, p).hit(x, y)) pressedBtn = PHOTO_BTN + i;
+			if (buttonRect(QUIT_BTN).hit(x, y)) pressedBtn = QUIT_BTN;
 			return false;
 		}
 		// the bar is easier to hit with some room around it
@@ -781,10 +992,20 @@ namespace bp
 		const Track* s = p.selected(TrackType::Sub);
 		char buf[256];
 		snprintf(buf, sizeof buf, "%d %d %d %d %ld %ld %d %d %lld %lld %zu %d %d %d %.2f %d %d %d %d|", (int)page, cursor, scroll,
-			p.paused, (long)std::floor(p.position), (long)p.duration, (int)p.aspect, p.loaded, a ? (long long)a->id : 0LL,
+			p.paused + setGroup * 2 + 2, (long)std::floor(p.position), (long)p.duration, (int)p.aspect, p.loaded, a ? (long long)a->id : 0LL,
 			s ? (long long)s->id : 0LL, p.tracks.size(), dragging, (int)(dragFraction * 1000), quitArmed != 0, p.speed,
 			p.index(), p.count(), pressedBtn + touchLocked * 100 + (lockHoldAt != 0) * 1000, listTouch * 1000 + browseVersion + (clearArmed != 0) * 100000 + (int)p.history().items().size() * 1000000);
-		return buf + p.title + "|" + p.error + "|" + serializeSettings(p.settings) + "|bat" + std::to_string(battery.percent) + (battery.charging ? "c" : "") + (inMenu ? "|menu" + std::to_string(menuTab) : "") + (ctxOpen ? "|ctx" + std::to_string(ctxCursor) + std::to_string(pressedBtn) : "");
+		std::string photo;
+		if (p.playingPhoto())
+		{
+			const Player::PhotoView& v = p.photo();
+			char pb[160];
+			snprintf(pb, sizeof pb, "|photo %.4f %.4f %.4f %d %d %d %d", v.zoom, v.panX, v.panY, v.rotate, v.fill, p.thumbId, p.photoWidth());
+			photo = pb;
+		}
+		// the dots of "Loading..." go round
+		if (p.loading() || (p.playingPhoto() && !p.thumbW)) photo += "|loading" + std::to_string(SDL_GetTicks() / 400 % 4);
+		return buf + photo + p.title + "|" + p.error + "|" + serializeSettings(p.settings) + "|bat" + std::to_string(battery.percent) + (battery.charging ? "c" : "") + (inMenu ? "|menu" + std::to_string(menuTab) : "") + (ctxOpen ? "|ctx" + std::to_string(ctxCursor) + std::to_string(pressedBtn) : "");
 	}
 
 	SDL_Texture* Ui::text(const std::string& s, int size, SDL_Color c)
@@ -1188,72 +1409,86 @@ namespace bp
 
 	void Ui::drawSettings(const Player& p)
 	{
-
 		if (clearArmed && SDL_GetTicks() - clearArmed >= QUIT_WINDOW_MS) clearArmed = 0;
-		if (scroll > 0) drawText("^", 1, DIM, 320, 16, 0, 2);
-		if (scroll + SET_SHOWN < SET_ROWS) drawText("v more", 0, DIM, 320, 424, 0, 2);
-		for (int i = scroll; i < SET_ROWS && i < scroll + SET_SHOWN; i++)
+		if (setGroup < 0)
 		{
+			// the groups: a name, what's in it
+			for (int g = 0; g < GROUPS; g++)
+			{
+				int y = GROUP_Y + g * GROUP_H;
+				bool at = g == cursor;
+				if (at) fill({16, y, 608, GROUP_H - 4}, TEAL);
+				drawText(GROUP_NAMES[g].name, 1, at ? YELLOW : CREAM, 32, y + 4, 540);
+				drawText(GROUP_NAMES[g].about, 0, DIM, 32, y + 31, 540);
+				drawText(">", 1, at ? YELLOW : DIM, 608, y + 14, 0, 1);
+			}
+			drawText("A or tap to open   L/R Tabs   B Back", 0, DIM, 320, 444, 0, 2);
+			return;
+		}
+		drawText(GROUP_NAMES[setGroup].name, 1, YELLOW, 24, 58, 420);
+		auto rows = settingRows();
+		for (int i = scroll; i < (int)rows.size() && i < scroll + SET_SHOWN; i++)
+		{
+			int row = rows[i];
 			int y = SET_Y + (i - scroll) * SET_H;
 			bool at = i == cursor;
 			if (at) fill({16, y, 608, SET_H - 4}, TEAL);
 			std::string label, value;
-			int k = i - STYLE_ROW0;	// a style row's key
-			if (i == QUIT_ROW)
-			{
-				drawText("Quit Banana Player", 1, at ? YELLOW : RED, 32, y + 4, 420);
-				continue;
-			}
-			else if (k < STYLE_KEYS)
-			{
-				label = std::string(k == BORDER_COLOR ? "" : "Subtitle ") + subStyleSettings()[k].label;
-				if (k != BORDER_COLOR) label[9] = (char)std::tolower((unsigned char)label[9]);
-				value = styleValueLabel(p.settings.style, (StyleKey)k);
-			}
-			else if (i == ABOUT_ROW)
-			{
-				drawText("About Banana Player", 1, CREAM, 32, y + 4, 420);
-				drawText(">", 1, at ? YELLOW : DIM, 608, y + 4, 0, 1);
-				continue;
-			}
-			else if (i == CLEAR_ROW)
+			int k = row - STYLE_ROW0;	// a style row's key
+			if (row == CLEAR_ROW)
 			{
 				// an action, not a value: no arrows
 				size_t n = p.history().items().size();
-				drawText("Clear play history", 1, CREAM, 32, y + 4, 320);
-				drawText(clearArmed ? "Again to clear" : n ? std::to_string(n) + (n == 1 ? " video" : " videos") : "Empty", 1,
-					clearArmed ? YELLOW : at ? YELLOW : DIM, 608, y + 4, 0, 1);
+				drawText("Clear play history", 1, CREAM, 32, y + 9, 320);
+				drawText(clearArmed ? "Again to clear" : n ? std::to_string(n) + (n == 1 ? " file" : " files") : "Empty", 1,
+					clearArmed ? YELLOW : at ? YELLOW : DIM, 608, y + 9, 0, 1);
 				continue;
 			}
-			else if (i == MUSIC_ROW)
+			if (k >= 0 && k < STYLE_KEYS)
+			{
+				label = subStyleSettings()[k].label;
+				value = styleValueLabel(p.settings.style, (StyleKey)k);
+			}
+			else if (row == MUSIC_ROW)
 			{
 				label = "Music display";
 				value = musicShowLabel(p.settings.musicShow);
 			}
-			else if (i == VIS_ROW)
+			else if (row == VIS_ROW)
 			{
 				label = "Visualizer";
 				value = visualizerLabel(p.settings.visualizer);
 			}
+			else if (row == PAN_ROW)
+			{
+				label = "Pan area";
+				value = p.settings.panRight ? "Right" : "Left";
+			}
 			else
 			{
-				label = REMEMBER_LABELS[i - TOGGLE_ROW];
-				value = p.settings.*REMEMBER[i - TOGGLE_ROW] ? "On" : "Off";
+				label = REMEMBER_LABELS[row - TOGGLE_ROW];
+				value = p.settings.*REMEMBER[row - TOGGLE_ROW] ? "On" : "Off";
 			}
-			drawText(label, 1, CREAM, 32, y + 4, 320);
+			drawText(label, 1, CREAM, 32, y + 9, 330);
 			// arrows on every row: they are where a finger steps back and on
-			drawText("<", 1, at ? YELLOW : DIM, SET_ARROW_X, y + 4);
-			drawText(value, 1, at ? YELLOW : CREAM, 490, y + 4, 196, 2);
-			drawText(">", 1, at ? YELLOW : DIM, 608, y + 4, 0, 1);
+			drawText("<", 1, at ? YELLOW : DIM, SET_ARROW_X, y + 9);
+			drawText(value, 1, at ? YELLOW : CREAM, 490, y + 9, 196, 2);
+			drawText(">", 1, at ? YELLOW : DIM, 608, y + 9, 0, 1);
 		}
-		Rect box{24, SET_Y + SET_SHOWN * SET_H + 4, 592, 56};
-		drawPreview(p.settings.style, box);
-
-		const Track* s = p.selected(TrackType::Sub);
-		bool styled = s && (s->codec == "ass" || s->codec == "ssa");
-		drawText(styled ? "This video's subtitles are styled (ASS): they keep their own look"
-						: "Tap < > or LEFT/RIGHT to change",
-			0, styled ? YELLOW : DIM, 320, 450, 600, 2);
+		std::string hint = "Tap < > or LEFT/RIGHT to change   B Back";
+		SDL_Color hintInk = DIM;
+		if (setGroup == GROUP_SUBS)
+		{
+			Rect box{24, SET_Y + (int)rows.size() * SET_H + 8, 592, 56};
+			drawPreview(p.settings.style, box);
+			const Track* s = p.selected(TrackType::Sub);
+			if (s && (s->codec == "ass" || s->codec == "ssa"))
+			{
+				hint = "This video's subtitles are styled (ASS): they keep their own look";
+				hintInk = YELLOW;
+			}
+		}
+		drawText(hint, 0, hintInk, 320, 444, 600, 2);
 	}
 
 	// a line in the chosen font, colour and border over a stand-in for the picture, at the size it has on the top
@@ -1293,8 +1528,95 @@ namespace bp
 		TTF_CloseFont(f);
 	}
 
+	void Ui::drawPhoto(const Player& p)
+	{
+		drawText(p.title.empty() ? "Opening..." : p.title, 2, CREAM, 24, 24, battery.percent >= 0 ? 592 - BATTERY_W : 592);
+		drawBattery(616, 26, p);
+		Rect pan = panRect(p);
+		fill(pan, SCREEN);
+		PhotoScale sc = p.photoScaleNow();
+		const Player::PhotoView& v = p.photo();
+		if (!p.error.empty())
+		{
+			drawText("This photo can't be shown:", 0, RED, pan.x + 12, pan.y + 12, pan.w - 24);
+			drawText(p.error, 0, RED, pan.x + 12, pan.y + 40, pan.w - 24);
+		}
+		else if (p.thumbW > 0)
+		{
+			if (photoTexId != p.thumbId)
+			{
+				if (photoTex) SDL_DestroyTexture(photoTex);
+				photoTex = SDL_CreateTexture(ren, SDL_PIXELFORMAT_RGB888, SDL_TEXTUREACCESS_STATIC, p.thumbW, p.thumbH);
+				if (photoTex) SDL_UpdateTexture(photoTex, nullptr, p.thumb.data(), p.thumbW * 4);
+				photoTexId = p.thumbId;
+			}
+			// the thumbnail as the photo is shown: turned about its middle, in the box it fills turned
+			Rect tr = thumbRect(p);
+			int turn = p.thumbTurn();
+			bool across = turn % 180 == 90;
+			float cx = (tr.x + tr.w / 2.f) * sx, cy = (tr.y + tr.h / 2.f) * sy;
+			float w = (across ? tr.h * sy : tr.w * sx), h = (across ? tr.w * sx : tr.h * sy);
+			SDL_Rect dst{(int)std::lround(cx - w / 2), (int)std::lround(cy - h / 2), (int)std::lround(w), (int)std::lround(h)};
+			if (photoTex) SDL_RenderCopyEx(ren, photoTex, nullptr, &dst, turn, nullptr, SDL_FLIP_NONE);
+			// the part on the top panel, boxed (all of it shown: no box)
+			if (sc.x > 1.001 || sc.y > 1.001)
+			{
+				double hx = std::min(0.5, 0.5 / sc.x), hy = std::min(0.5, 0.5 / sc.y);
+				int bx = tr.x + (int)std::lround(tr.w * (0.5 - v.panX - hx)), by = tr.y + (int)std::lround(tr.h * (0.5 - v.panY - hy));
+				int bw = std::max(4, (int)std::lround(tr.w * 2 * hx)), bh = std::max(4, (int)std::lround(tr.h * 2 * hy));
+				fill({bx, by, bw, 2}, YELLOW);
+				fill({bx, by + bh - 2, bw, 2}, YELLOW);
+				fill({bx, by, 2, bh}, YELLOW);
+				fill({bx + bw - 2, by, 2, bh}, YELLOW);
+			}
+		}
+		else drawText("Loading" + std::string(SDL_GetTicks() / 400 % 4, '.'), 1, DIM, pan.x + pan.w / 2, pan.y + pan.h / 2 - 12, 0, 2);
+
+		// under the pan area: the zoom and the size; how to use it
+		std::string zoom = "Zoom " + std::to_string((int)std::lround(v.zoom * 100)) + "%";
+		if (p.photoWidth() > 0) zoom += "   " + std::to_string(p.photoWidth()) + " x " + std::to_string(p.photoHeight());
+		drawText(zoom, 0, CREAM, pan.x, pan.y + pan.h + 10, pan.w);
+		drawText(maxPan(sc.x) > 0 || maxPan(sc.y) > 0 ? "Drag to move · double-tap: zoom out" : "Swipe: next · double-tap: zoom in",
+			0, DIM, pan.x, pan.y + pan.h + 36, pan.w);
+
+		bool hints = p.settings.buttonHotkeys;
+		struct { const char* label; const char* hint; bool off; } btns[PHOTO_BTNS] = {
+			{"Prev", "L", p.index() == 0},
+			{"Next", "R", p.index() + 1 >= p.count()},
+			{"Zoom -", "DOWN", v.zoom <= 1.001},
+			{"Zoom +", "UP", v.zoom >= MAX_ZOOM - 0.001},
+			{"Rotate", "L3", false},
+			{v.fill ? "Fill" : "Fit", "SELECT", false},
+			{"Info", "", false},
+			{"Menu", "START", false},
+		};
+		for (int i = 0; i < PHOTO_BTNS; i++)
+		{
+			Rect b = photoBtn(i, p);
+			fill(b, pressedBtn == PHOTO_BTN + i ? PRESSED : TEAL);
+			bool hint = hints && *btns[i].hint;
+			drawText(btns[i].label, 1, btns[i].off ? DIM : CREAM, b.x + b.w / 2, b.y + (hint ? 5 : 15), b.w - 6, 2);
+			if (hint) drawText(btns[i].hint, 0, btns[i].off ? DIM : YELLOW, b.x + b.w / 2, b.y + 33, b.w - 6, 2);
+		}
+		if (p.count() > 1)
+		{
+			Rect last = photoBtn(PHOTO_BTNS - 1, p);
+			drawText(std::to_string(p.index() + 1) + " / " + std::to_string(p.count()), 0, DIM, last.x + last.w, last.y + last.h + 12, 0, 1);
+		}
+
+		Rect q = buttonRect(QUIT_BTN);
+		fill(q, pressedBtn == QUIT_BTN ? PRESSED : TEAL);
+		drawText(quitArmed ? "Again?" : browserMode ? "Close" : "Quit", 1, quitArmed ? YELLOW : CREAM, q.x + q.w / 2, q.y + 6, q.w - 6, 2);
+		const char* leave = browserMode ? "close" : "quit";
+		std::string hint = quitArmed ? std::string("Again to ") + leave
+			: hints ? std::string("A Fit/2x   Double tap B to ") + leave
+					: std::string("Tap ") + (browserMode ? "Close" : "Quit") + " twice";
+		drawText(hint, 0, quitArmed ? YELLOW : DIM, 24, 444, 470);
+	}
+
 	void Ui::drawMain(const Player& p)
 	{
+		if (p.playingPhoto()) { drawPhoto(p); return; }
 		drawText(p.title.empty() ? "Opening..." : p.title, 2, CREAM, 24, 24, battery.percent >= 0 ? 592 - BATTERY_W : 592);
 		drawBattery(616, 26, p);
 		if (p.count() > 1)
@@ -1306,7 +1628,7 @@ namespace bp
 		}
 		else
 		{
-			std::string status = !p.loaded ? "Loading" : p.paused ? "Paused" : "Playing";
+			std::string status = p.loading() ? "Loading" + std::string(SDL_GetTicks() / 400 % 4, '.') : p.paused ? "Paused" : "Playing";
 			if (std::fabs(p.speed - 1) > 1e-6) status += "  " + speedLabel(p.speed);
 			if (!p.settings.buttonHotkeys) status += "  (buttons off)";
 			drawText(status, 1, YELLOW, 24, 84);

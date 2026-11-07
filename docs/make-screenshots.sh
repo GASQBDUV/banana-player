@@ -27,7 +27,7 @@ run prop:pause,shot:browser "$DEMO/Movies"    # the browser, opened in Movies
 run prop:pause,prop:pause,shot:playing "$MOVIE"
 run Y,shot:subs "$MOVIE"
 run Right,shot:music "$SONG"
-run Start,R,Down,Down,shot:settings "$MOVIE"
+run Start,R,A,Down,Down,shot:settings "$MOVIE"	# Settings › Subtitles
 run tap:322:452,Down,Down,Down,Down,Down,Down,Down,Down,shot:info "$MOVIE"
 
 # each pair stacked: top over bottom with a hinge between, on a dark frame

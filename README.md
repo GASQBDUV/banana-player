@@ -3,13 +3,14 @@
 </p>
 
 <p align="center">
-  <b>Watch videos and play music on your RG DS: the picture on top, the controls on the touch screen below.</b>
+  <b>Watch videos, play music and look at photos on your RG DS: the picture on top, the controls on the touch screen below.</b>
 </p>
 
 <p align="center">
   <a href="#install">Install</a> ·
   <a href="#what-it-plays">What it plays</a> ·
   <a href="#controls">Controls</a> ·
+  <a href="#photos">Photos</a> ·
   <a href="#settings">Settings</a> ·
   <a href="DEVELOPMENT.md">For developers</a>
 </p>
@@ -36,6 +37,8 @@
 - 🎬 **Plays almost anything:** MP4, MKV, AVI, WebM and more, with embedded or separate subtitles and multiple audio
   tracks.
 - 🎵 **Music too:** MP3, FLAC, OGG, WAV and more. Folders play as albums, with album art and visualizers.
+- 🖼️ **Photos:** JPG, PNG, WebP, GIF, AVIF and more. Zoom in, and drag the photo around on the touch screen like on a
+  phone.
 - 👆 **Two screens, made for the RG DS:** the picture on top, big touch controls below. Every button has a touch
   equivalent.
 - 💾 **Picks up where you left off:** position, audio track and subtitles per file, plus Recent for the last 30 things
@@ -80,6 +83,7 @@ and history are kept: they live in `home/.config/banana-player` on the card, not
 |---|---|
 | **Video** | MP4, MKV, WebM, AVI, MOV, TS, M4V, MPG, WMV, FLV and more: H.264, HEVC, VP9, AV1, MPEG-2/4… |
 | **Music** | MP3, FLAC, OGG, WAV, M4A, AAC, Opus, WMA, AIFF, APE and more |
+| **Photos** | JPG, PNG, WebP, GIF (animated too), BMP, TIFF, AVIF |
 | **Subtitles** | Inside the video (SRT, ASS/SSA, PGS, VobSub, VTT), or files next to it (`movie.srt`, `movie.en.ass`) |
 | **Languages** | Subtitles, titles and file names in Latin scripts (Vietnamese too), Cyrillic, Greek, Chinese, Japanese, Korean, Thai, Arabic, Hebrew and Hindi |
 
@@ -98,8 +102,9 @@ Folders come first, then files in natural order (episode 2 before episode 10). A
 shows where you left off.
 
 Everything in a folder plays as one playlist: **L/R** go to the previous or next file, and the next one starts when
-the current one ends. Folders can mix videos and music. When you close a video, you're back in its folder on the file
-you were playing.
+the current one ends. Folders can mix videos and music. Photos are a list of their own: from a photo you step through
+the folder's photos, and from a video or a song through its videos and songs. When you close something, you're back in
+its folder on that file.
 
 ## Controls
 
@@ -126,6 +131,20 @@ you were playing.
 
 Under the progress bar you'll see the time played, the time left (at the current speed) and the total length.
 
+### Looking at a photo
+
+| Button | What it does |
+|---|---|
+| **LEFT / RIGHT** or **L / R** | Previous / next photo (hold to keep going) |
+| **UP / DOWN** | Zoom in / out: 100%, 150%, 200%, 300%, 400%, 600%, 800% |
+| **A** | Zoom to 200%, or back to the whole photo |
+| **L3** (press the stick) | Rotate a quarter turn |
+| **SELECT** | Fit (the whole photo) or Fill (the screen filled) |
+| **START** | Menu |
+| **B twice** | Close the photo |
+
+See [Photos](#photos) for the touch screen.
+
 ### In the file list
 
 | Button | What it does |
@@ -145,6 +164,22 @@ Four tabs. Switch with **L/R** or a tap; **B** or **START** closes it.
 - **Settings:** see [below](#settings).
 - **About:** version, licence and the libraries it uses.
 - **Exit:** quits Banana Player, keeping your place.
+
+## Photos
+
+Pick a photo in the file list. The bottom screen shows the photo small, in the **pan area** (on the left; Settings ›
+Photos can put it on the right), with a box around the part you see on top. The pan area works like a photo on a phone:
+
+- **Drag** to move the photo. Let go while moving and it glides on.
+- **Double-tap** to zoom to 200% on that spot. Double-tap again to see all of it.
+- **Tap** somewhere on the small photo to look there.
+- **Swipe** left or right while the whole photo is shown to go to the next or previous one.
+
+The buttons beside it do the same as the handheld's: Prev, Next, Zoom −, Zoom +, Rotate, Fit/Fill, Info and Menu.
+
+The next photo opens at the same zoom, in the same corner, which suits scanned comics page by page (turn this off with
+**Keep zoom between photos**). Photos taken sideways are shown upright, and animated GIFs play. Photos don't go into
+Recent. **Info** shows the photo's size, format, and when and with which camera it was taken.
 
 ## Picture size
 
@@ -169,19 +204,23 @@ All three are remembered.
 
 ## Settings
 
-| Setting | Default | |
-|---|---|---|
-| Subtitle font, size, colour, border, border colour | Inter, Medium, White, Normal, Black | How plain subtitles (SRT, VTT…) look, with a live preview. Styled subtitles (ASS/SSA) keep their own look. |
-| Music display, Visualizer | Album art, Bars | What the top screen shows for music (also on SELECT and Y while a song plays) |
-| Remember position | On | Reopening a file continues where you stopped |
-| Remember audio track | On | Keeps each file's audio track; a new file starts in the language you chose last |
-| Remember subtitles | On | The same, for subtitles |
-| Remember last folder | Off | The file list opens where you last were |
-| Keep play history | On | Keeps Recent. Turning it off also deletes the history |
-| Button hotkeys | On | Off: buttons can't pause, skip or close while something plays (touch still can) |
-| Show hidden folders | Off | Shows folders you've hidden (they contain a `.hidden` file), so you can unhide them |
-| Battery percentage | Off | Shows the battery's percent beside its icon (the icon, with a bolt while charging, is always there) |
-| Clear play history | | Tap twice. Positions you stopped at are kept |
+Settings opens on six groups; pick one with **A** or a tap, and **B** goes back to them.
+
+| Group | Setting | Default | |
+|---|---|---|---|
+| **Subtitles** | Font, size, colour, border, border colour | Inter, Medium, White, Normal, Black | How plain subtitles (SRT, VTT…) look, with a live preview. Styled subtitles (ASS/SSA) keep their own look. |
+| **Music** | Music display, Visualizer | Album art, Bars | What the top screen shows for music (also on SELECT and Y while a song plays) |
+| **Photos** | Keep zoom between photos | On | The next photo opens at the same zoom and place. Off: each opens whole |
+| | Pan area | Left | Which side of the bottom screen the photo's pan area is on |
+| **Remember** | Remember position | On | Reopening a file continues where you stopped |
+| | Remember audio track | On | Keeps each file's audio track; a new file starts in the language you chose last |
+| | Remember subtitles | On | The same, for subtitles |
+| **Files** | Remember last folder | Off | The file list opens where you last were |
+| | Show hidden folders | Off | Shows folders you've hidden (they contain a `.hidden` file), so you can unhide them |
+| | Keep play history | On | Keeps Recent. Turning it off also deletes the history |
+| | Clear play history | | Tap twice. Positions you stopped at are kept |
+| **Controls & screen** | Button hotkeys | On | Off: buttons can't pause, skip or close while something plays (touch still can) |
+| | Battery percentage | Off | Shows the battery's percent beside its icon (the icon, with a bolt while charging, is always there) |
 
 ## More
 
@@ -190,6 +229,7 @@ All three are remembered.
 - **Battery:** an icon on the bottom screen, red when it's low, with a bolt while charging (and its percent, if you
   turn that on in Settings).
 - **Volume and brightness:** the keys show a level card on the top screen.
+- **Loading:** a file that takes a moment to open (a big photo, a slow card) shows a spinner on the top screen.
 - **Lock:** locks the touch screen while playing; Screen off still works. Hold the lock for a second to unlock.
 - **Screen off:** turns the bottom screen off to save battery. Touch it to turn it back on.
 - **Lid:** closing it pauses; opening it keeps it paused until you press play.

@@ -1,4 +1,5 @@
 #include "playlist.h"
+#include "photo.h"
 #include <algorithm>
 #include <cctype>
 #include <dirent.h>
@@ -31,7 +32,7 @@ namespace bp
 
 	bool isMediaFile(const std::string& name)
 	{
-		return isVideoFile(name) || isAudioFile(name);
+		return isVideoFile(name) || isAudioFile(name) || isPhotoFile(name);
 	}
 
 	bool naturalLess(const std::string& a, const std::string& b)
@@ -72,10 +73,12 @@ namespace bp
 		std::string dir = slash == std::string::npos ? "." : slash == 0 ? "/" : path.substr(0, slash);
 		std::string name = slash == std::string::npos ? path : path.substr(slash + 1);
 		std::vector<std::string> names;
+		// a photo's are the photos; a video's or a song's, the videos and songs (a slideshow doesn't start a film)
+		bool photos = isPhotoFile(name);
 		if (DIR* d = isMediaFile(name) ? opendir(dir.c_str()) : nullptr)
 		{
 			while (dirent* e = readdir(d))
-				if (isMediaFile(e->d_name)) names.push_back(e->d_name);
+				if (isMediaFile(e->d_name) && isPhotoFile(e->d_name) == photos) names.push_back(e->d_name);
 			closedir(d);
 		}
 		if (std::find(names.begin(), names.end(), name) == names.end()) return {path};

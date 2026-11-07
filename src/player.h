@@ -1,6 +1,7 @@
 #pragma once
 #include "aspect.h"
 #include "history.h"
+#include "photo.h"
 #include "resume.h"
 #include "settings.h"
 #include "tracks.h"
@@ -39,6 +40,7 @@ namespace bp
 		// at a file's end: the next one, or (Loop all, music) the first again; false when that's all
 		bool advance();
 		bool playingAudio() const { return isAudio && !playlist.empty(); }
+		bool playingPhoto() const { return isPhoto && !playlist.empty(); }
 		int index() const { return current; }
 		int count() const { return (int)playlist.size(); }
 
@@ -50,6 +52,13 @@ namespace bp
 		// never ends, so mpv never ends the file: the clock runs on past the song. Ended here instead (or, Loop one,
 		// started again)
 		void checkSongEnd();
+		// a file opened and nothing of it shown yet (its first picture still decoding, a slow card); not an error
+		bool loading() const;
+		// called each turn of the loop: the top panel's spinner while loading() lasts (from 0.3 s: a quick file
+		// shows none)
+		void checkLoading();
+		// called now and then: a photo's size, once mpv knows it (the view is set to it), and its thumbnail
+		void checkPhoto();
 		bool frameDue();
 		void render(int w, int h);
 		void reportSwap();
@@ -106,6 +115,32 @@ namespace bp
 		std::vector<Track> tracksOf(TrackType type) const;
 		const Track* selected(TrackType type) const;
 
+		// A photo's view on the top panel: zoom (a factor of Fit, or of Fill), the place (mpv's video-pan: minus the
+		// shown part's centre, as a fraction of the photo from its centre), a turn of the photo's own (L3), Fit or Fill.
+		// The zoom, the place in it (as a share of how far it can go) and Fit/Fill pass to the next photo (Keep zoom
+		// between photos); the turn doesn't
+		struct PhotoView
+		{
+			double zoom = 1, panX = 0, panY = 0;
+			int rotate = 0;
+			bool fill = false;
+		};
+		const PhotoView& photo() const { return view; }
+		// the photo's size as shown (turned), 0 till mpv knows it
+		int photoWidth() const { return turned() ? photoH : photoW; }
+		int photoHeight() const { return turned() ? photoW : photoH; }
+		// the photo at its view, in panel widths and heights
+		PhotoScale photoScaleNow() const;
+		// clamped to the photo's edges, and shown
+		void setPhotoView(double zoom, double panX, double panY);
+		void rotatePhoto();	// a quarter turn clockwise
+		void togglePhotoFill();
+		// the photo small, for the bottom panel's pan area (BGRX, thumbW x thumbH, empty till it's taken); thumbTurn:
+		// the clockwise turn that shows it as the top panel does; thumbId changes with each new one
+		std::vector<unsigned char> thumb;
+		int thumbW = 0, thumbH = 0, thumbId = 0;
+		int thumbTurn() const;
+
 	private:
 		void load();
 		void refreshTracks();
@@ -114,7 +149,22 @@ namespace bp
 		void applyAudioDisplay();
 		int shownMusic() const;	// MusicShow as it comes out for this file (its art or none)
 		void updateOverlay();
-		bool isAudio = false;
+		bool isAudio = false, isPhoto = false;
+		// photos: the size mpv shows (before any turn), the turn mpv makes of the file's own (rotation metadata) and
+		// the one made here for an EXIF orientation mpv's FFmpeg leaves (7.1's does)
+		PhotoView view;
+		int photoW = 0, photoH = 0, fileTurn = 0, exifTurn = 0;
+		double panShareX = 0, panShareY = 0;	// the place as a share of how far it can go, for the next photo
+		ExifInfo exif;
+		bool turned() const { return (fileTurn + exifTurn + view.rotate) % 180 == 90; }
+		void applyPhotoView();
+		// the thumbnail: asked of mpv (screenshot-raw, answered on its own time) once a frame is up
+		uint64_t thumbAt = 0, loadAt = 0;
+		int spinnerStep = -1;
+		bool started = false;	// the file's playback began (mpv's playback-restart): no longer loading	// the spinner's lit dot as drawn, -1: not up
+		int thumbTries = 0, loadSerial = 0;
+		bool thumbAsked = false, thumbTurnedByMpv = false;
+		void takeThumb(mpv_node* result);
 		std::string get(const char* name) const;	// "" where mpv has none
 		void writeFile(const std::string& path, const std::string& text);
 

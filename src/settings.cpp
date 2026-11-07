@@ -12,6 +12,7 @@ namespace bp
 		{"button-hotkeys", &Settings::buttonHotkeys},
 		{"show-hidden-folders", &Settings::showHiddenFolders},
 		{"battery-percent", &Settings::batteryPercent},
+		{"keep-photo-zoom", &Settings::keepPhotoZoom},
 	};
 
 	static const char* SHOW_IDS[SHOWS] = {"art", "both", "visualizer", "none"};
@@ -65,6 +66,7 @@ namespace bp
 		out += std::string("visualizer = ") + VIS_IDS[s.visualizer] + "\n";
 		out += std::string("loop = ") + LOOP_IDS[s.loop] + "\n";
 		for (auto& r : REMEMBER) out += std::string(r.key) + " = " + (s.*r.field ? "yes" : "no") + "\n";
+		out += std::string("pan-area = ") + (s.panRight ? "right" : "left") + "\n";
 		return out;
 	}
 
@@ -91,6 +93,7 @@ namespace bp
 				if (key == "visualizer" && value == VIS_IDS[v]) s.visualizer = v;
 			for (int v = 0; v < LOOPS; v++)
 				if (key == "loop" && value == LOOP_IDS[v]) s.loop = v;
+			if (key == "pan-area" && (value == "left" || value == "right")) s.panRight = value == "right";
 			// the one setting before 0.1.1, kept: auto, cover-bars, bars, waves, spectrum, cover
 			if (key == "audio-display")
 			{

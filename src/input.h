@@ -6,7 +6,8 @@ namespace bp
 {
 	// The handheld's buttons by their printed names (Nintendo layout: A is the east button, B the south one), as
 	// banana-ui reads them.
-	enum class Button { None, A, B, X, Y, L, R, Up, Down, Left, Right, Start, Select };
+	// L3: the stick pressed in (the RG DS Plus has the left one only)
+	enum class Button { None, A, B, X, Y, L, R, Up, Down, Left, Right, Start, Select, L3 };
 
 	// a button pressed (repeats included), from a pad or, on a computer, the keyboard; None for anything else
 	Button buttonFromEvent(const SDL_Event& e);

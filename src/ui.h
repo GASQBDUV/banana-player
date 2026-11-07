@@ -28,8 +28,12 @@ namespace bp
 
 		// true when the player should leave
 		bool press(Button b, Player& p);
-		// a held button that repeats here (seeking, moving in a list)
-		bool repeats(Button b) const;
+		// a held button that repeats here (seeking, moving in a list, photo to photo)
+		bool repeats(Button b, const Player& p) const;
+		// called each turn of the loop: a flicked photo glides on
+		void tick(Player& p);
+		// something moves by itself (a flick): the loop should come round often
+		bool animating() const { return flickAt != 0; }
 		// a finger (or, on a computer, the mouse) on the bottom panel; true when the player should leave
 		bool pointer(const Pointer& pt, Player& p);
 
@@ -91,6 +95,11 @@ namespace bp
 		void openMenu(Page pg, const Player& p);
 		void choose(int i, Player& p);
 		void changeSetting(int row, int dir, Player& p);
+		// Settings opens on its groups (setGroup -1); A or a tap opens one, B goes back to them
+		enum SetGroup { GROUP_SUBS, GROUP_MUSIC, GROUP_PHOTOS, GROUP_REMEMBER, GROUP_FILES, GROUP_CONTROLS, GROUPS };
+		int setGroup = -1;
+		std::vector<int> settingRows() const;	// the open group's rows, by id
+		void openGroup(int g);
 		Page home(const Player& p) const { return p.playing() ? Page::Main : Page::Browse; }
 		void enterFolder(std::string dir, Player& p);	// "" the first page, RECENT the recent videos
 		void browseUp(Player& p);
@@ -130,6 +139,25 @@ namespace bp
 		bool pressAnyway(Button b, Player& p);
 		// music playing: X loop, Y visualizer, SELECT what's shown (a video: audio, subtitles, picture size)
 		bool musicKey(Button b, Player& p);
+		// a photo: the pan area (its thumbnail, the part on the top panel boxed: a finger drags the photo as on a
+		// phone, a flick glides, a double-tap zooms, a swipe at full view goes on) beside its buttons
+		bool photoKey(Button b, Player& p);	// true: it was a photo's
+		bool photoPointer(const Pointer& pt, int x, int y, Player& p);
+		void photoZoomTo(double zoom, double panX, double panY, Player& p);
+		void drawPhoto(const Player& p);
+		Rect panRect(const Player& p) const { return {p.settings.panRight ? 288 : 16, 80, PAN_W, PAN_H}; }
+		Rect photoBtn(int i, const Player& p) const
+		{
+			return {(p.settings.panRight ? 16 : 368) + i % 2 * 128, 80 + i / 2 * 64, 120, 56};
+		}
+		Rect thumbRect(const Player& p) const;	// the photo, as shown, fitted in the pan area
+		bool panTouch = false, panMoved = false;
+		int panDownX = 0, panDownY = 0, lastX = 0, lastY = 0, tapX = 0, tapY = 0;
+		double panStartX = 0, panStartY = 0, flickVX = 0, flickVY = 0;	// the flick's speed: units a millisecond
+		Uint32 lastAt = 0, flickAt = 0, tapAt = 0;
+		SDL_Texture* photoTex = nullptr;
+		int photoTexId = -1;
+		static constexpr int PAN_W = 336, PAN_H = 252, PHOTO_BTN = 20, PHOTO_BTNS = 8;
 		Rect buttonRect(int id) const;
 		std::string signature(const Player& p) const;
 
@@ -192,14 +220,11 @@ namespace bp
 		static constexpr Rect BAR{24, 150, 592, 24};
 		static constexpr int BTN_W = 108, BTN_H = 60, BTN_STEP = 121, ROW1_Y = 228, ROW2_Y = 300;
 		static constexpr int ROW_Y = 84, ROW_H = 48, ROWS_SHOWN = 7;
-		// the settings: the style's rows, five switches, Clear play history; SET_SHOWN of them at a time
-		// the settings' rows: Quit, the subtitle style, Audio display, the switches, Clear play history, About
-		// the settings' rows: the subtitle style, Audio display, the switches, Clear play history (Quit and About are
-		// the menu's own tabs: QUIT_ROW and ABOUT_ROW match no row)
-		static constexpr int QUIT_ROW = -1, STYLE_ROW0 = 0, MUSIC_ROW = STYLE_KEYS, VIS_ROW = STYLE_KEYS + 1,
-			TOGGLE_ROW = STYLE_KEYS + 2;
-		static constexpr int SET_Y = 54, SET_H = 34, SET_ROWS = STYLE_KEYS + 11, SET_SHOWN = 9,
-			CLEAR_ROW = SET_ROWS - 1, ABOUT_ROW = -2;
+		// the settings' rows by id: the subtitle style's, Music display, Visualizer, the switches (REMEMBER), Pan area,
+		// Clear play history. Shown a group at a time (settingRows), after a list of the groups
+		static constexpr int STYLE_ROW0 = 0, MUSIC_ROW = STYLE_KEYS, VIS_ROW = STYLE_KEYS + 1, TOGGLE_ROW = STYLE_KEYS + 2,
+			TOGGLES = 9, PAN_ROW = TOGGLE_ROW + TOGGLES, CLEAR_ROW = PAN_ROW + 1;
+		static constexpr int SET_Y = 92, SET_H = 46, SET_SHOWN = 7, GROUP_Y = 60, GROUP_H = 58;
 		static constexpr int64_t STYLE_ROW = -2;	// the subtitle menu's last row: the settings page
 		static constexpr int QUIT_BTN = 10, BACK_BTN = 11, SCREEN_BTN = 12, INFO_BTN = 13, LOCK_BTN = 14, EXIT_BTN = 15;
 		static constexpr Uint32 UNLOCK_HOLD_MS = 1000;	// buttonRect's ids beside the grid's 0..9

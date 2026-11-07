@@ -4,6 +4,7 @@
 #include "browser.h"
 #include "format.h"
 #include "history.h"
+#include "photo.h"
 #include "playlist.h"
 #include "resume.h"
 #include "settings.h"
@@ -395,6 +396,14 @@ static void testBattery()
 	std::ofstream(d + "/battery/status") << "Full\n";
 	CHECK_EQ(readBattery(d).charging, true);
 	CHECK_EQ(parseSettings("").batteryPercent, false);	// the percent: off by default
+	CHECK_EQ(parseSettings("").keepPhotoZoom, true);
+	CHECK_EQ(parseSettings("").panRight, false);	// the pan area: left by default
+	Settings ph;
+	ph.keepPhotoZoom = false;
+	ph.panRight = true;
+	Settings phb = parseSettings(serializeSettings(ph));
+	CHECK_EQ(phb.keepPhotoZoom, false);
+	CHECK_EQ(phb.panRight, true);
 	for (const char* f : {"/battery/type", "/battery/capacity", "/battery/status", "/usb/type", "/usb/online"}) unlink((d + f).c_str());
 	rmdir((d + "/battery").c_str());
 	rmdir((d + "/usb").c_str());
@@ -412,7 +421,7 @@ static void testPlaylist()
 		CHECK_EQ(isMediaFile(a), true);
 	}
 	CHECK_EQ(isAudioFile("a.mkv"), false);
-	CHECK_EQ(isMediaFile("cover.jpg"), false);
+	CHECK_EQ(isMediaFile("a.txt"), false);
 	CHECK_EQ(naturalLess("ep2.mkv", "ep10.mkv"), true);
 	CHECK_EQ(naturalLess("ep10.mkv", "ep2.mkv"), false);
 	CHECK_EQ(naturalLess("Ep 02.mkv", "ep 3.mkv"), true);
@@ -435,7 +444,79 @@ static void testPlaylist()
 	CHECK_EQ(alone.size(), (size_t)1);
 	CHECK_EQ(index, 0);
 	for (const char* n : {"ep10.mkv", "ep2.mkv", "ep1.mp4", "ep2.srt", "notes.txt"}) unlink((d + "/" + n).c_str());
+
+	// photos step through photos, videos and songs through videos and songs
+	for (const char* n : {"a.jpg", "b.mkv", "c.PNG", "d.mp3"}) std::ofstream(d + "/" + n) << "x";
+	auto photos = siblingVideos(d + "/c.PNG", index);
+	CHECK_EQ(photos.size(), (size_t)2);
+	CHECK_EQ(index, 1);
+	auto media = siblingVideos(d + "/d.mp3", index);
+	CHECK_EQ(media.size(), (size_t)2);
+	CHECK_EQ(index, 1);
+	if (media.size() == 2) CHECK_EQ(media[0], d + "/b.mkv");
+	for (const char* n : {"a.jpg", "b.mkv", "c.PNG", "d.mp3"}) unlink((d + "/" + n).c_str());
 	rmdir(dir);
+}
+
+static void testPhoto()
+{
+	CHECK_EQ(isPhotoFile("IMG_0001.JPG"), true);
+	CHECK_EQ(isPhotoFile("a.webp"), true);
+	CHECK_EQ(isPhotoFile("a.mkv"), false);
+	CHECK_EQ(isMediaFile("cover.jpg"), true);
+
+	CHECK_EQ(stepZoom(1, 1), 1.5);
+	CHECK_EQ(stepZoom(1.5, 1), 2.0);
+	CHECK_EQ(stepZoom(8, 1), 8.0);
+	CHECK_EQ(stepZoom(1, -1), 1.0);
+	CHECK_EQ(stepZoom(2.5, -1), 2.0);	// from between steps: the one below
+	CHECK_EQ(stepZoom(2.5, 1), 3.0);
+
+	// a 4:3 photo on the 4:3 panel fits exactly; 2x: twice the panel, half a panel each way to move
+	PhotoScale s = photoScale(4.0 / 3, 4.0 / 3, false, 1);
+	CHECK_EQ(s.x, 1.0);
+	CHECK_EQ(s.y, 1.0);
+	CHECK_EQ(maxPan(1), 0.0);
+	CHECK_EQ(maxPan(2), 0.25);
+	// a 2:3 portrait fits by its height: half the panel's width
+	s = photoScale(2.0 / 3, 4.0 / 3, false, 1);
+	CHECK_EQ(s.x, 0.5);
+	CHECK_EQ(s.y, 1.0);
+	// filled: as wide as the panel, twice as tall
+	s = photoScale(2.0 / 3, 4.0 / 3, true, 1);
+	CHECK_EQ(s.x, 1.0);
+	CHECK_EQ(s.y, 2.0);
+
+	// an EXIF block: little-endian, IFD0 with Make and Orientation 6, an Exif IFD with DateTimeOriginal
+	auto le16 = [](std::string& b, unsigned v) { b += (char)(v & 0xFF); b += (char)(v >> 8); };
+	auto le32 = [&](std::string& b, unsigned v) { le16(b, v & 0xFFFF); le16(b, v >> 16); };
+	std::string tiff = "II";
+	le16(tiff, 42);
+	le32(tiff, 8);
+	// IFD0 at 8: 3 entries (12 bytes each), next-IFD 0 -> ends at 8 + 2 + 36 + 4 = 50
+	le16(tiff, 3);
+	le16(tiff, 0x010F); le16(tiff, 2); le32(tiff, 6); le32(tiff, 50);	// Make "Canon\0" at 50
+	le16(tiff, 0x0112); le16(tiff, 3); le32(tiff, 1); le32(tiff, 6);
+	le16(tiff, 0x8769); le16(tiff, 4); le32(tiff, 1); le32(tiff, 56);	// Exif IFD at 56
+	le32(tiff, 0);
+	tiff += std::string("Canon\0", 6);
+	le16(tiff, 1);	// at 56: one entry, its text at 56 + 2 + 12 + 4 = 74
+	le16(tiff, 0x9003); le16(tiff, 2); le32(tiff, 20); le32(tiff, 74);
+	le32(tiff, 0);
+	tiff += std::string("2024:05:01 13:45:10\0", 20);
+	std::string app1 = std::string("Exif\0\0", 6) + tiff;
+	std::string jpeg = "\xFF\xD8\xFF\xE1";
+	jpeg += (char)((app1.size() + 2) >> 8);
+	jpeg += (char)((app1.size() + 2) & 0xFF);
+	jpeg += app1 + "\xFF\xDA";
+	ExifInfo e = parseExif(jpeg);
+	CHECK_EQ(e.orientation, 6);
+	CHECK_EQ(e.make, std::string("Canon"));
+	CHECK_EQ(e.taken, std::string("2024:05:01 13:45:10"));
+	CHECK_EQ(exifRotation(e.orientation), 90);
+	CHECK_EQ(exifDate(e.taken), std::string("2024-05-01 13:45"));
+	CHECK_EQ(parseExif("not a jpeg").orientation, 1);
+	CHECK_EQ(exifRotation(8), 270);
 }
 
 int main()
@@ -445,6 +526,7 @@ int main()
 	testSettings();
 	testResume();
 	testPlaylist();
+	testPhoto();
 	testBrowser();
 	testHistory();
 	testBattery();
