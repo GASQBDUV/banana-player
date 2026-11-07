@@ -180,12 +180,15 @@ All three are remembered.
 | Keep play history | On | Keeps Recent. Turning it off also deletes the history |
 | Button hotkeys | On | Off: buttons can't pause, skip or close while something plays (touch still can) |
 | Show hidden folders | Off | Shows folders you've hidden (they contain a `.hidden` file), so you can unhide them |
+| Battery percentage | Off | Shows the battery's percent beside its icon (the icon, with a bolt while charging, is always there) |
 | Clear play history | | Tap twice. Positions you stopped at are kept |
 
 ## More
 
 - **Info** (while playing): file, size, length, resolution, codecs, frame rate, bitrate, audio format, every track and
   the file's tags.
+- **Battery:** an icon on the bottom screen, red when it's low, with a bolt while charging (and its percent, if you
+  turn that on in Settings).
 - **Volume and brightness:** the keys show a level card on the top screen.
 - **Lock:** locks the touch screen while playing; Screen off still works. Hold the lock for a second to unlock.
 - **Screen off:** turns the bottom screen off to save battery. Touch it to turn it back on.

@@ -38,6 +38,8 @@ namespace bp
 		int musicShow = SHOW_ART, visualizer = VIS_BARS, loop = LOOP_OFF;
 		// folders with a ".hidden" file in them: listed (and their videos in Recent) only when this is on
 		bool showHiddenFolders = false;
+		// the battery's percent beside its icon on the bottom panel (the icon is always there)
+		bool batteryPercent = false;
 	};
 
 	std::string serializeSettings(const Settings& s);

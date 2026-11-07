@@ -1,5 +1,6 @@
 // The parts without a window: aspect modes, track labels, mpv's track-list, times.
 #include "aspect.h"
+#include "battery.h"
 #include "browser.h"
 #include "format.h"
 #include "history.h"
@@ -371,6 +372,35 @@ static void testHistory()
 	CHECK_EQ(back.items().empty(), true);
 }
 
+static void testBattery()
+{
+	char dir[] = "/tmp/bp-power-XXXXXX";
+	if (!mkdtemp(dir)) { failures++; return; }
+	std::string d = dir;
+	CHECK_EQ(readBattery(d + "/none").percent, -1);	// no supplies: no battery
+	mkdir((d + "/battery").c_str(), 0755);
+	mkdir((d + "/usb").c_str(), 0755);
+	std::ofstream(d + "/battery/type") << "Battery\n";
+	std::ofstream(d + "/battery/capacity") << "57\n";
+	std::ofstream(d + "/battery/status") << "Discharging\n";
+	std::ofstream(d + "/usb/type") << "USB\n";
+	std::ofstream(d + "/usb/online") << "0\n";
+	BatteryState b = readBattery(d);
+	CHECK_EQ(b.percent, 57);
+	CHECK_EQ(b.charging, false);
+	// the rk817's gauge says Discharging on the cable: the charger online says charging
+	std::ofstream(d + "/usb/online") << "1\n";
+	CHECK_EQ(readBattery(d).charging, true);
+	std::ofstream(d + "/usb/online") << "0\n";
+	std::ofstream(d + "/battery/status") << "Full\n";
+	CHECK_EQ(readBattery(d).charging, true);
+	CHECK_EQ(parseSettings("").batteryPercent, false);	// the percent: off by default
+	for (const char* f : {"/battery/type", "/battery/capacity", "/battery/status", "/usb/type", "/usb/online"}) unlink((d + f).c_str());
+	rmdir((d + "/battery").c_str());
+	rmdir((d + "/usb").c_str());
+	rmdir(dir);
+}
+
 static void testPlaylist()
 {
 	CHECK_EQ(isVideoFile("a.MKV"), true);
@@ -417,6 +447,7 @@ int main()
 	testPlaylist();
 	testBrowser();
 	testHistory();
+	testBattery();
 	testAspect();
 	testTime();
 	testLabels();

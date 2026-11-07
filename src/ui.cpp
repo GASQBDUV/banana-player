@@ -26,10 +26,11 @@ namespace bp
 	};
 
 	// the settings' on/off rows, after the style's
-	static const char* REMEMBER_LABELS[7] = {"Remember position", "Remember audio track", "Remember subtitles",
-		"Remember last folder", "Keep play history", "Button hotkeys", "Show hidden folders"};
-	static bool Settings::*const REMEMBER[7] = {&Settings::rememberPosition, &Settings::rememberAudio, &Settings::rememberSubs,
-		&Settings::rememberFolder, &Settings::keepHistory, &Settings::buttonHotkeys, &Settings::showHiddenFolders};
+	static const char* REMEMBER_LABELS[8] = {"Remember position", "Remember audio track", "Remember subtitles",
+		"Remember last folder", "Keep play history", "Button hotkeys", "Show hidden folders", "Battery percentage"};
+	static bool Settings::*const REMEMBER[8] = {&Settings::rememberPosition, &Settings::rememberAudio, &Settings::rememberSubs,
+		&Settings::rememberFolder, &Settings::keepHistory, &Settings::buttonHotkeys, &Settings::showHiddenFolders,
+		&Settings::batteryPercent};
 	static const char* RECENT = "\x01recent";
 	static const char* SHOW_SHORT[SHOWS] = {"Art", "Art+Viz", "Viz", "None"};	// MusicShow on a button	// the browser's recent videos: not a folder
 
@@ -783,7 +784,7 @@ namespace bp
 			p.paused, (long)std::floor(p.position), (long)p.duration, (int)p.aspect, p.loaded, a ? (long long)a->id : 0LL,
 			s ? (long long)s->id : 0LL, p.tracks.size(), dragging, (int)(dragFraction * 1000), quitArmed != 0, p.speed,
 			p.index(), p.count(), pressedBtn + touchLocked * 100 + (lockHoldAt != 0) * 1000, listTouch * 1000 + browseVersion + (clearArmed != 0) * 100000 + (int)p.history().items().size() * 1000000);
-		return buf + p.title + "|" + p.error + "|" + serializeSettings(p.settings) + (inMenu ? "|menu" + std::to_string(menuTab) : "") + (ctxOpen ? "|ctx" + std::to_string(ctxCursor) + std::to_string(pressedBtn) : "");
+		return buf + p.title + "|" + p.error + "|" + serializeSettings(p.settings) + "|bat" + std::to_string(battery.percent) + (battery.charging ? "c" : "") + (inMenu ? "|menu" + std::to_string(menuTab) : "") + (ctxOpen ? "|ctx" + std::to_string(ctxCursor) + std::to_string(pressedBtn) : "");
 	}
 
 	SDL_Texture* Ui::text(const std::string& s, int size, SDL_Color c)
@@ -875,6 +876,7 @@ namespace bp
 	void Ui::draw(const Player& p, bool force)
 	{
 		if (quitArmed && SDL_GetTicks() - quitArmed >= QUIT_WINDOW_MS) quitArmed = 0;
+		if (!batteryAt || SDL_GetTicks() - batteryAt >= 10000) readPower();
 		// the lock held long enough: released (the finger still down presses nothing)
 		if (touchLocked && lockHoldAt && SDL_GetTicks() - lockHoldAt >= UNLOCK_HOLD_MS)
 		{
@@ -930,6 +932,43 @@ namespace bp
 		else drawMain(p);
 		if (inMenu) drawTabs();
 		if (ctxOpen && page == Page::Browse) drawFolderMenu();
+	}
+
+	void Ui::readPower()
+	{
+		const char* base = getenv("BP_POWER_SUPPLY");
+		battery = readBattery(base ? base : "/sys/class/power_supply");
+		batteryAt = SDL_GetTicks();
+	}
+
+	void Ui::drawBattery(int right, int y, const Player& p)
+	{
+		if (battery.percent < 0) return;
+		// the body (an outline, filled to the charge) and its nub; the percent before it, the bolt before that
+		const int bw = 30, bh = 16;
+		int x = right - bw - 3;
+		SDL_Color ink = battery.charging ? YELLOW : battery.percent <= 15 ? RED : CREAM;
+		fill({x, y, bw, bh}, CREAM);
+		fill({x + 2, y + 2, bw - 4, bh - 4}, BG);
+		int level = (bw - 6) * battery.percent / 100;
+		if (level > 0) fill({x + 3, y + 3, level, bh - 6}, ink);
+		fill({x + bw, y + 5, 3, bh - 10}, CREAM);
+		int left = x;
+		if (p.settings.batteryPercent)
+		{
+			std::string pct = std::to_string(battery.percent) + "%";
+			drawText(pct, 0, battery.percent <= 15 && !battery.charging ? RED : CREAM, x - 6, y - 2, 0, 1);
+			left = x - 6 - (int)(textWidth(pct, 0) / sx) - 4;
+		}
+		if (battery.charging)
+		{
+			// a lightning bolt, 5x7 cells of 2
+			static const char* BOLT[7] = {"...##", "..##.", ".##..", "#####", "..##.", ".##..", "##..."};
+			int bx = left - 14, by = y + 1;
+			for (int r = 0; r < 7; r++)
+				for (int c = 0; c < 5; c++)
+					if (BOLT[r][c] == '#') fill({bx + c * 2, by + r * 2, 2, 2}, YELLOW);
+		}
 	}
 
 	void Ui::drawFolderMenu()
@@ -1004,7 +1043,8 @@ namespace bp
 			if (!inMenu)
 			{
 				std::string title = browseDir.empty() ? "Banana Player" : browseDir == RECENT ? "Recently watched" : baseName(browseDir);
-				drawText(title.empty() ? browseDir : title, 2, YELLOW, 24, 24, 470);
+				drawText(title.empty() ? browseDir : title, 2, YELLOW, 24, 24, battery.percent >= 0 ? 470 - BATTERY_W : 470);
+				drawBattery(496, 22, p);
 				if (!browseDir.empty() && browseDir != RECENT)
 				{
 					// where it is, from the first page's place it's in: "Videos/Show/Season 1"
@@ -1255,7 +1295,8 @@ namespace bp
 
 	void Ui::drawMain(const Player& p)
 	{
-		drawText(p.title.empty() ? "Opening..." : p.title, 2, CREAM, 24, 24, 592);
+		drawText(p.title.empty() ? "Opening..." : p.title, 2, CREAM, 24, 24, battery.percent >= 0 ? 592 - BATTERY_W : 592);
+		drawBattery(616, 26, p);
 		if (p.count() > 1)
 			drawText(std::to_string(p.index() + 1) + " / " + std::to_string(p.count()), 0, DIM, 616, 90, 0, 1);
 		if (!p.error.empty())

@@ -1,4 +1,5 @@
 #pragma once
+#include "battery.h"
 #include "browser.h"
 #include "input.h"
 #include "panel.h"
@@ -104,6 +105,12 @@ namespace bp
 		void openFolderMenu(int row);
 		void chooseFolderMenu(int item, Player& p);
 		void drawFolderMenu();
+		// the battery's icon (and percent, a bolt while charging), its right edge at right; read every 10 s
+		BatteryState battery;
+		Uint32 batteryAt = 0;
+		void readPower();
+		void drawBattery(int right, int y, const Player& p);
+		static constexpr int BATTERY_W = 110;	// what a title leaves for it
 		bool folderRow(int row) const;
 		Rect ctxRow(int item) const { return {136, 214 + item * 52, 368, 46}; }
 		// START's menu, over a video or the browser: tabs Recent (the browser's Recently watched), Settings, About,
@@ -191,7 +198,7 @@ namespace bp
 		// the menu's own tabs: QUIT_ROW and ABOUT_ROW match no row)
 		static constexpr int QUIT_ROW = -1, STYLE_ROW0 = 0, MUSIC_ROW = STYLE_KEYS, VIS_ROW = STYLE_KEYS + 1,
 			TOGGLE_ROW = STYLE_KEYS + 2;
-		static constexpr int SET_Y = 54, SET_H = 34, SET_ROWS = STYLE_KEYS + 10, SET_SHOWN = 9,
+		static constexpr int SET_Y = 54, SET_H = 34, SET_ROWS = STYLE_KEYS + 11, SET_SHOWN = 9,
 			CLEAR_ROW = SET_ROWS - 1, ABOUT_ROW = -2;
 		static constexpr int64_t STYLE_ROW = -2;	// the subtitle menu's last row: the settings page
 		static constexpr int QUIT_BTN = 10, BACK_BTN = 11, SCREEN_BTN = 12, INFO_BTN = 13, LOCK_BTN = 14, EXIT_BTN = 15;

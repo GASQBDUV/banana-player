@@ -11,6 +11,7 @@ namespace bp
 		{"keep-history", &Settings::keepHistory},
 		{"button-hotkeys", &Settings::buttonHotkeys},
 		{"show-hidden-folders", &Settings::showHiddenFolders},
+		{"battery-percent", &Settings::batteryPercent},
 	};
 
 	static const char* SHOW_IDS[SHOWS] = {"art", "both", "visualizer", "none"};
