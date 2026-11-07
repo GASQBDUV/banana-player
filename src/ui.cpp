@@ -28,19 +28,19 @@ namespace bp
 	};
 
 	// the settings' on/off rows (TOGGLE_ROW + their index)
-	static const char* REMEMBER_LABELS[10] = {"Remember position", "Remember audio track", "Remember subtitles",
+	static const char* REMEMBER_LABELS[11] = {"Remember position", "Remember audio track", "Remember subtitles",
 		"Remember last folder", "Keep play history", "Button hotkeys", "Show hidden folders", "Battery percentage",
-		"Keep zoom between photos", "Check automatically"};
-	static bool Settings::*const REMEMBER[10] = {&Settings::rememberPosition, &Settings::rememberAudio, &Settings::rememberSubs,
+		"Keep zoom between photos", "Check automatically", "Same for both screens"};
+	static bool Settings::*const REMEMBER[11] = {&Settings::rememberPosition, &Settings::rememberAudio, &Settings::rememberSubs,
 		&Settings::rememberFolder, &Settings::keepHistory, &Settings::buttonHotkeys, &Settings::showHiddenFolders,
-		&Settings::batteryPercent, &Settings::keepPhotoZoom, &Settings::checkUpdates};
+		&Settings::batteryPercent, &Settings::keepPhotoZoom, &Settings::checkUpdates, &Settings::sameBrightness};
 	static const struct { const char* name; const char* about; } GROUP_NAMES[] = {
 		{"Subtitles", "Font, size, colour, border"},
 		{"Music", "What's shown, visualizer"},
 		{"Photos", "Zoom, pan area"},
 		{"Remember", "Position, audio track, subtitles"},
 		{"Files", "Last folder, hidden folders, play history"},
-		{"Controls & screen", "Button hotkeys, battery percentage"},
+		{"Controls & screen", "Brightness, button hotkeys, battery percentage"},
 		{"Updates", "Check for a new version, update"},
 	};
 	static const char* RECENT = "\x01recent";
@@ -62,6 +62,10 @@ namespace bp
 	{
 		fontsDir = dir;
 		panel.init();
+		// tests: a fake /sys/class/backlight and /data/banana/backlight
+		if (const char* d = getenv("BP_BACKLIGHT_DIR")) backlight.sysDir = d;
+		if (const char* f = getenv("BP_BACKLIGHT_STORE")) backlight.store = f;
+		if (const char* v = getenv("BP_VOLUME_SCRIPT")) volume.script = v;
 		ren = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED);
 		if (!ren) ren = SDL_CreateRenderer(window, -1, SDL_RENDERER_SOFTWARE);
 		if (!ren) return false;
@@ -425,7 +429,19 @@ namespace bp
 		case GROUP_PHOTOS: return {T + 8, PAN_ROW, DRAG_ROW};
 		case GROUP_REMEMBER: return {T + 0, T + 1, T + 2};
 		case GROUP_FILES: return {T + 3, T + 6, T + 4, CLEAR_ROW};
-		case GROUP_CONTROLS: return {T + 5, T + 7};
+		case GROUP_CONTROLS:
+		{
+			// the brightness rows where there are backlights (the handheld)
+			std::vector<int> out;
+			// one row for both panels (Same for both screens), or one each
+			bool both = backlight.present(Backlight::TOP) && backlight.present(Backlight::BOTTOM);
+			if (backlight.present(Backlight::TOP)) out.push_back(TOP_LIGHT_ROW);
+			if (backlight.present(Backlight::BOTTOM) && !(both && sameBrightness)) out.push_back(BOTTOM_LIGHT_ROW);
+			if (both) out.push_back(T + 10);
+			out.push_back(T + 5);
+			out.push_back(T + 7);
+			return out;
+		}
 		case GROUP_UPDATES:
 		{
 			// a Store install (or a computer's build): the status alone
@@ -447,10 +463,237 @@ namespace bp
 		cursor = scroll = 0;
 	}
 
+	static int rowsIndexOf(const std::vector<int>& rows, int row)
+	{
+		for (size_t i = 0; i < rows.size(); i++)
+			if (rows[i] == row) return (int)i;
+		return -1;
+	}
+
+	std::vector<int> Ui::quickRows() const
+	{
+		std::vector<int> r;
+		if (volume.present()) r.push_back(Q_VOLUME);
+		bool top = backlight.present(Backlight::TOP), bottom = backlight.present(Backlight::BOTTOM);
+		if (top || bottom) r.push_back(Q_BRIGHT);
+		if (top && bottom && !sameBrightness) r.push_back(Q_BOTTOM);
+		if (top && bottom) r.push_back(Q_SAME);
+		r.push_back(Q_QUIT);
+		return r;
+	}
+
+	void Ui::toggleQuick(Player& p)
+	{
+		quickOpen = !quickOpen;
+		if (!quickOpen) return;
+		if (!panel.on()) panel.set(true);	// the bottom panel back, to see them
+		sameBrightness = p.settings.sameBrightness;
+		volumePct = volume.get();
+		quickCursor = 0;
+		quickDrag = false;
+		pressedBtn = -1;
+	}
+
+	void Ui::quickAdjust(int row, int dir, Player& p)
+	{
+		if (row == Q_VOLUME && volumePct >= 0)
+		{
+			// bananad's keys' step
+			volumePct = std::clamp((volumePct + (dir > 0 ? 5 : -1)) / 5 * 5, 0, 100);	// to the next five either way
+			volume.set(volumePct);
+		}
+		else if (row == Q_BRIGHT || row == Q_BOTTOM)
+		{
+			Backlight::Panel panelOf = row == Q_BOTTOM ? Backlight::BOTTOM : Backlight::TOP;
+			int pm = backlight.permille(panelOf);
+			if (pm >= 0) setBrightness(panelOf, stepBrightness(pm, dir), p);
+		}
+	}
+
+	void Ui::quickSetAt(int row, int x, Player& p)
+	{
+		Rect bar = quickBar(row);
+		double f = std::clamp((x - bar.x) / (double)bar.w, 0.0, 1.0);
+		if (rowsIndexOf(quickRows(), Q_VOLUME) == row && volumePct >= 0)
+		{
+			int v = (int)std::lround(f * 20) * 5;
+			if (v != volumePct)
+			{
+				volumePct = v;
+				volume.set(v);
+			}
+			return;
+		}
+		int which = quickRows()[row];
+		Backlight::Panel panelOf = which == Q_BOTTOM ? Backlight::BOTTOM : Backlight::TOP;
+		int pm = std::clamp((int)std::lround(f * 10) * 100, 100, 1000);
+		if (pm != backlight.permille(panelOf)) setBrightness(panelOf, pm, p);
+	}
+
+	void Ui::quickChoose(int row, Player& p)
+	{
+		if (row == Q_SAME)
+		{
+			Settings s = p.settings;
+			s.sameBrightness = !s.sameBrightness;
+			p.setSettings(s);
+			sameBrightness = s.sameBrightness;
+			// one level for both: the bottom to the top's
+			int pm = backlight.permille(Backlight::TOP);
+			if (sameBrightness && pm >= 100) backlight.set(Backlight::BOTTOM, pm);
+		}
+		else if (row == Q_QUIT) quitRequested = true;
+	}
+
+	bool Ui::quickKey(Button b, Player& p)
+	{
+		auto rows = quickRows();
+		int n = (int)rows.size();
+		quickCursor = std::clamp(quickCursor, 0, n - 1);
+		int row = rows[quickCursor];
+		switch (b)
+		{
+		case Button::Up: quickCursor = (quickCursor + n - 1) % n; break;
+		case Button::Down: quickCursor = (quickCursor + 1) % n; break;
+		case Button::Left: case Button::Right: quickAdjust(row, b == Button::Right ? 1 : -1, p); break;
+		case Button::A: quickChoose(row, p); break;
+		case Button::B: case Button::Start: quickOpen = false; break;
+		default: break;
+		}
+		return false;
+	}
+
+	bool Ui::quickPointer(const Pointer& pt, int x, int y, Player& p)
+	{
+		auto rows = quickRows();
+		auto barRow = [&](int i) { return rows[i] == Q_VOLUME || rows[i] == Q_BRIGHT || rows[i] == Q_BOTTOM; };
+		if (pt.kind == Pointer::Down)
+		{
+			pressedBtn = -1;
+			// outside: closed (the finger lifting presses nothing)
+			if (!quickPanel().hit(x, y))
+			{
+				quickOpen = false;
+				swallowTouch = true;
+				return false;
+			}
+			for (int i = 0; i < (int)rows.size(); i++)
+			{
+				if (!quickRowRect(i).hit(x, y)) continue;
+				quickCursor = i;
+				if (barRow(i) && quickMinus(i).hit(x, y)) pressedBtn = 300 + i * 4;
+				else if (barRow(i) && quickPlus(i).hit(x, y)) pressedBtn = 301 + i * 4;
+				else if (barRow(i) && Rect{quickBar(i).x - 6, quickRowRect(i).y, quickBar(i).w + 12, 54}.hit(x, y))
+				{
+					// the bar, as the progress bar: at once, and while the finger drags
+					quickDrag = true;
+					quickDragRow = i;
+					quickSetAt(i, x, p);
+				}
+				else if (!barRow(i)) pressedBtn = 302 + i * 4;
+			}
+			return false;
+		}
+		if (quickDrag)
+		{
+			quickSetAt(quickDragRow, x, p);
+			if (pt.kind == Pointer::Up) quickDrag = false;
+			return false;
+		}
+		if (pt.kind == Pointer::Up && pressedBtn >= 300)
+		{
+			int i = (pressedBtn - 300) / 4, what = (pressedBtn - 300) % 4;
+			pressedBtn = -1;
+			if (i >= (int)rows.size() || !quickRowRect(i).hit(x, y)) return false;
+			if (what == 0) quickAdjust(rows[i], -1, p);
+			else if (what == 1) quickAdjust(rows[i], 1, p);
+			else quickChoose(rows[i], p);
+		}
+		return false;
+	}
+
+	void Ui::drawQuick(const Player& p)
+	{
+		fill({0, 0, W, H}, {0, 0, 0, 170});
+		Rect pr = quickPanel();
+		fill(pr, TEAL);
+		fill({pr.x + 4, pr.y + 4, pr.w - 8, pr.h - 8}, BG);
+		drawText("Quick settings", 2, YELLOW, pr.x + 20, pr.y + 12);
+		auto rows = quickRows();
+		for (int i = 0; i < (int)rows.size(); i++)
+		{
+			Rect r = quickRowRect(i);
+			bool at = i == quickCursor;
+			int row = rows[i];
+			if (at) fill(r, {0x23, 0x43, 0x46, 120});
+			if (row == Q_QUIT)
+			{
+				fill(r, pressedBtn == 302 + i * 4 ? PRESSED : RED);
+				drawText("Quit Banana Player", 1, CREAM, r.x + r.w / 2, r.y + 12, r.w - 10, 2);
+				if (at) { fill({r.x, r.y, r.w, 3}, YELLOW); fill({r.x, r.y + r.h - 3, r.w, 3}, YELLOW); }
+				continue;
+			}
+			if (row == Q_SAME)
+			{
+				// a tick box
+				Rect box{r.x + 12, r.y + 13, 28, 28};
+				fill(box, CREAM);
+				fill({box.x + 3, box.y + 3, box.w - 6, box.h - 6}, BG);
+				if (p.settings.sameBrightness) fill({box.x + 7, box.y + 7, box.w - 14, box.h - 14}, YELLOW);
+				drawText("Same brightness for both screens", 1, at ? YELLOW : CREAM, r.x + 54, r.y + 14, r.w - 64);
+				continue;
+			}
+			int pct;
+			std::string label;
+			if (row == Q_VOLUME)
+			{
+				pct = volumePct;
+				label = "Volume";
+			}
+			else
+			{
+				int pm = backlight.permille(row == Q_BOTTOM ? Backlight::BOTTOM : Backlight::TOP);
+				pct = pm < 0 ? -1 : (pm + 5) / 10;
+				label = row == Q_BOTTOM ? "Bottom" : p.settings.sameBrightness ? "Brightness" : "Top";
+			}
+			drawText(label, 1, at ? YELLOW : CREAM, r.x + 12, r.y + 6, 220);
+			drawText(pct < 0 ? "-" : std::to_string(pct) + "%", 0, DIM, r.x + 12, r.y + 32, 220);
+			for (int k = 0; k < 2; k++)
+			{
+				Rect bt = k ? quickPlus(i) : quickMinus(i);
+				fill(bt, pressedBtn == 300 + i * 4 + k ? PRESSED : TEAL);
+				drawText(k ? "+" : "-", 2, CREAM, bt.x + bt.w / 2, bt.y + 6, 0, 2);
+			}
+			Rect bar = quickBar(i);
+			fill(bar, TEAL);
+			if (pct > 0) fill({bar.x, bar.y, bar.w * std::min(pct, 100) / 100, bar.h}, YELLOW);
+		}
+		drawText(p.settings.buttonHotkeys ? "UP/DOWN Choose   LEFT/RIGHT Change   F or B Close" : "Tap outside to close", 0, DIM,
+			W / 2, pr.y + pr.h - 26, 0, 2);
+	}
+
+	void Ui::setBrightness(Backlight::Panel panel, int pm, Player& p)
+	{
+		// Same for both screens: the other panel to the same level
+		if (p.settings.sameBrightness && backlight.present(Backlight::TOP) && backlight.present(Backlight::BOTTOM))
+		{
+			backlight.set(Backlight::TOP, pm);
+			backlight.set(Backlight::BOTTOM, pm);
+		}
+		else backlight.set(panel, pm);
+	}
+
 	void Ui::changeSetting(int row, int dir, Player& p)
 	{
 		if (row == CLEAR_ROW) { clearHistory(p); return; }
 		if (row == CHECK_ROW) { if (updater) updater->check(); return; }
+		if (row == TOP_LIGHT_ROW || row == BOTTOM_LIGHT_ROW)
+		{
+			Backlight::Panel panel = row == TOP_LIGHT_ROW ? Backlight::TOP : Backlight::BOTTOM;
+			int pm = backlight.permille(panel);
+			if (pm >= 0) setBrightness(panel, stepBrightness(pm, dir), p);
+			return;
+		}
 		if (row == INSTALL_ROW)
 		{
 			if (!updater) return;
@@ -516,6 +759,8 @@ namespace bp
 
 	bool Ui::press(Button b, Player& p)
 	{
+		sameBrightness = p.settings.sameBrightness;
+		if (quickOpen) return quickKey(b, p);
 		// Button hotkeys off: the buttons do nothing over a playing video (touch does it all); the pages opened from
 		// there by touch still take them
 		if (page == Page::Main && !p.settings.buttonHotkeys) return false;
@@ -862,6 +1107,7 @@ namespace bp
 		}
 		auto barFraction = [&] { return std::clamp((x - BAR.x) / (double)BAR.w, 0.0, 1.0); };
 
+		if (quickOpen) return quickPointer(pt, x, y, p);
 		// locked, over a video: Screen off goes through; a hold on the lock (draw() times it) releases it; nothing else
 		if (touchLocked && p.playing() && !p.playingPhoto() && page == Page::Main && pressedBtn != SCREEN_BTN)
 		{
@@ -1077,9 +1323,13 @@ namespace bp
 			snprintf(pb, sizeof pb, "|photo %.4f %.4f %.4f %d %d %d %d", v.zoom, v.panX, v.panY, v.rotate, v.fill, p.thumbId, p.photoWidth());
 			photo = pb;
 		}
-		std::string upd;
+		// the backlights' levels while their rows show (the keys change them too)
+		std::string upd = quickOpen ? "|quick" + std::to_string(quickCursor) + " " + std::to_string(volumePct) + " " + std::to_string(pressedBtn) +
+			" " + std::to_string(backlight.permille(Backlight::TOP)) + "," + std::to_string(backlight.permille(Backlight::BOTTOM)) : "";
+		upd += page == Page::Settings && setGroup == GROUP_CONTROLS
+			? "|bl" + std::to_string(backlight.permille(Backlight::TOP)) + "," + std::to_string(backlight.permille(Backlight::BOTTOM)) : "";
 		if (updater)
-			upd = "|upd" + std::to_string((int)updater->state()) + " " + std::to_string(updater->progress()) + " " + updater->available() +
+			upd += "|upd" + std::to_string((int)updater->state()) + " " + std::to_string(updater->progress()) + " " + updater->available() +
 				" " + std::to_string(popupShown(p)) + std::to_string(popupCursor) + std::to_string(pressedBtn);
 		// the dots of "Loading..." go round
 		if (p.loading() || p.thumbPending()) photo += "|loading" + std::to_string(SDL_GetTicks() / 400 % 4);
@@ -1174,6 +1424,7 @@ namespace bp
 
 	void Ui::draw(const Player& p, bool force)
 	{
+		sameBrightness = p.settings.sameBrightness;
 		if (quitArmed && SDL_GetTicks() - quitArmed >= QUIT_WINDOW_MS) quitArmed = 0;
 		// before the signature: "Again to clear" goes back to how it was when the second tap would no longer clear
 		if (clearArmed && SDL_GetTicks() - clearArmed >= QUIT_WINDOW_MS) clearArmed = 0;
@@ -1234,6 +1485,7 @@ namespace bp
 		if (inMenu) drawTabs();
 		if (ctxOpen && page == Page::Browse) drawFolderMenu();
 		if (popupShown(p)) drawUpdatePopup();
+		if (quickOpen) drawQuick(p);
 	}
 
 	void Ui::readPower()
@@ -1674,6 +1926,12 @@ namespace bp
 			{
 				label = "Visualizer";
 				value = visualizerLabel(p.settings.visualizer);
+			}
+			else if (row == TOP_LIGHT_ROW || row == BOTTOM_LIGHT_ROW)
+			{
+				label = row == BOTTOM_LIGHT_ROW ? "Bottom brightness" : sameBrightness ? "Brightness" : "Top brightness";
+				int pm = backlight.permille(row == TOP_LIGHT_ROW ? Backlight::TOP : Backlight::BOTTOM);
+				value = pm < 0 ? "-" : std::to_string((pm + 5) / 10) + "%";
 			}
 			else if (row == PAN_ROW)
 			{

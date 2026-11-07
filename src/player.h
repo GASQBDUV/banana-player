@@ -60,7 +60,8 @@ namespace bp
 		// called now and then: a photo's size, once mpv knows it (the view is set to it), and its thumbnail
 		void checkPhoto();
 		bool frameDue();
-		void render(int w, int h);
+		// mpv's result: < 0 when it couldn't draw (in the log, the first few times: a black top panel's cause)
+		int render(int w, int h);
 		void reportSwap();
 
 		void togglePause();
@@ -82,6 +83,10 @@ namespace bp
 		void hideLevel();
 		// the top panel with nothing playing: the icon, the name, where to pick something
 		void showIdle(bool on);
+		// the top panel's output made with nothing playing: mpv 0.40 makes force-window's only as it goes idle, and
+		// it's idle from the start, before force-window could be set (it needs the render context): black, logo and
+		// level cards unseen, till a file had played. An empty load fails at once and sends it through idle again
+		void wakeOutput();
 		// keeps the file's position and tracks in resume.tsv, as far as the settings say
 		void saveResume();
 		// back to no file (the browser): the place kept first
@@ -150,6 +155,7 @@ namespace bp
 		// the file opened and its track list known: the art's choice, the title, tracks gone missing
 		void fileReady();
 		bool readyPending = false;	// opened, its track list still to come
+		int wakeLoads = 0;			// wakeOutput's loads still to end (their failure is no file's)
 		void prop(const char* name, const std::string& value);
 		// an audio file: the visualizer (Audio display) and the title, artist and album over the top panel
 		void applyAudioDisplay();

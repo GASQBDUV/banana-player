@@ -57,6 +57,8 @@ namespace bp
 		bool dragBox = true;
 		// the built-in updater (a Ports install): look for a new release at each start, in the background
 		bool checkUpdates = true;
+		// one brightness for both panels (quick settings and Settings › Controls & screen); off: each its own
+		bool sameBrightness = true;
 		// its pop-up's "Not until tomorrow": not shown before this time (seconds since 1970)
 		long long updateRemindAfter = 0;
 	};

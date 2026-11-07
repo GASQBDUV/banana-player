@@ -4,7 +4,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Banana Player: a video and music player for BananaOS (github.com/JorreFog/BananaLinux) on the Anbernic RG DS / RG DS
 Plus (RK3568, aarch64, two 4:3 panels: 640×480 or 1024×768; the bottom one is a touchscreen). C++17, libmpv, SDL2,
-SDL2_ttf, zlib. `README.md` is for end users; `DEVELOPMENT.md` has the technical detail and the roadmap.
+SDL2_ttf, zlib. `README.md` is a short page for end users (what it is, install, the basics); every feature, control and setting
+is in `FEATURES.md` (a new one goes there); `DEVELOPMENT.md` has the technical detail and the roadmap.
 
 ## Commands
 
@@ -109,7 +110,7 @@ docs/make-screenshots.sh <library>                   # the README's docs/img/scr
   `file://` too); the `update` step prints its state. The Updater is never destroyed, so a download doesn't hold up
   quitting.
 - **Library code with no window** (`aspect`, `tracks`, `format`, `substyle`, `settings`, `resume`, `history`,
-  `playlist`, `browser`, `png`, `battery`, `photo`, `update`) builds as `bpcore` and is covered by `tests/core_test.cpp` (a hand-rolled `CHECK_EQ`).
+  `playlist`, `browser`, `png`, `battery`, `photo`, `update`, `backlight`) builds as `bpcore` and is covered by `tests/core_test.cpp` (a hand-rolled `CHECK_EQ`).
   Keep window/mpv-handle code out of these.
 - **Settings** are an INI-ish `key = value` file. New switches go in `Settings` plus the `REMEMBER` table in
   `settings.cpp`. In `ui.cpp`, the `REMEMBER`/`REMEMBER_LABELS` arrays, `TOGGLES` and the row ids (`TOGGLE_ROW`,
@@ -129,6 +130,15 @@ docs/make-screenshots.sh <library>                   # the README's docs/img/scr
     bananad keeps it dark after a wake.
   - **Bottom touchscreen:** found by its sysfs path (`fe5e0000.i2c`), because SDL can't tell the two touchscreens
     apart.
+  - **Brightness** (Settings › Controls & screen): each panel's own backlight, set as BananaOS's menu sets it:
+    `backlight1` is the top, `backlight0` the bottom, a level is thousandths of `max_brightness` written to sysfs, and
+    both levels go to `/data/banana/backlight` ("<top> <bottom>") for bananad to restore at boot. There's no other
+    interface: bananad reads sysfs at each brightness key. Tests use `BP_BACKLIGHT_DIR`/`BP_BACKLIGHT_STORE`.
+  - **Volume** (quick settings): BananaOS's own script, `/usr/libexec/banana/volume get | set N` (the percent the ear
+    hears, on whichever card plays: speakers, jack, Bluetooth), then SIGHUP to bananad so it stores it, as its menu
+    does. Never amixer directly. `volume.cpp` sets it on a thread, the latest value only; `BP_VOLUME_SCRIPT` in tests.
+  - **F** is shared with bananad (F + volume = brightness): the quick settings open as F lets go only if nothing came
+    between (no button, no L2, no level change).
   - **Battery:** `/sys/class/power_supply`, read as BananaOS's menu does. A charger that's online counts as charging,
     because the rk817 gauge says "Discharging" on the cable.
   - **Sound:** there's no sound server, so ALSA's plug does the channel mapping. Mono went to the left speaker only,

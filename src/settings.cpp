@@ -19,6 +19,7 @@ namespace bp
 		{"battery-percent", &Settings::batteryPercent},
 		{"keep-photo-zoom", &Settings::keepPhotoZoom},
 		{"check-updates", &Settings::checkUpdates},
+		{"same-brightness", &Settings::sameBrightness},
 	};
 
 	static const char* SHOW_IDS[SHOWS] = {"art", "both", "visualizer", "none"};

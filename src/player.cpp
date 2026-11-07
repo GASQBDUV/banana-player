@@ -384,6 +384,11 @@ namespace bp
 			}
 			case MPV_EVENT_END_FILE:
 			{
+				if (wakeLoads > 0)
+				{
+					wakeLoads--;	// wakeOutput's empty load, not a file of the person's
+					break;
+				}
 				auto* e = (mpv_event_end_file*)ev->data;
 				if (e->reason == MPV_END_FILE_REASON_ERROR) error = mpv_error_string(e->error);
 				else if (e->reason == MPV_END_FILE_REASON_EOF) finished = true;
@@ -453,7 +458,7 @@ namespace bp
 		return rc && (mpv_render_context_update(rc) & MPV_RENDER_UPDATE_FRAME);
 	}
 
-	void Player::render(int w, int h)
+	int Player::render(int w, int h)
 	{
 		mpv_opengl_fbo fbo{0, w, h, 0};
 		int flip = 1;
@@ -462,7 +467,7 @@ namespace bp
 			{MPV_RENDER_PARAM_FLIP_Y, &flip},
 			{MPV_RENDER_PARAM_INVALID, nullptr},
 		};
-		mpv_render_context_render(rc, params);
+		return mpv_render_context_render(rc, params);
 	}
 
 	void Player::reportSwap()
@@ -842,6 +847,13 @@ namespace bp
 		ev += "{\\an8\\pos(480,330)\\bord0\\shad0\\fnPixelify Sans\\fs72\\1c&H29B4F0&}Banana Player\n";
 		ev += "{\\an8\\pos(480,420)\\bord0\\shad0\\fnInter\\fs30\\1c&H7C868A&}Pick a video or a song on the bottom screen";
 		const char* cmd[] = {"osd-overlay", "3", "ass-events", ev.c_str(), "960", "720", "0", "no", "no", nullptr};
+		mpv_command_async(mpv, 0, cmd);
+	}
+
+	void Player::wakeOutput()
+	{
+		wakeLoads++;
+		const char* cmd[] = {"loadfile", "memory://", "replace", nullptr};
 		mpv_command_async(mpv, 0, cmd);
 	}
 

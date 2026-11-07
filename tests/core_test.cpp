@@ -6,6 +6,7 @@
 #include "history.h"
 #include "photo.h"
 #include "update.h"
+#include "backlight.h"
 #include "playlist.h"
 #include "resume.h"
 #include "settings.h"
@@ -609,6 +610,53 @@ static void testUpdate()
 	CHECK_EQ(t.tm_hour == 0 && t.tm_min == 0 && t.tm_sec == 0, true);
 }
 
+static void testBacklight()
+{
+	CHECK_EQ(stepBrightness(740, 1), 800);	// between steps (bananad's keys): to the next ten
+	CHECK_EQ(stepBrightness(740, -1), 700);
+	CHECK_EQ(stepBrightness(700, 1), 800);
+	CHECK_EQ(stepBrightness(700, -1), 600);
+	CHECK_EQ(stepBrightness(100, -1), 100);	// 10% at least: never off
+	CHECK_EQ(stepBrightness(1000, 1), 1000);
+
+	char dir[] = "/tmp/bp-backlight-XXXXXX";
+	if (!mkdtemp(dir)) { failures++; return; }
+	std::string d = dir;
+	Backlight bl;
+	bl.sysDir = d + "/sys";
+	bl.store = d + "/backlight";
+	for (const char* n : {"backlight0", "backlight1"})
+	{
+		mkdir((d + "/sys").c_str(), 0755);
+		mkdir((d + "/sys/" + n).c_str(), 0755);
+		std::ofstream(d + "/sys/" + n + "/max_brightness") << "1666\n";
+		std::ofstream(d + "/sys/" + n + "/brightness") << "833\n";
+	}
+	CHECK_EQ(bl.present(Backlight::TOP), true);
+	CHECK_EQ(bl.permille(Backlight::BOTTOM), 500);
+	// the top (backlight1) to 70%: sysfs as bananad rounds it, the store "<top> <bottom>"
+	CHECK_EQ(bl.set(Backlight::TOP, 700), true);
+	std::ifstream b1(d + "/sys/backlight1/brightness");
+	int v = 0;
+	b1 >> v;
+	CHECK_EQ(v, (1666 * 700 + 500) / 1000);
+	CHECK_EQ(bl.permille(Backlight::TOP), 700);
+	std::ifstream st(d + "/backlight");
+	int t = 0, b = 0;
+	st >> t >> b;
+	CHECK_EQ(t, 700);
+	CHECK_EQ(b, 500);	// the bottom as it was
+	// the bottom next: the top kept from the store
+	bl.set(Backlight::BOTTOM, 300);
+	std::ifstream st2(d + "/backlight");
+	st2 >> t >> b;
+	CHECK_EQ(t == 700 && b == 300, true);
+	Backlight none;
+	none.sysDir = d + "/none";
+	CHECK_EQ(bl.present(Backlight::TOP) && !none.present(Backlight::TOP), true);
+	system(("rm -rf " + d).c_str());
+}
+
 int main()
 {
 	testSpeed();
@@ -618,6 +666,7 @@ int main()
 	testPlaylist();
 	testPhoto();
 	testUpdate();
+	testBacklight();
 	testBrowser();
 	testHistory();
 	testBattery();

@@ -136,7 +136,7 @@ int main(int argc, char** argv)
 			{
 				int n = 0;
 				float v[4];
-				bool ok = buttonFromName(step) != Button::None || step == "info" || step == "page" || step == "update" || step == "rows" || step == "screenshot" || step.rfind("prop:", 0) == 0 || step.rfind("shot:", 0) == 0 ||
+				bool ok = buttonFromName(step) != Button::None || step == "info" || step == "page" || step == "update" || step == "F" || step == "rows" || step == "screenshot" || step.rfind("prop:", 0) == 0 || step.rfind("shot:", 0) == 0 ||
 					(sscanf(step.c_str(), "tap:%f:%f%n", &v[0], &v[1], &n) == 2 && n == (int)step.size()) ||
 					(sscanf(step.c_str(), "dtap:%f:%f%n", &v[0], &v[1], &n) == 2 && n == (int)step.size()) ||
 					(sscanf(step.c_str(), "hold:%f:%f%n", &v[0], &v[1], &n) == 2 && n == (int)step.size()) ||
@@ -157,6 +157,9 @@ int main(int argc, char** argv)
 		if (!file.empty() && stat(file.c_str(), &st) == 0 && S_ISDIR(st.st_mode)) startFolder.swap(file);
 	}
 	bool browserMode = file.empty();
+	// a file named "verbose" in the state folder (home/.config/banana-player on the card): mpv's verbose log, for a
+	// problem seen only on the handheld (it can't be given -v from the Ports shelf)
+	if (!opts.stateDir.empty() && exists(opts.stateDir + "/verbose")) opts.verbose = true;
 	if (font.empty()) font = findFont();
 	// the subtitle fonts are the bottom panel's font's neighbours
 	if (!font.empty() && font.rfind('/') != std::string::npos) opts.fontsDir = font.substr(0, font.rfind('/'));
@@ -221,7 +224,15 @@ int main(int argc, char** argv)
 		fprintf(stderr, "window: %s\n", SDL_GetError());
 		return 1;
 	}
+	// where the top window went, in the log (a black top panel: which display, what size)
+	{
+		int tw = 0, th = 0;
+		SDL_GetWindowSize(top, &tw, &th);
+		fprintf(stderr, "top: window on display %d, %dx%d; bottom on display %d\n", SDL_GetWindowDisplayIndex(top), tw, th,
+			bottom ? SDL_GetWindowDisplayIndex(bottom) : -1);
+	}
 	SDL_GLContext gl = SDL_GL_CreateContext(top);
+	if (!gl) fprintf(stderr, "top: GL context: %s\n", SDL_GetError());
 	if (!gl)
 	{
 		fprintf(stderr, "GL context: %s\n", SDL_GetError());
@@ -292,6 +303,7 @@ int main(int argc, char** argv)
 		{
 			ui.startBrowser(player, startFolder);
 			player.showIdle(true);
+			player.wakeOutput();
 		}
 		else
 		{
@@ -359,7 +371,7 @@ int main(int argc, char** argv)
 			player.osd(ok ? "Screenshot saved" : "Screenshot couldn't be saved");
 			fprintf(stderr, "screenshot %s%s: %s\n", dir.c_str(), name, ok ? "saved" : "failed");
 		};
-		bool fHeld = false, l2Down = false;
+		bool fHeld = false, fCombo = false, l2Down = false;
 
 		// the volume and brightness keys (bananad's): their level on a card over the top panel for 1.5 s
 		LevelWatch levelWatch;
@@ -371,13 +383,17 @@ int main(int argc, char** argv)
 			SDL_PushEvent(&ev);
 		});
 		Uint32 levelUntil = 0;
+		int topDraws = 0;
+		bool logNextTop = false;
 
 		Button held = Button::None;	// a pad's button held down: repeated as a key is
 		Uint32 heldNext = 0, savedAt = SDL_GetTicks();
 		// Both panels drawn again and again for a while after the start and a wake, and every few seconds after: on
 		// the handheld (SDL's KMSDRM) the first frames presented don't reach the panels, and a page that doesn't
 		// change would otherwise stay black till something did
-		Uint32 freshUntil = SDL_GetTicks() + 2000, refreshedAt = 0;
+		// (8 s at the start, not 2: the first launch after the handheld starts is slow, every shader compiled afresh, and
+		// mpv's first picture of the top panel can come after 2 s, then nothing drew it again for a while: black)
+		Uint32 freshUntil = SDL_GetTicks() + 8000, refreshedAt = 0;
 		while (running)
 		{
 			SDL_Event e;
@@ -395,6 +411,8 @@ int main(int argc, char** argv)
 				else if (e.type == SDL_JOYHATMOTION && e.jhat.value) fprintf(stderr, "input: joystick %d hat %d value %d\n", e.jhat.which, e.jhat.hat, e.jhat.value);
 				else if (e.type == SDL_KEYDOWN && !e.key.repeat)
 					fprintf(stderr, "input: key %s (scancode %d)\n", SDL_GetKeyName(e.key.keysym.sym), e.key.keysym.scancode);
+				// F + any other button: no quick settings as F lets go (the button does what it does)
+				if (e.type == SDL_CONTROLLERBUTTONDOWN && fHeld && e.cbutton.button != SDL_CONTROLLER_BUTTON_GUIDE) fCombo = true;
 				if (e.type == SDL_QUIT) running = false;
 				else if (e.type == SDL_WINDOWEVENT && e.window.event == SDL_WINDOWEVENT_CLOSE) running = false;
 				else if (e.type == SDL_WINDOWEVENT && (e.window.event == SDL_WINDOWEVENT_EXPOSED || e.window.event == SDL_WINDOWEVENT_SHOWN))
@@ -412,11 +430,20 @@ int main(int argc, char** argv)
 					if (e.type == evTouch) delete (Pointer*)e.user.data1;
 				}
 				else if ((e.type == SDL_CONTROLLERBUTTONDOWN || e.type == SDL_CONTROLLERBUTTONUP) && e.cbutton.button == SDL_CONTROLLER_BUTTON_GUIDE)
-					fHeld = e.type == SDL_CONTROLLERBUTTONDOWN;	// F, for F + L2
+				{
+					// F: with L2 a screenshot, with START out; alone (pressed and let go with nothing between, not
+					// even bananad's F + volume for brightness) the quick settings
+					bool down = e.type == SDL_CONTROLLERBUTTONDOWN;
+					if (down) fCombo = false;
+					else if (fHeld && !fCombo && haveUi) ui.toggleQuick(player);
+					fHeld = down;
+				}
+				else if (e.type == SDL_KEYDOWN && e.key.keysym.sym == SDLK_F1 && !e.key.repeat && haveUi) ui.toggleQuick(player);
 				else if (e.type == SDL_CONTROLLERAXISMOTION && e.caxis.axis == SDL_CONTROLLER_AXIS_TRIGGERLEFT)
 				{
 					// L2 is a trigger to SDL: pressed past half way
 					bool down = e.caxis.value > 16000;
+					if (down && fHeld) fCombo = true;
 					if (down && !l2Down && fHeld) screenshot();
 					l2Down = down;
 				}
@@ -437,6 +464,10 @@ int main(int argc, char** argv)
 				{
 					std::string* what = (std::string*)e.user.data1;
 					player.showLevel(*what == "brightness" ? "Brightness" : "Volume", e.user.code);
+					if (haveUi) ui.levelChanged(*what, e.user.code);	// the quick settings' bar follows the keys
+					fprintf(stderr, "level: %s %d (at %u ms)\n", what->c_str(), e.user.code, SDL_GetTicks());
+					logNextTop = true;
+					if (fHeld) fCombo = true;	// F + volume: bananad's brightness
 					levelUntil = SDL_GetTicks() + 1500;
 					renderPending = true;
 					delete what;
@@ -614,6 +645,7 @@ int main(int argc, char** argv)
 						{
 							for (auto& l : ui.browseLabels()) printf("    %s\n", l.c_str());
 						}
+						else if (step == "F") ui.toggleQuick(player);	// F alone
 						else if (step == "update")
 						{
 							static const char* names[] = {"off", "idle", "checking", "up-to-date", "available", "downloading", "ready", "failed"};
@@ -676,10 +708,17 @@ int main(int argc, char** argv)
 				if (!player.playing())
 				{
 					// nothing playing: mpv draws its black with the icon (and a level card if one is up)
-					player.render(w, h);
+					int r = player.render(w, h);
+					if (r < 0 && topDraws < 5) fprintf(stderr, "top: mpv couldn't draw (%d) at %u ms\n", r, SDL_GetTicks());
 					SDL_GL_SwapWindow(top);
 					player.reportSwap();
 					topDark = true;
+					// in the log: the top panel drawn with nothing playing (the first time, and after a level card),
+					// to find where a black top panel comes from
+					if (topDraws++ == 0 || logNextTop)
+						fprintf(stderr, "top: drawn idle %dx%d at %u ms (draw %d)%s\n", w, h, SDL_GetTicks(), topDraws,
+							logNextTop ? " with the level card" : "");
+					logNextTop = false;
 				}
 				// a new frame, or the same one again (paused, or a refresh)
 				else if (player.frameDue() || refresh)

@@ -6,6 +6,8 @@
 #include "player.h"
 #include "touch.h"
 #include "updater.h"
+#include "backlight.h"
+#include "volume.h"
 #include <SDL.h>
 #include <SDL_ttf.h>
 #include <string>
@@ -79,6 +81,12 @@ namespace bp
 		// the built-in updater (main's), and "Restart now": out with Updater::RESTART_CODE (launch.sh starts again)
 		Updater* updater = nullptr;
 		bool restartRequested = false;
+		// F alone: quick settings over whatever's on the bottom panel (volume, brightness, Same for both screens, Quit);
+		// F again, B or a tap outside closes them
+		void toggleQuick(Player& p);
+		bool quickShown() const { return quickOpen; }
+		// a level from bananad (its keys: "volume" or "brightness", percent): the quick settings show it
+		void levelChanged(const std::string& what, int percent) { if (what == "volume") volumePct = percent; }
 
 		// the bottom panel's backlight: off from its button, on again at the next touch
 		bool screenOn() const { return panel.on(); }
@@ -243,8 +251,30 @@ namespace bp
 		// the settings' rows by id: the subtitle style's, Music display, Visualizer, the switches (REMEMBER), Pan area,
 		// Clear play history. Shown a group at a time (settingRows), after a list of the groups
 		static constexpr int STYLE_ROW0 = 0, MUSIC_ROW = STYLE_KEYS, VIS_ROW = STYLE_KEYS + 1, TOGGLE_ROW = STYLE_KEYS + 2,
-			TOGGLES = 10, PAN_ROW = TOGGLE_ROW + TOGGLES, DRAG_ROW = PAN_ROW + 1, CLEAR_ROW = DRAG_ROW + 1,
-			CHECK_ROW = CLEAR_ROW + 1, INSTALL_ROW = CHECK_ROW + 1;
+			TOGGLES = 11, PAN_ROW = TOGGLE_ROW + TOGGLES, DRAG_ROW = PAN_ROW + 1, CLEAR_ROW = DRAG_ROW + 1,
+			CHECK_ROW = CLEAR_ROW + 1, INSTALL_ROW = CHECK_ROW + 1, TOP_LIGHT_ROW = INSTALL_ROW + 1,
+			BOTTOM_LIGHT_ROW = TOP_LIGHT_ROW + 1;
+		// the panels' backlights (BananaOS's own levels: changed here as its menu changes them)
+		Backlight backlight;
+		bool sameBrightness = true;	// the setting's, kept here for settingRows (no Player there)
+		Volume volume;
+		int volumePct = -1;	// as read when the quick settings opened, then as set there
+		bool quickOpen = false, quickDrag = false;
+		int quickCursor = 0, quickDragRow = -1;
+		enum QuickRow { Q_VOLUME, Q_BRIGHT, Q_BOTTOM, Q_SAME, Q_QUIT };
+		std::vector<int> quickRows() const;
+		bool quickKey(Button b, Player& p);
+		bool quickPointer(const Pointer& pt, int x, int y, Player& p);
+		void quickAdjust(int row, int dir, Player& p);
+		void quickSetAt(int row, int x, Player& p);	// a finger on the row's bar
+		void quickChoose(int row, Player& p);
+		void drawQuick(const Player& p);
+		Rect quickPanel() const { return {40, 36, 560, 408}; }
+		Rect quickRowRect(int i) const { return {56, 92 + i * 62, 528, 54}; }
+		Rect quickMinus(int i) const { Rect r = quickRowRect(i); return {r.x + 236, r.y + 3, 48, 48}; }
+		Rect quickBar(int i) const { Rect r = quickRowRect(i); return {r.x + 296, r.y + 17, 164, 20}; }
+		Rect quickPlus(int i) const { Rect r = quickRowRect(i); return {r.x + 472, r.y + 3, 48, 48}; }
+		void setBrightness(Backlight::Panel panel, int permille, Player& p);
 		static constexpr int SET_Y = 92, SET_H = 46, SET_SHOWN = 7, GROUP_Y = 58, GROUP_H = 54;
 		static constexpr int64_t STYLE_ROW = -2;	// the subtitle menu's last row: the settings page
 		static constexpr int QUIT_BTN = 10, BACK_BTN = 11, SCREEN_BTN = 12, INFO_BTN = 13, LOCK_BTN = 14, EXIT_BTN = 15,
