@@ -18,5 +18,7 @@ mkdir -p "$LOG_DIR"
 export LD_LIBRARY_PATH="$D/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 # the player's fonts for subtitles and titles in any script (BananaOS has none of its own)
 export FONTCONFIG_FILE="$D/share/banana-player/fonts.conf"
-# the last run's log, for a report: home/.config/banana-player/log.txt on the card
+# the last run's log, for a report: home/.config/banana-player/log.txt on the card, and the run before it beside it
+# (log.prev.txt: a relaunch doesn't lose what happened)
+[ -f "$LOG_DIR/log.txt" ] && mv -f "$LOG_DIR/log.txt" "$LOG_DIR/log.prev.txt"
 exec "$D/bin/banana-player" "$@" > "$LOG_DIR/log.txt" 2>&1

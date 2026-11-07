@@ -362,6 +362,17 @@ int main(int argc, char** argv)
 			bool got = SDL_WaitEventTimeout(&e, ui.animating() ? 16 : held != Button::None || player.loading() ? 20 : SDL_GetTicks() < freshUntil || levelUntil ? 50 : 250);
 			while (got)
 			{
+				// every button in the log (home/.config/banana-player/log.txt on the card), mapped or not: what the
+				// handheld's keys send, found by pressing them
+				if (e.type == SDL_CONTROLLERBUTTONDOWN)
+				{
+					const char* name = SDL_GameControllerGetStringForButton((SDL_GameControllerButton)e.cbutton.button);
+					fprintf(stderr, "input: pad button %d (%s)\n", e.cbutton.button, name ? name : "?");
+				}
+				else if (e.type == SDL_JOYBUTTONDOWN) fprintf(stderr, "input: joystick %d button %d\n", e.jbutton.which, e.jbutton.button);
+				else if (e.type == SDL_JOYHATMOTION && e.jhat.value) fprintf(stderr, "input: joystick %d hat %d value %d\n", e.jhat.which, e.jhat.hat, e.jhat.value);
+				else if (e.type == SDL_KEYDOWN && !e.key.repeat)
+					fprintf(stderr, "input: key %s (scancode %d)\n", SDL_GetKeyName(e.key.keysym.sym), e.key.keysym.scancode);
 				if (e.type == SDL_QUIT) running = false;
 				else if (e.type == SDL_WINDOWEVENT && e.window.event == SDL_WINDOWEVENT_CLOSE) running = false;
 				else if (e.type == SDL_WINDOWEVENT && (e.window.event == SDL_WINDOWEVENT_EXPOSED || e.window.event == SDL_WINDOWEVENT_SHOWN))
@@ -389,6 +400,8 @@ int main(int argc, char** argv)
 				}
 				else if (e.type == SDL_KEYDOWN && e.key.keysym.sym == SDLK_F12 && !e.key.repeat) screenshot();
 				else if (e.type == SDL_CONTROLLERBUTTONUP) held = Button::None;
+				// F + START: out at once, from anywhere (the place is kept as the loop ends)
+				else if (e.type == SDL_CONTROLLERBUTTONDOWN && fHeld && buttonFromEvent(e) == Button::Start) running = false;
 				else if (Button b = buttonFromEvent(e); b != Button::None)
 				{
 					if (e.type == SDL_CONTROLLERBUTTONDOWN && ui.repeats(b, player))
@@ -619,7 +632,9 @@ int main(int argc, char** argv)
 				refreshedAt = now;
 				topDark = false;	// the black of no video drawn again too
 			}
-			if (renderPending.exchange(false) || refresh || (!player.playing() && !topDark))
+			// with nothing playing the top panel is drawn on a change only, and mpv may not have the level card yet
+			// when it's asked to show: drawn again and again while the card is up
+			if (renderPending.exchange(false) || refresh || (!player.playing() && (!topDark || levelUntil)))
 			{
 				SDL_GL_MakeCurrent(top, gl);
 				int w, h;

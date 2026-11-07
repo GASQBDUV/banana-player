@@ -170,6 +170,7 @@ namespace bp
 		out += std::string("loop = ") + LOOP_IDS[s.loop] + "\n";
 		for (auto& r : REMEMBER) out += std::string(r.key) + " = " + (s.*r.field ? "yes" : "no") + "\n";
 		out += std::string("pan-area = ") + (s.panRight ? "right" : "left") + "\n";
+		out += std::string("pan-drag = ") + (s.dragBox ? "box" : "photo") + "\n";
 		return out;
 	}
 
@@ -197,6 +198,7 @@ namespace bp
 			for (int v = 0; v < LOOPS; v++)
 				if (key == "loop" && value == LOOP_IDS[v]) s.loop = v;
 			if (key == "pan-area" && (value == "left" || value == "right")) s.panRight = value == "right";
+			if (key == "pan-drag" && (value == "photo" || value == "box")) s.dragBox = value == "box";
 			// the one setting before 0.1.1, kept: auto, cover-bars, bars, waves, spectrum, cover
 			if (key == "audio-display")
 			{

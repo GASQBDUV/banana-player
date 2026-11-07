@@ -52,6 +52,9 @@ namespace bp
 		bool keepPhotoZoom = true;
 		// the photo's pan area on the bottom panel: the left half (the default) or the right
 		bool panRight = false;
+		// a drag in the pan area moves the photo (as on a phone: it follows the finger on the top panel) or the
+		// box over the small photo (the top panel follows the box)
+		bool dragBox = false;
 	};
 
 	std::string serializeSettings(const Settings& s);

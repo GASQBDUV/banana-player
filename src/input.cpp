@@ -7,7 +7,8 @@ namespace bp
 		switch (k)
 		{
 		case SDLK_RETURN: case SDLK_SPACE: return Button::A;
-		case SDLK_ESCAPE: case SDLK_BACKSPACE: return Button::B;
+		// the handheld's Back key (Linux's KEY_BACK) too
+		case SDLK_ESCAPE: case SDLK_BACKSPACE: case SDLK_AC_BACK: return Button::B;
 		case SDLK_x: return Button::X;
 		case SDLK_y: return Button::Y;
 		case SDLK_PAGEUP: case SDLK_q: return Button::L;

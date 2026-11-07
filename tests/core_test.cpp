@@ -428,6 +428,10 @@ static void testBattery()
 	Settings phb = parseSettings(serializeSettings(ph));
 	CHECK_EQ(phb.keepPhotoZoom, false);
 	CHECK_EQ(phb.panRight, true);
+	CHECK_EQ(parseSettings("").dragBox, false);	// a drag moves the photo, as on a phone
+	CHECK_EQ(parseSettings("pan-drag = box\n").dragBox, true);
+	ph.dragBox = true;
+	CHECK_EQ(parseSettings(serializeSettings(ph)).dragBox, true);
 	for (const char* f : {"/battery/type", "/battery/capacity", "/battery/status", "/usb/type", "/usb/online"}) unlink((d + f).c_str());
 	rmdir((d + "/battery").c_str());
 	rmdir((d + "/usb").c_str());

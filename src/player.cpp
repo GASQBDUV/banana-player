@@ -706,13 +706,15 @@ namespace bp
 		// ASS colours are &HBBGGRR&
 		percent = std::max(0, std::min(100, percent));
 		int fill = 260 * percent / 100;
+		// with nothing playing, under the icon and the name rather than over them
+		int dy = playing() ? 0 : 250;
 		char ev[1024];
 		snprintf(ev, sizeof ev,
-			"{\\an7\\pos(330,318)\\bord0\\shad0\\1c&H1C1617&\\1a&H20&\\p1}m 0 0 l 300 0 300 84 0 84{\\p0}\n"
-			"{\\an7\\pos(350,328)\\bord0\\shad0\\fs30\\1c&HE2EDF1&}%s  %d%%\n"
-			"{\\an7\\pos(350,372)\\bord0\\shad0\\1c&H464323&\\p1}m 0 0 l 260 0 260 12 0 12{\\p0}\n"
-			"{\\an7\\pos(350,372)\\bord0\\shad0\\1c&H29B4F0&\\p1}m 0 0 l %d 0 %d 12 0 12{\\p0}",
-			label.c_str(), percent, std::max(fill, 1), std::max(fill, 1));
+			"{\\an7\\pos(330,%d)\\bord0\\shad0\\1c&H1C1617&\\1a&H20&\\p1}m 0 0 l 300 0 300 84 0 84{\\p0}\n"
+			"{\\an7\\pos(350,%d)\\bord0\\shad0\\fs30\\1c&HE2EDF1&}%s  %d%%\n"
+			"{\\an7\\pos(350,%d)\\bord0\\shad0\\1c&H464323&\\p1}m 0 0 l 260 0 260 12 0 12{\\p0}\n"
+			"{\\an7\\pos(350,%d)\\bord0\\shad0\\1c&H29B4F0&\\p1}m 0 0 l %d 0 %d 12 0 12{\\p0}",
+			318 + dy, 328 + dy, label.c_str(), percent, 372 + dy, 372 + dy, std::max(fill, 1), std::max(fill, 1));
 		const char* cmd[] = {"osd-overlay", "2", "ass-events", ev, "960", "720", "10", "no", "no", nullptr};
 		mpv_command(mpv, cmd);
 	}

@@ -21,14 +21,14 @@
 
 <table>
   <tr>
-    <td align="center" width="33%"><img src="docs/img/screen-browser.png" alt="The file list on the bottom screen, the Banana Player logo on the top"><br><sub><b>Your files.</b> Folders and videos in order, with where you left off</sub></td>
+    <td align="center" width="33%"><img src="docs/img/screen-browser.png" alt="The file list on the bottom screen, the Banana Player logo on the top"><br><sub><b>Your files.</b> Folders, videos, music and photos, with where you left off</sub></td>
     <td align="center" width="33%"><img src="docs/img/screen-playing.png" alt="A film playing on the top screen, the controls on the bottom"><br><sub><b>Playing.</b> Seek, skip, speed and size, by button or touch</sub></td>
-    <td align="center" width="33%"><img src="docs/img/screen-subs.png" alt="The subtitle list"><br><sub><b>Subtitles and audio tracks,</b> remembered per file</sub></td>
+    <td align="center" width="33%"><img src="docs/img/screen-photo.png" alt="A photo zoomed in on the top screen, the pan area and its buttons on the bottom"><br><sub><b>Photos.</b> Zoom in and look around with the pan area</sub></td>
   </tr>
   <tr>
-    <td align="center"><img src="docs/img/screen-music.png" alt="A song with its album art and a visualizer"><br><sub><b>Music,</b> with album art, a visualizer, or both</sub></td>
-    <td align="center"><img src="docs/img/screen-settings.png" alt="The settings, with a subtitle preview"><br><sub><b>Settings,</b> with a live subtitle preview</sub></td>
-    <td align="center"><img src="docs/img/screen-info.png" alt="Media info: codec, resolution, frame rate"><br><sub><b>Media info:</b> codec, resolution, bitrate, tracks</sub></td>
+    <td align="center"><img src="docs/img/screen-music.png" alt="A song with its album art inside the Circle visualizer"><br><sub><b>Music,</b> with album art, a visualizer, or both (here: Circle)</sub></td>
+    <td align="center"><img src="docs/img/screen-subs.png" alt="The subtitle list"><br><sub><b>Subtitles and audio tracks,</b> remembered per file</sub></td>
+    <td align="center"><img src="docs/img/screen-settings.png" alt="Settings › Subtitles, with a subtitle preview"><br><sub><b>Settings</b> in groups, with a live subtitle preview</sub></td>
   </tr>
 </table>
 
@@ -49,11 +49,11 @@
 ## Install
 
 > [!TIP]
-> **Latest: [Banana Player 0.1.3](https://github.com/tonywei92/banana-player/releases/tag/v0.1.3)** (tested on an RG DS
+> **Latest: [Banana Player 0.2.0](https://github.com/tonywei92/banana-player/releases/tag/v0.2.0)** (tested on an RG DS
 > Plus with BananaOS).
 
-1. **Download** `BananaPlayer-0.1.3-aarch64.zip` from
-   [the release](https://github.com/tonywei92/banana-player/releases/tag/v0.1.3) (all versions:
+1. **Download** `BananaPlayer-0.2.0-aarch64.zip` from
+   [the release](https://github.com/tonywei92/banana-player/releases/tag/v0.2.0) (all versions:
    [Releases](https://github.com/tonywei92/banana-player/releases)).
 2. **Unzip it into `roms/ports`** on your BananaOS SD card, with a card reader or over Wi-Fi with BananaOS's file
    sharing (`\\<handheld address>\banana`). You should end up with:
@@ -120,14 +120,16 @@ its folder on that file.
 | **Y** | Video: choose subtitles · Music: Bars → Waves → Spectrum → Circle |
 | **SELECT** | Video: Fit → Fill → Stretch · Music: Album art → Art + visualizer → Visualizer → None |
 | **START** | Menu: Recent, Settings, About, Exit |
-| **B twice** | Close the video (back to the list) |
+| **B** (or **Back**) **twice** | Close the video (back to the list) |
 | **F + L2** | Screenshot of both screens (saved in the card's `screenshots` folder) |
+| **F + START** | Quit Banana Player at once (anywhere; your place is kept) |
 
 **By touch:**
 - **Progress bar:** touch it to jump there. Hold and drag to scrub, and the picture follows your finger.
 - **Buttons:** they act when you lift your finger, so slide off one to cancel.
 - **Lists:** tap to choose, drag to scroll.
-- **Close:** tap twice.
+- **Close:** tap **<** (top left) or Close twice.
+- **<** in the file list goes up a folder (at the top: tap twice to quit).
 
 Under the progress bar you'll see the time played, the time left (at the current speed) and the total length.
 
@@ -141,7 +143,7 @@ Under the progress bar you'll see the time played, the time left (at the current
 | **L3** (press the stick) | Rotate a quarter turn |
 | **SELECT** | Fit (the whole photo) or Fill (the screen filled) |
 | **START** | Menu |
-| **B twice** | Close the photo |
+| **B** (or **Back**) **twice** | Close the photo |
 
 See [Photos](#photos) for the touch screen.
 
@@ -149,8 +151,8 @@ See [Photos](#photos) for the touch screen.
 
 | Button | What it does |
 |---|---|
-| **A** | Open the folder or play the file |
-| **B** | Up one folder (twice at the top to quit) |
+| **A** (or tap it) | Open the folder or play the file |
+| **B** or **Back** | Up one folder (twice at the top to quit) |
 | **UP / DOWN** | Move |
 | **LEFT / RIGHT** or **L / R** | Page up / down |
 | **X** | On a folder: Hide folder / Unhide folder (or hold the folder on the touch screen) |
@@ -168,9 +170,11 @@ Four tabs. Switch with **L/R** or a tap; **B** or **START** closes it.
 ## Photos
 
 Pick a photo in the file list. The bottom screen shows the photo small, in the **pan area** (on the left; Settings ›
-Photos can put it on the right), with a box around the part you see on top. The pan area works like a photo on a phone:
+Photos can put it on the right), with a box around the part you see on top:
 
-- **Drag** to move the photo. Let go while moving and it glides on.
+- **Drag** to move the photo, as on a phone: it follows your finger on the top screen. Or, with Settings › Photos ›
+  **Drag moves: The box**, drag the box over the small photo and the top screen follows the box. Let go while moving
+  and it glides on.
 - **Double-tap** to zoom to 200% on that spot. Double-tap again to see all of it.
 - **Tap** somewhere on the small photo to look there.
 - **Swipe** left or right while the whole photo is shown to go to the next or previous one.
@@ -213,6 +217,7 @@ Settings opens on six groups; pick one with **A** or a tap, and **B** goes back 
 | **Music** | Music display, Visualizer | Album art, Bars | What the top screen shows for music (also on SELECT and Y while a song plays) |
 | **Photos** | Keep zoom between photos | On | The next photo opens at the same zoom and place. Off: each opens whole |
 | | Pan area | Left | Which side of the bottom screen the photo's pan area is on |
+| | Drag moves | The photo | A drag in the pan area moves the photo (like a phone), or the box over the small photo |
 | **Remember** | Remember position | On | Reopening a file continues where you stopped |
 | | Remember audio track | On | Keeps each file's audio track; a new file starts in the language you chose last |
 | | Remember subtitles | On | The same, for subtitles |

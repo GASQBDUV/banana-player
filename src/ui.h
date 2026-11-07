@@ -229,10 +229,13 @@ namespace bp
 		// the settings' rows by id: the subtitle style's, Music display, Visualizer, the switches (REMEMBER), Pan area,
 		// Clear play history. Shown a group at a time (settingRows), after a list of the groups
 		static constexpr int STYLE_ROW0 = 0, MUSIC_ROW = STYLE_KEYS, VIS_ROW = STYLE_KEYS + 1, TOGGLE_ROW = STYLE_KEYS + 2,
-			TOGGLES = 9, PAN_ROW = TOGGLE_ROW + TOGGLES, CLEAR_ROW = PAN_ROW + 1;
+			TOGGLES = 9, PAN_ROW = TOGGLE_ROW + TOGGLES, DRAG_ROW = PAN_ROW + 1, CLEAR_ROW = DRAG_ROW + 1;
 		static constexpr int SET_Y = 92, SET_H = 46, SET_SHOWN = 7, GROUP_Y = 60, GROUP_H = 58;
 		static constexpr int64_t STYLE_ROW = -2;	// the subtitle menu's last row: the settings page
-		static constexpr int QUIT_BTN = 10, BACK_BTN = 11, SCREEN_BTN = 12, INFO_BTN = 13, LOCK_BTN = 14, EXIT_BTN = 15;
+		static constexpr int QUIT_BTN = 10, BACK_BTN = 11, SCREEN_BTN = 12, INFO_BTN = 13, LOCK_BTN = 14, EXIT_BTN = 15,
+			BACK_ICON = 16;	// "<" at the top left of the browser and the player: B
+		void drawBackIcon();
+		bool backIconShown(const Player& p) const { return (page == Page::Browse && !inMenu) || (page == Page::Main && p.playing()); }
 		static constexpr Uint32 UNLOCK_HOLD_MS = 1000;	// buttonRect's ids beside the grid's 0..9
 		static constexpr int SET_ARROW_X = 372;	// a settings row's left arrow: a tap left of the value's middle steps back
 	};

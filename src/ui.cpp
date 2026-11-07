@@ -252,11 +252,11 @@ namespace bp
 
 	void Ui::dropTouch()
 	{
-		// a finger still down on what's gone presses nothing on what comes
+		// a finger still down on what's gone presses nothing on what comes (as it lifts); none down: nothing to drop
+		if (panTouch || listTouch || dragging || pressedBtn >= 0) swallowTouch = true;
 		panTouch = panMoved = listTouch = dragging = false;
 		pressedBtn = -1;
 		flickAt = tapAt = holdAt = 0;
-		swallowTouch = true;
 	}
 
 	void Ui::fitList()
@@ -418,7 +418,7 @@ namespace bp
 			return out;
 		}
 		case GROUP_MUSIC: return {MUSIC_ROW, VIS_ROW};
-		case GROUP_PHOTOS: return {T + 8, PAN_ROW};
+		case GROUP_PHOTOS: return {T + 8, PAN_ROW, DRAG_ROW};
 		case GROUP_REMEMBER: return {T + 0, T + 1, T + 2};
 		case GROUP_FILES: return {T + 3, T + 6, T + 4, CLEAR_ROW};
 		case GROUP_CONTROLS: return {T + 5, T + 7};
@@ -441,6 +441,7 @@ namespace bp
 		else if (row == MUSIC_ROW) s.musicShow = ((s.musicShow + dir) % SHOWS + SHOWS) % SHOWS;
 		else if (row == VIS_ROW) s.visualizer = ((s.visualizer + dir) % VISUALIZERS + VISUALIZERS) % VISUALIZERS;
 		else if (row == PAN_ROW) s.panRight = !s.panRight;
+		else if (row == DRAG_ROW) s.dragBox = !s.dragBox;
 		else s.*REMEMBER[row - TOGGLE_ROW] = !(s.*REMEMBER[row - TOGGLE_ROW]);
 		p.setSettings(s);
 	}
@@ -688,8 +689,12 @@ namespace bp
 		{
 			if (std::abs(dx) > 8 || std::abs(dy) > 8) panMoved = true;
 			if (!panMoved) return false;
-			// the photo goes with the finger: the pan area stands for the top panel
-			p.setPhotoView(v.zoom, panStartX + dx / (double)PAN_W / sc.x, panStartY + dy / (double)PAN_H / sc.y);
+			// Drag moves the photo: it goes with the finger, the pan area standing for the top panel. The box: it
+			// goes with the finger over the small photo (its centre is minus the pan, in shares of the photo as
+			// drawn here), the top panel showing what's in it
+			Rect tr = thumbRect(p);
+			if (p.settings.dragBox) p.setPhotoView(v.zoom, panStartX - dx / (double)tr.w, panStartY - dy / (double)tr.h);
+			else p.setPhotoView(v.zoom, panStartX + dx / (double)PAN_W / sc.x, panStartY + dy / (double)PAN_H / sc.y);
 			// its speed, smoothed over the last moves, for a flick
 			Uint32 dt = std::max<Uint32>(1, now - lastAt);
 			flickVX = 0.6 * (x - lastX) / (double)dt + 0.4 * flickVX;
@@ -745,7 +750,9 @@ namespace bp
 		PhotoScale sc = p.photoScaleNow();
 		const Player::PhotoView& v = p.photo();
 		double x0 = v.panX, y0 = v.panY;
-		p.setPhotoView(v.zoom, x0 + flickVX * dt / PAN_W / sc.x, y0 + flickVY * dt / PAN_H / sc.y);
+		Rect tr = thumbRect(p);
+		if (p.settings.dragBox) p.setPhotoView(v.zoom, x0 - flickVX * dt / tr.w, y0 - flickVY * dt / tr.h);
+		else p.setPhotoView(v.zoom, x0 + flickVX * dt / PAN_W / sc.x, y0 + flickVY * dt / PAN_H / sc.y);
 		// slowing, and stopped at an edge
 		double decay = std::exp(-(double)dt / 300);
 		flickVX = p.photo().panX == x0 ? 0 : flickVX * decay;
@@ -762,12 +769,13 @@ namespace bp
 		if (id == INFO_BTN) return {268, 434, 108, 38};
 		if (id == LOCK_BTN) return {148, 434, 108, 38};
 		if (id == EXIT_BTN) return {170, 200, 300, 80};
+		if (id == BACK_ICON) return {8, 12, 48, 48};
 		return {24 + id % 5 * BTN_STEP, id / 5 ? ROW2_Y : ROW1_Y, BTN_W, BTN_H};
 	}
 
 	bool Ui::act(int id, Player& p)
 	{
-		if (id == QUIT_BTN) return pressAnyway(Button::B, p);
+		if (id == QUIT_BTN || id == BACK_ICON) return pressAnyway(Button::B, p);
 		if (id == BACK_BTN) return press(Button::B, p);	// up a folder, out of a page, or (the first page) leave
 		if (id == SCREEN_BTN) { panel.set(false); return false; }
 		if (id == EXIT_BTN) { quitRequested = true; return false; }
@@ -923,9 +931,12 @@ namespace bp
 		}
 
 		bool quitTap = (page == Page::Main && buttonRect(QUIT_BTN).hit(x, y)) ||
-			(page == Page::Browse && browseDir.empty() && buttonRect(BACK_BTN).hit(x, y));
+			(backIconShown(p) && buttonRect(BACK_ICON).hit(x, y));
 		if (!quitTap) quitArmed = 0;
-		if (page != Page::Main && buttonRect(BACK_BTN).hit(x, y)) { pressedBtn = BACK_BTN; return false; }
+		// "<": B (up a folder; twice, out of what plays or, from the first page, out of the player)
+		if (backIconShown(p) && buttonRect(BACK_ICON).hit(x, y)) { pressedBtn = BACK_ICON; return false; }
+		// the pages' own Back (the browser has "<" instead)
+		if (page != Page::Main && !(page == Page::Browse && !inMenu) && buttonRect(BACK_BTN).hit(x, y)) { pressedBtn = BACK_BTN; return false; }
 		if (page == Page::Info || page == Page::About)
 		{
 			if (y < INFO_Y) return false;
@@ -1263,6 +1274,13 @@ namespace bp
 		drawText("A Quit   L/R Tabs   B Back", 0, DIM, W / 2, 444, 0, 2);
 	}
 
+	void Ui::drawBackIcon()
+	{
+		Rect b = buttonRect(BACK_ICON);
+		fill(b, pressedBtn == BACK_ICON ? PRESSED : quitArmed ? YELLOW : TEAL);
+		drawText("<", 2, quitArmed ? BG : CREAM, b.x + b.w / 2, b.y + 6, 0, 2);
+	}
+
 	void Ui::drawBack(const char* label)
 	{
 		Rect b = buttonRect(BACK_BTN);
@@ -1278,8 +1296,9 @@ namespace bp
 			if (!inMenu)
 			{
 				std::string title = browseDir.empty() ? "Banana Player" : browseDir == RECENT ? "Recently watched" : baseName(browseDir);
-				drawText(title.empty() ? browseDir : title, 2, YELLOW, 24, 24, battery.percent >= 0 ? 470 - BATTERY_W : 470);
-				drawBattery(496, 22, p);
+				drawBackIcon();
+				drawText(title.empty() ? browseDir : title, 2, YELLOW, 68, 24, battery.percent >= 0 ? 548 - BATTERY_W : 548);
+				drawBattery(616, 26, p);
 				if (!browseDir.empty() && browseDir != RECENT)
 				{
 					// where it is, from the first page's place it's in: "Videos/Show/Season 1"
@@ -1293,8 +1312,6 @@ namespace bp
 						}
 					drawText(where, 0, DIM, 24, 60, 470);
 				}
-				bool leaving = browseDir.empty() && !p.playing();
-				drawBack(leaving ? (quitArmed ? "Again?" : "Quit") : "Back");
 			}
 		}
 		else
@@ -1479,6 +1496,11 @@ namespace bp
 				label = "Pan area";
 				value = p.settings.panRight ? "Right" : "Left";
 			}
+			else if (row == DRAG_ROW)
+			{
+				label = "Drag moves";
+				value = p.settings.dragBox ? "The box" : "The photo";
+			}
 			else
 			{
 				label = REMEMBER_LABELS[row - TOGGLE_ROW];
@@ -1546,7 +1568,8 @@ namespace bp
 	void Ui::drawPhoto(const Player& p)
 	{
 		std::string name = p.currentPath().substr(p.currentPath().rfind('/') + 1);
-		drawText(!p.title.empty() ? p.title : !p.error.empty() ? name : "Opening...", 2, CREAM, 24, 24, battery.percent >= 0 ? 592 - BATTERY_W : 592);
+		drawBackIcon();
+		drawText(!p.title.empty() ? p.title : !p.error.empty() ? name : "Opening...", 2, CREAM, 68, 24, battery.percent >= 0 ? 548 - BATTERY_W : 548);
 		drawBattery(616, 26, p);
 		Rect pan = panRect(p);
 		fill(pan, SCREEN);
@@ -1593,7 +1616,8 @@ namespace bp
 		std::string zoom = "Zoom " + std::to_string((int)std::lround(v.zoom * 100)) + "%";
 		if (p.photoWidth() > 0) zoom += "   " + std::to_string(p.photoWidth()) + " x " + std::to_string(p.photoHeight());
 		drawText(zoom, 0, CREAM, pan.x, pan.y + pan.h + 10, pan.w);
-		drawText(maxPan(sc.x) > 0 || maxPan(sc.y) > 0 ? "Drag to move · double-tap: zoom out" : "Swipe: next · double-tap: zoom in",
+		drawText(maxPan(sc.x) > 0 || maxPan(sc.y) > 0 ? (p.settings.dragBox ? "Drag the box · double-tap: zoom out" : "Drag to move · double-tap: zoom out")
+			: "Swipe: next · double-tap: zoom in",
 			0, DIM, pan.x, pan.y + pan.h + 36, pan.w);
 
 		bool hints = p.settings.buttonHotkeys;
@@ -1635,7 +1659,8 @@ namespace bp
 	{
 		if (p.playingPhoto()) { drawPhoto(p); return; }
 		std::string name = p.currentPath().substr(p.currentPath().rfind('/') + 1);
-		drawText(!p.title.empty() ? p.title : !p.error.empty() ? name : "Opening...", 2, CREAM, 24, 24, battery.percent >= 0 ? 592 - BATTERY_W : 592);
+		drawBackIcon();
+		drawText(!p.title.empty() ? p.title : !p.error.empty() ? name : "Opening...", 2, CREAM, 68, 24, battery.percent >= 0 ? 548 - BATTERY_W : 548);
 		drawBattery(616, 26, p);
 		if (p.count() > 1)
 			drawText(std::to_string(p.index() + 1) + " / " + std::to_string(p.count()), 0, DIM, 616, 90, 0, 1);

@@ -91,7 +91,7 @@ docs/make-screenshots.sh <library>                   # the README's docs/img/scr
 - The player runs as a Port (`run-port` runs `Banana Player.sh`) or a Store app (`run-store-app` runs `launch.sh`).
   Both give it its own session, `HOME=/data/home` and `SDL_KMSDRM_FIRST=DSI-2` (the top panel is SDL display 0).
   `run-port` also darkens the bottom backlight, and `launch.sh` turns it back on. State lives in `$XDG_CONFIG_HOME/banana-player`; the log is
-  `home/.config/banana-player/log.txt` on the card (overwritten every launch).
+  `home/.config/banana-player/log.txt` on the card (the run before it: `log.prev.txt`).
 - Behaviour on BananaOS:
   - **Lid / sleep:** bananad SIGSTOPs the process group to sleep and SIGCONTs it on wake; the player pauses on
     `SW_LID` and on `SIGCONT`.
@@ -114,6 +114,9 @@ docs/make-screenshots.sh <library>                   # the README's docs/img/scr
   `docs/bananalinux-hw-decoding-request.md`).
 - The panels use the Nintendo button layout: A is the east button, which is `SDL_CONTROLLER_BUTTON_B`. The RG DS Plus
   has one stick, the left, and it clicks (L3, `SDL_CONTROLLER_BUTTON_LEFTSTICK`).
+- F is SDL's `GUIDE` button and L2 a trigger axis (handled in `main.cpp`, not `Button`): F + L2 screenshot, F + START
+  quits. The Back key is mapped to B as `SDLK_AC_BACK` (unconfirmed on the
+  handheld); every button press is logged as `input: ...` to find what a key sends.
 - Photos are scaled to 4096 pixels at most: the RK3566's GPU (Mali-G52, Panfrost) may take no texture over 8192
   (unverified), and a 50 MP photo's would be 200 MB.
 
