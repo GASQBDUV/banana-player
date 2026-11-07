@@ -7,6 +7,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <fstream>
 #include <sstream>
 #include <string>
@@ -15,7 +16,7 @@
 
 namespace bp
 {
-	enum Observed : uint64_t { TIME_POS = 1, DURATION, PAUSE, TRACK_LIST, MEDIA_TITLE, AID, SID, SPEED };
+	enum Observed : uint64_t { TIME_POS = 1, DURATION, PAUSE, TRACK_LIST, MEDIA_TITLE, AID, SID, SPEED, METADATA };
 	// screenshot-raw's answers for the photo's thumbnail: this plus the load they were asked in
 	static const uint64_t THUMB_REPLY = 1000;
 	// the panels' shape (both are 4:3)
@@ -64,6 +65,11 @@ namespace bp
 		opt("input-default-bindings", "no");
 		opt("input-vo-keyboard", "no");
 		opt("osc", "no");
+		// none of mpv's own scripts (they load even with config=no): each file waits on their hooks as it opens
+		// (ytdl_hook, auto_profiles...), a stall at every Next. Options this mpv doesn't have are refused, harmlessly
+		for (const char* o : {"ytdl", "load-scripts", "load-stats-overlay", "load-osd-console", "load-auto-profiles",
+				 "load-select", "load-commands", "load-context-menu", "load-positioning"})
+			opt(o, "no");
 		opt("sub-auto", "fuzzy");			// movie.srt, movie.en.srt... next to movie.mkv
 		// the style from settings.conf is for plain subtitles; ASS/SSA keep their own (only sub-scale reaches
 		// them, and we leave it)
@@ -98,10 +104,11 @@ namespace bp
 		mpv_observe_property(mpv, TIME_POS, "time-pos", MPV_FORMAT_DOUBLE);
 		mpv_observe_property(mpv, DURATION, "duration", MPV_FORMAT_DOUBLE);
 		mpv_observe_property(mpv, PAUSE, "pause", MPV_FORMAT_FLAG);
-		mpv_observe_property(mpv, TRACK_LIST, "track-list", MPV_FORMAT_NONE);
+		// the track list and the tags come with their change (a read of them, as a file opens, waits for mpv while
+		// mpv waits for this thread to draw); a track chosen changes the list too
+		mpv_observe_property(mpv, TRACK_LIST, "track-list", MPV_FORMAT_NODE);
+		mpv_observe_property(mpv, METADATA, "metadata", MPV_FORMAT_NODE);
 		mpv_observe_property(mpv, MEDIA_TITLE, "media-title", MPV_FORMAT_STRING);
-		mpv_observe_property(mpv, AID, "aid", MPV_FORMAT_NONE);
-		mpv_observe_property(mpv, SID, "sid", MPV_FORMAT_NONE);
 		mpv_observe_property(mpv, SPEED, "speed", MPV_FORMAT_DOUBLE);
 		mpv_set_wakeup_callback(mpv, wakeup, ctx);
 		setAspect(aspect);
@@ -134,9 +141,15 @@ namespace bp
 		mpv = nullptr;
 	}
 
+	// Settings and commands are sent without waiting for mpv's answer (it takes them in order): while it switches
+	// files mpv waits for this thread to draw the top panel, and a call that waited for mpv meanwhile held both
+	// till mpv gave up ("mpv_render_context_render() not being called or stuck"): seconds on the handheld at each
+	// Next. Only a read (get) waits
 	void Player::prop(const char* name, const std::string& value)
 	{
-		mpv_set_property_string(mpv, name, value.c_str());
+		const char* v = value.c_str();
+		mpv_set_property_async(mpv, 0, name, MPV_FORMAT_STRING, &v);
+		if (!strcmp(name, "lavfi-complex")) graphSet = value;	// known here, not asked of mpv (a read waits)
 	}
 
 	void Player::open(const std::vector<std::string>& list, int index)
@@ -190,6 +203,7 @@ namespace bp
 		isPhoto = isPhotoFile(path);
 		loadSerial++;
 		loadAt = ticks();
+		readyPending = false;
 		started = false;
 		thumb.clear();
 		thumbW = thumbH = 0;
@@ -200,9 +214,26 @@ namespace bp
 		photoW = photoH = fileTurn = exifTurn = 0;
 
 		showIdle(false);
-		// the last file's visualizer off first: with a filter graph on them, mpv's tracks can't be chosen (aid, sid
-		// below)
-		prop("lavfi-complex", "");
+		// A song's picture is chosen before it opens, as far as it can be known: a filter graph changed (or taken off
+		// and put back) between songs closes and opens the sound output again, which takes the handheld a second or
+		// more. The art's graph ([vid1]) only where the art is sure (a cover file: a song without the track it names
+		// doesn't open at all); else the visualizer alone, or (Album art) a guess from the folder's last song, put right
+		// at FILE_LOADED (applyAudioDisplay)
+		std::string graph;
+		if (isAudio)
+		{
+			size_t slash = path.rfind('/');
+			std::string dir = slash == std::string::npos ? "." : path.substr(0, slash);
+			bool cover = folderHasCover(path), guessArt = cover || (dir == lastArtDir && lastArt);
+			if (settings.musicShow == SHOW_VIS) graph = graphFor(settings.visualizer, false);
+			else if (settings.musicShow == SHOW_NONE) graph = blankGraph();
+			else if (settings.musicShow == SHOW_BOTH) graph = graphFor(settings.visualizer, cover);
+			else graph = guessArt ? "" : blankGraph();
+		}
+		// the same graph as the last song's: kept. Else the last file's off first: under a graph mpv's tracks can't
+		// be chosen (aid, sid below)
+		bool keepGraph = !graph.empty() && graphSet == graph;
+		if (!keepGraph) prop("lavfi-complex", "");
 
 		// what this file is remembered with; mpv's options are global, so each one is set for every file
 		const ResumeEntry* e = isPhoto ? nullptr : resume.find(path);
@@ -211,8 +242,9 @@ namespace bp
 		if (settings.rememberPosition && !isAudio && e && e->position >= 0) snprintf(start, sizeof start, "%.3f", e->position);
 		prop("start", start);
 
-		wantAid = settings.rememberAudio && e && e->aid > 0 ? e->aid : 0;
-		prop("aid", wantAid ? std::to_string(wantAid) : "auto");
+		// (a graph takes the song's first audio track itself: no track to choose)
+		wantAid = graph.empty() && settings.rememberAudio && e && e->aid > 0 ? e->aid : 0;
+		if (graph.empty()) prop("aid", wantAid ? std::to_string(wantAid) : "auto");
 		std::string alang = opts.lang;
 		if (settings.rememberAudio && !resume.lastAudioLang.empty()) alang = resume.lastAudioLang + (alang.empty() ? "" : "," + alang);
 		prop("alang", alang);
@@ -225,15 +257,13 @@ namespace bp
 			sid = e->sid ? std::to_string(e->sid) : "no";
 		}
 		else if (settings.rememberSubs && !e && resume.lastSubOff) sid = "no";
-		prop("sid", sid);
+		if (graph.empty()) prop("sid", sid);
+		else wantSid = 0;
 		std::string slang = opts.lang;
 		if (settings.rememberSubs && !resume.lastSubLang.empty()) slang = resume.lastSubLang + (slang.empty() ? "" : "," + slang);
 		prop("slang", slang);
 
-		// a visualizer is set before the file opens; a video has none
-		// (the art's choices wait for the file: they depend on whether it has art)
-		if (isAudio && settings.musicShow == SHOW_VIS) prop("lavfi-complex", graphFor(settings.visualizer, false));
-		if (isAudio && settings.musicShow == SHOW_NONE) prop("lavfi-complex", blankGraph());
+		if (!graph.empty() && !keepGraph) prop("lavfi-complex", graph);
 		// Loop one: the song again and again (mpv's own); a video never loops; a photo stays (an animated one goes round)
 		prop("loop-file", isPhoto || (isAudio && settings.loop == LOOP_ONE) ? "inf" : "no");
 
@@ -279,7 +309,7 @@ namespace bp
 		}
 
 		const char* cmd[] = {"loadfile", path.c_str(), "replace", nullptr};
-		mpv_command(mpv, cmd);
+		mpv_command_async(mpv, 0, cmd);
 	}
 
 	void Player::pollEvents()
@@ -299,29 +329,45 @@ namespace bp
 				case DURATION: duration = p->format == MPV_FORMAT_DOUBLE ? *(double*)p->data : -1; break;
 				case PAUSE: paused = p->format == MPV_FORMAT_FLAG && *(int*)p->data; break;
 				case SPEED: if (p->format == MPV_FORMAT_DOUBLE) speed = *(double*)p->data; break;
-				case MEDIA_TITLE: title = p->format == MPV_FORMAT_STRING ? *(char**)p->data : ""; break;
-				case TRACK_LIST: case AID: case SID: refreshTracks(); break;
+				case MEDIA_TITLE:
+					title = p->format == MPV_FORMAT_STRING ? *(char**)p->data : "";
+					if (isAudio && loaded) updateOverlay();	// it can come after the file's start
+					break;
+				case TRACK_LIST:
+					refreshTracks(p->format == MPV_FORMAT_NODE ? (mpv_node*)p->data : nullptr);
+					if (loaded && readyPending && !tracks.empty()) fileReady();
+					break;
+				case METADATA:
+				{
+					// the song's artist and album, for its title over the top panel (any case: ID3's are lower)
+					tagArtist.clear();
+					tagAlbum.clear();
+					auto* n = p->format == MPV_FORMAT_NODE ? (mpv_node*)p->data : nullptr;
+					if (n && n->format == MPV_FORMAT_NODE_MAP)
+						for (int i = 0; i < n->u.list->num; i++)
+						{
+							std::string k = n->u.list->keys[i];
+							for (char& c : k) c = (char)tolower((unsigned char)c);
+							if (n->u.list->values[i].format != MPV_FORMAT_STRING) continue;
+							if (k == "artist") tagArtist = n->u.list->values[i].u.string;
+							else if (k == "album") tagAlbum = n->u.list->values[i].u.string;
+						}
+					if (isAudio && loaded) updateOverlay();
+					break;
+				}
 				}
 				break;
 			}
 			case MPV_EVENT_FILE_LOADED:
 			{
 				loaded = true;
+				loadedAt = ticks();
 				audioChecks = 0;
 				audioCheckAt = ticks() + 1500;
-				refreshTracks();
-				// a remembered track that isn't there any more (a subtitle file taken away): mpv's own choice instead
-				auto missing = [&](TrackType type, int64_t id) {
-					for (auto& t : tracks)
-						if (t.type == type && t.id == id) return false;
-					return true;
-				};
-				if (wantAid > 0 && missing(TrackType::Audio, wantAid)) prop("aid", "auto");
-				if (wantSid > 0 && missing(TrackType::Sub, wantSid)) prop("sid", "auto");
-				if (isAudio && (settings.musicShow == SHOW_ART || settings.musicShow == SHOW_BOTH)) applyAudioDisplay();
-				updateOverlay();
-				// a photo's name and its place in the folder, for a moment
-				if (isPhoto) osd(baseName(playlist[current]) + (count() > 1 ? "   " + std::to_string(current + 1) + " / " + std::to_string(count()) : ""), 2000);
+				// what needs the file's tracks waits for its list, if that comes after this event (not read here: as
+				// mpv sets the picture up it waits for this thread to draw, and a read would wait for mpv)
+				if (!tracks.empty()) fileReady();
+				else readyPending = true;
 				break;
 			}
 			case MPV_EVENT_COMMAND_REPLY:
@@ -341,7 +387,13 @@ namespace bp
 			}
 			case MPV_EVENT_PLAYBACK_RESTART:
 				// this file's (it comes after its FILE_LOADED): one left over from the last file's seek isn't
-				if (loaded) started = true;
+				if (loaded && !started)
+				{
+					started = true;
+					// in the log: how long a file takes to start, from the press (the handheld's numbers)
+					fprintf(stderr, "timing: %s started in %llu ms (opened in %llu)\n", baseName(currentPath()).c_str(),
+						(unsigned long long)(ticks() - loadAt), (unsigned long long)(loadedAt - loadAt));
+				}
 				break;
 			case MPV_EVENT_SHUTDOWN:
 				quit = true;
@@ -349,6 +401,7 @@ namespace bp
 			case MPV_EVENT_LOG_MESSAGE:
 			{
 				auto* m = (mpv_event_log_message*)ev->data;
+				if (opts.verbose) fprintf(stderr, "%6llu ", (unsigned long long)(ticks() % 1000000));
 				fprintf(stderr, "[%s] %s: %s", m->level, m->prefix, m->text);
 				break;
 			}
@@ -357,12 +410,31 @@ namespace bp
 		}
 	}
 
-	void Player::refreshTracks()
+	void Player::fileReady()
 	{
-		mpv_node node;
-		if (mpv_get_property(mpv, "track-list", MPV_FORMAT_NODE, &node) < 0) return;
-		tracks = parseTrackList(&node);
-		mpv_free_node_contents(&node);
+		readyPending = false;
+		const Track* a = selected(TrackType::Audio);
+		const Track* s = selected(TrackType::Sub);
+		seenAid = a ? a->id : -1;
+		seenSid = s ? s->id : 0;
+		// a remembered track that isn't there any more (a subtitle file taken away): mpv's own choice instead
+		auto missing = [&](TrackType type, int64_t id) {
+			for (auto& t : tracks)
+				if (t.type == type && t.id == id) return false;
+			return true;
+		};
+		if (wantAid > 0 && missing(TrackType::Audio, wantAid)) prop("aid", "auto");
+		if (wantSid > 0 && missing(TrackType::Sub, wantSid)) prop("sid", "auto");
+		if (isAudio && (settings.musicShow == SHOW_ART || settings.musicShow == SHOW_BOTH)) applyAudioDisplay();
+		updateOverlay();
+		// a photo's name and its place in the folder, for a moment
+		if (isPhoto) osd(baseName(playlist[current]) + (count() > 1 ? "   " + std::to_string(current + 1) + " / " + std::to_string(count()) : ""), 2000);
+	}
+
+	void Player::refreshTracks(mpv_node* node)
+	{
+		if (!node) return;
+		tracks = parseTrackList(node);
 		if (loaded && !tracks.empty())
 		{
 			const Track* a = selected(TrackType::Audio);
@@ -415,14 +487,14 @@ namespace bp
 		audioChecks++;
 		fprintf(stderr, "banana-player: no sound output; opening the sound device again (try %d)\n", audioChecks);
 		const char* cmd[] = {"ao-reload", nullptr};
-		mpv_command(mpv, cmd);
+		mpv_command_async(mpv, 0, cmd);
 		audioCheckAt = ticks() + 1500;
 	}
 
 	void Player::checkSongEnd()
 	{
 		if (!isAudio || !loaded || finished || !(duration > 0) || position < duration + 0.25) return;
-		if (get("lavfi-complex").empty()) return;	// no graph: mpv ends the file itself
+		if (graphSet.empty()) return;	// no graph: mpv ends the file itself
 		if (settings.loop == LOOP_ONE) seekFraction(0);
 		else finished = true;
 	}
@@ -441,7 +513,7 @@ namespace bp
 			if (spinnerStep >= 0)
 			{
 				const char* cmd[] = {"osd-overlay", "4", "none", "", nullptr};
-				mpv_command(mpv, cmd);
+				mpv_command_async(mpv, 0, cmd);
 				spinnerStep = -1;
 			}
 			return;
@@ -464,12 +536,13 @@ namespace bp
 		}
 		ev += "{\\an8\\pos(480,390)\\bord2\\shad0\\fnInter\\fs30\\1c&HE2EDF1&}Loading";
 		const char* cmd[] = {"osd-overlay", "4", "ass-events", ev.c_str(), "960", "720", "20", "no", "no", nullptr};
-		mpv_command(mpv, cmd);
+		mpv_command_async(mpv, 0, cmd);
 	}
 
 	void Player::checkPhoto()
 	{
-		if (!isPhoto || !loaded) return;
+		// (after the start: a read waits for mpv, which may be waiting for this thread to draw while it opens a file)
+		if (!isPhoto || !loaded || !started) return;
 		if (!photoW)
 		{
 			int w = atoi(get("video-params/dw").c_str()), h = atoi(get("video-params/dh").c_str());
@@ -573,10 +646,10 @@ namespace bp
 			py = view.panY;
 			turn = (exifTurn + view.rotate) % 360;
 		}
-		mpv_set_property(mpv, "video-zoom", MPV_FORMAT_DOUBLE, &zoom);
-		mpv_set_property(mpv, "video-pan-x", MPV_FORMAT_DOUBLE, &px);
-		mpv_set_property(mpv, "video-pan-y", MPV_FORMAT_DOUBLE, &py);
-		mpv_set_property(mpv, "video-rotate", MPV_FORMAT_INT64, &turn);
+		mpv_set_property_async(mpv, 0, "video-zoom", MPV_FORMAT_DOUBLE, &zoom);
+		mpv_set_property_async(mpv, 0, "video-pan-x", MPV_FORMAT_DOUBLE, &px);
+		mpv_set_property_async(mpv, 0, "video-pan-y", MPV_FORMAT_DOUBLE, &py);
+		mpv_set_property_async(mpv, 0, "video-rotate", MPV_FORMAT_INT64, &turn);
 	}
 
 	void Player::setPhotoView(double zoom, double panX, double panY)
@@ -612,7 +685,7 @@ namespace bp
 	void Player::togglePause()
 	{
 		const char* cmd[] = {"cycle", "pause", nullptr};
-		mpv_command(mpv, cmd);
+		mpv_command_async(mpv, 0, cmd);
 	}
 
 	void Player::pauseNow()
@@ -626,26 +699,26 @@ namespace bp
 	{
 		std::string s = std::to_string(seconds);
 		const char* cmd[] = {"seek", s.c_str(), "relative", nullptr};
-		mpv_command(mpv, cmd);
+		mpv_command_async(mpv, 0, cmd);
 	}
 
 	void Player::scrub(double fraction)
 	{
 		std::string s = std::to_string(fraction * 100.0);
 		const char* cmd[] = {"seek", s.c_str(), "absolute-percent+keyframes", nullptr};
-		mpv_command(mpv, cmd);
+		mpv_command_async(mpv, 0, cmd);
 	}
 
 	void Player::seekFraction(double fraction)
 	{
 		std::string s = std::to_string(fraction * 100.0);
 		const char* cmd[] = {"seek", s.c_str(), "absolute-percent+exact", nullptr};
-		mpv_command(mpv, cmd);
+		mpv_command_async(mpv, 0, cmd);
 	}
 
 	void Player::setSpeed(double s)
 	{
-		mpv_set_property(mpv, "speed", MPV_FORMAT_DOUBLE, &s);
+		mpv_set_property_async(mpv, 0, "speed", MPV_FORMAT_DOUBLE, &s);
 	}
 
 	void Player::selectTrack(TrackType type, int64_t id)
@@ -717,7 +790,7 @@ namespace bp
 			"{\\an7\\pos(350,%d)\\bord0\\shad0\\1c&H29B4F0&\\p1}m 0 0 l %d 0 %d 12 0 12{\\p0}",
 			318 + dy, 328 + dy, label.c_str(), percent, 372 + dy, 372 + dy, std::max(fill, 1), std::max(fill, 1));
 		const char* cmd[] = {"osd-overlay", "2", "ass-events", ev, "960", "720", "10", "no", "no", nullptr};
-		mpv_command(mpv, cmd);
+		mpv_command_async(mpv, 0, cmd);
 	}
 
 	void Player::showIdle(bool on)
@@ -725,7 +798,7 @@ namespace bp
 		if (!on)
 		{
 			const char* cmd[] = {"osd-overlay", "3", "none", "", nullptr};
-			mpv_command(mpv, cmd);
+			mpv_command_async(mpv, 0, cmd);
 			return;
 		}
 		// the icon as ASS drawings, a run of pixels a rectangle, one event a colour; on a 960x720 canvas
@@ -753,20 +826,20 @@ namespace bp
 		ev += "{\\an8\\pos(480,330)\\bord0\\shad0\\fnPixelify Sans\\fs72\\1c&H29B4F0&}Banana Player\n";
 		ev += "{\\an8\\pos(480,420)\\bord0\\shad0\\fnInter\\fs30\\1c&H7C868A&}Pick a video or a song on the bottom screen";
 		const char* cmd[] = {"osd-overlay", "3", "ass-events", ev.c_str(), "960", "720", "0", "no", "no", nullptr};
-		mpv_command(mpv, cmd);
+		mpv_command_async(mpv, 0, cmd);
 	}
 
 	void Player::hideLevel()
 	{
 		const char* cmd[] = {"osd-overlay", "2", "none", "", nullptr};
-		mpv_command(mpv, cmd);
+		mpv_command_async(mpv, 0, cmd);
 	}
 
 	void Player::osd(const std::string& text, int ms)
 	{
 		std::string d = std::to_string(ms);
 		const char* cmd[] = {"show-text", text.c_str(), d.c_str(), nullptr};
-		mpv_command(mpv, cmd);
+		mpv_command_async(mpv, 0, cmd);
 	}
 
 	void Player::saveResume()
@@ -795,7 +868,7 @@ namespace bp
 		tracks.clear();
 		position = duration = -1;
 		const char* cmd[] = {"stop", nullptr};
-		mpv_command(mpv, cmd);
+		mpv_command_async(mpv, 0, cmd);
 		isAudio = isPhoto = false;
 		checkLoading();	// the spinner down
 		applyPhotoView();
@@ -848,10 +921,14 @@ namespace bp
 
 	void Player::applyAudioDisplay()
 	{
+		// for the next song's guess (load): an album's songs mostly all have art, or none
+		size_t slash = currentPath().rfind('/');
+		lastArtDir = slash == std::string::npos ? "." : currentPath().substr(0, slash);
+		lastArt = hasCover(tracks);
 		int show = shownMusic();
 		std::string graph = show == SHOW_ART ? "" : show == SHOW_NONE ? blankGraph() : graphFor(settings.visualizer, show == SHOW_BOTH);
-		bool had = !get("lavfi-complex").empty();
-		if (get("lavfi-complex") != graph) prop("lavfi-complex", graph);
+		bool had = !graphSet.empty();
+		if (graphSet != graph) prop("lavfi-complex", graph);
 		if (graph.empty() && had)
 		{
 			// a graph taken off leaves no track chosen: the song's sound and its art back
@@ -881,10 +958,10 @@ namespace bp
 		if (!isAudio)
 		{
 			const char* cmd[] = {"osd-overlay", "1", "none", "", nullptr};
-			mpv_command(mpv, cmd);
+			mpv_command_async(mpv, 0, cmd);
 			return;
 		}
-		std::string title = get("media-title"), artist = get("metadata/by-key/Artist"), album = get("metadata/by-key/Album");
+		std::string title = this->title, artist = tagArtist, album = tagAlbum;
 		// over the art alone: at the bottom; with a visualizer (along the bottom): at the top; alone: in the middle, bigger
 		int show = shownMusic();
 		const char* at = show == SHOW_ART ? "{\\an2}" : show == SHOW_NONE ? "{\\an5}" : "{\\an8}";
@@ -893,7 +970,7 @@ namespace bp
 		if (!artist.empty()) text += "\\N{\\fs" + std::to_string(big * 3 / 4) + "}" + assText(artist);
 		if (!album.empty()) text += "\\N{\\fs" + std::to_string(big * 2 / 3) + "}{\\c&HB4B4B4&}" + assText(album);
 		const char* cmd[] = {"osd-overlay", "1", "ass-events", text.c_str(), "0", "720", "0", "no", "no", nullptr};
-		mpv_command(mpv, cmd);
+		mpv_command_async(mpv, 0, cmd);
 	}
 
 	std::string Player::get(const char* name) const

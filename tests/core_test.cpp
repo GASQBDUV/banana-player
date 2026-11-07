@@ -485,6 +485,10 @@ static void testPlaylist()
 	CHECK_EQ(media.size(), (size_t)2);
 	CHECK_EQ(index, 1);
 	if (media.size() == 2) CHECK_EQ(media[0], d + "/b.mkv");
+	CHECK_EQ(folderHasCover(d + "/d.mp3"), false);	// a.jpg is no cover's name
+	std::ofstream(d + "/Folder.JPG") << "x";
+	CHECK_EQ(folderHasCover(d + "/d.mp3"), true);
+	unlink((d + "/Folder.JPG").c_str());
 	for (const char* n : {"a.jpg", "b.mkv", "c.PNG", "d.mp3"}) unlink((d + "/" + n).c_str());
 	rmdir(dir);
 }

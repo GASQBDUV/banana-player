@@ -22,8 +22,9 @@ docs/make-screenshots.sh <library>                   # the README's docs/img/scr
   (`A,B,X,Y,L,R,Up,Down,Left,Right,Start,Select,L3`), `tap:X:Y`, `dtap:X:Y`, `drag:X1:Y1:X2:Y2`, `hold:X:Y` (in the
   bottom panel's 640×480 layout units), `info`, `page`, `rows` (the browser's rows, in view or not), `prop:NAME` (any mpv property),
   `shot:NAME` (both panels to `$BP_SHOTS/NAME-{top,bottom}.png`), `screenshot`. Use `--state-dir` with a scratch dir
-  so runs don't share settings/resume/history. The state line can lag one step behind (mpv is asynchronous).
-  Steps wait for the file to open, 3 s at most.
+  so runs don't share settings/resume/history. The state line can lag a step behind (mpv is asynchronous; the
+  harness doesn't wait for it, as a loop that stops drawing holds mpv up). Steps wait for the file to open, 3 s at
+  most. The log's `timing: <file> started in N ms` lines give how long each file took to start, on the handheld too.
 - **Test variables** that stand in for the handheld: `BP_POWER_SUPPLY` (a fake `/sys/class/power_supply`),
   `BP_OSD_FILE` (bananad's level file), `BP_FONT_PROVIDER=none` (libass with no system fonts, as on BananaOS),
   `BP_SCREENSHOTS`.
@@ -72,6 +73,14 @@ docs/make-screenshots.sh <library>                   # the README's docs/img/scr
   by zoom, not `panscan`. Everything set for a photo at `load()` (vf, dscale, zoom/pan/rotate) is reset for a video.
   `video-params` is before the `vf` scale and before rotation. The thumbnail is `screenshot-raw video`, unrotated.
   Photos have their own playlist (`siblingVideos` splits photos from videos/songs), no history and no resume.
+- **Never wait for mpv on the main thread while a file opens.** As it switches files mpv waits for the main thread
+  to draw the top panel (`mpv_render_context_render`); a blocking call meanwhile (`mpv_set_property`,
+  `mpv_command`, `mpv_get_property`) holds both until mpv gives up after 200 ms ("not being called or stuck" in
+  `-v`), several times a file: Next took 2-3 s on the handheld. So `prop()` and commands are async, the track list
+  and tags come by `observe_property` (`MPV_FORMAT_NODE`), `fileReady()` waits for the track list rather than read
+  it, and `graphSet` remembers `lavfi-complex`. Reads (`get`) only once a file has started (`checkPhoto`), or on
+  the Info page. mpv's own Lua scripts are off: their per-file hooks stalled every open too. A song keeps the last
+  one's graph when it's the same (taking it off and on reopens the sound output).
 - **Loading:** `loading()` is true from `load()` till mpv's `PLAYBACK_RESTART`; the stale `video-params` and
   `video-out-params` of the last file (or the idle window) can't tell.
 - **`Ui`** is the whole bottom panel: pages (Main, Audio, Subs, Settings, Browse, Info, About, Exit), START's tabbed

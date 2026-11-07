@@ -592,7 +592,8 @@ int main(int argc, char** argv)
 							for (auto& l : ui.pageLines()) printf("    %s\n", l.c_str());
 						}
 						else if (ui.press(buttonFromName(step), player)) leave();
-						SDL_Delay(100);	// mpv's answer to the step
+						// (no wait for mpv's answer here: a loop that doesn't draw holds mpv up as it switches files, and
+						// the timings would be the harness's; the state line can lag a step)
 						player.pollEvents();
 						const Track* a = player.selected(TrackType::Audio);
 						const Track* s = player.selected(TrackType::Sub);

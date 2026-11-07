@@ -11,6 +11,10 @@ namespace bp
 	// what the player plays: any of them, photos too (photo.h)
 	bool isMediaFile(const std::string& name);
 
+	// a picture mpv takes as the folder's songs' art (cover-art-auto): cover.jpg, folder.png, front.webp... (any case)
+	// beside the file at path
+	bool folderHasCover(const std::string& path);
+
 	// "ep2" before "ep10"; letters compared without case
 	bool naturalLess(const std::string& a, const std::string& b);
 

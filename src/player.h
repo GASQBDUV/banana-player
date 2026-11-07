@@ -146,12 +146,20 @@ namespace bp
 
 	private:
 		void load();
-		void refreshTracks();
+		void refreshTracks(mpv_node* trackList);
+		// the file opened and its track list known: the art's choice, the title, tracks gone missing
+		void fileReady();
+		bool readyPending = false;	// opened, its track list still to come
 		void prop(const char* name, const std::string& value);
 		// an audio file: the visualizer (Audio display) and the title, artist and album over the top panel
 		void applyAudioDisplay();
 		std::string graphFor(int vis, bool overCover);	// visualizerGraph, with Circle's tables made first
 		std::string circleMaps;	// where they are, once made
+		std::string graphSet;	// lavfi-complex as last set (prop)
+		std::string tagArtist, tagAlbum;	// the file's tags, as mpv sent them
+		// whether the last song (in lastArtDir) had art: the next one's guess
+		bool lastArt = false;
+		std::string lastArtDir;
 		int shownMusic() const;	// MusicShow as it comes out for this file (its art or none)
 		void updateOverlay();
 		bool isAudio = false, isPhoto = false;
@@ -164,7 +172,7 @@ namespace bp
 		bool turned() const { return (fileTurn + exifTurn + view.rotate) % 180 == 90; }
 		void applyPhotoView();
 		// the thumbnail: asked of mpv (screenshot-raw, answered on its own time) once a frame is up
-		uint64_t thumbAt = 0, loadAt = 0;
+		uint64_t thumbAt = 0, loadAt = 0, loadedAt = 0;
 		int spinnerStep = -1;
 		bool started = false;	// the file's playback began (mpv's playback-restart): no longer loading	// the spinner's lit dot as drawn, -1: not up
 		int thumbTries = 0, loadSerial = 0;

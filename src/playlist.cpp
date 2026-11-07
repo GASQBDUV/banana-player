@@ -35,6 +35,30 @@ namespace bp
 		return isVideoFile(name) || isAudioFile(name) || isPhotoFile(name);
 	}
 
+	bool folderHasCover(const std::string& path)
+	{
+		size_t slash = path.rfind('/');
+		std::string dir = slash == std::string::npos ? "." : slash == 0 ? "/" : path.substr(0, slash);
+		DIR* d = opendir(dir.c_str());
+		if (!d) return false;
+		bool found = false;
+		while (dirent* e = readdir(d))
+		{
+			std::string n = e->d_name;
+			size_t dot = n.rfind('.');
+			if (dot == std::string::npos || dot == 0) continue;
+			std::string base = n.substr(0, dot);
+			std::transform(base.begin(), base.end(), base.begin(), [](unsigned char c) { return std::tolower(c); });
+			// mpv's names (its cover-art-auto=exact list), as an image
+			bool named = false;
+			for (const char* b : {"albumartsmall", "albumart", "album", "cover", "front", "folder", "thumb"})
+				if (base == b) named = true;
+			if (named && hasExtension(n, {"jpg", "jpeg", "png", "webp", "gif", "bmp"})) { found = true; break; }
+		}
+		closedir(d);
+		return found;
+	}
+
 	bool naturalLess(const std::string& a, const std::string& b)
 	{
 		size_t i = 0, j = 0;
