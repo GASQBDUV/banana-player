@@ -9,7 +9,8 @@ namespace bp
 	// whatever this says. The title, artist and album over either.
 	// None: neither, the title alone on black (the lightest)
 	enum MusicShow { SHOW_ART, SHOW_BOTH, SHOW_VIS, SHOW_NONE, SHOWS };
-	enum Visualizer { VIS_BARS, VIS_WAVES, VIS_SPECTRUM, VISUALIZERS };
+	// Circle: the bars round a ring (cyan to purple to pink), drawn by looking each pixel up in two tables (remap)
+	enum Visualizer { VIS_BARS, VIS_WAVES, VIS_SPECTRUM, VIS_CIRCLE, VISUALIZERS };
 	// music only (a video never loops): all = back to the folder's first file after its last
 	enum Loop { LOOP_OFF, LOOP_ALL, LOOP_ONE, LOOPS };
 	const char* musicShowLabel(int v);
@@ -17,7 +18,12 @@ namespace bp
 	const char* loopLabel(int v);
 	// mpv's lavfi-complex: the first audio track to the speakers and, drawn, to the picture; overCover: over the first
 	// video track (the art), on its lower part
-	std::string visualizerGraph(int vis, bool overCover);
+	// mapsDir: where writeCircleMaps put Circle's tables; without them Circle is drawn as Bars
+	std::string visualizerGraph(int vis, bool overCover, const std::string& mapsDir = "");
+	// Circle's tables, remap's xmap and ymap as 16-bit PGMs, in dir (made once, kept); false if they can't be written
+	bool writeCircleMaps(const std::string& dir);
+	// Circle's picture, the panel's shape: the circle a little low, under the song's title
+	constexpr int CIRCLE_W = 640, CIRCLE_H = 480;
 	// None's picture: black, a tiny one at 5 frames a second drawn from the sound (so it ends with it): the last
 	// visualizer's frame would stay otherwise
 	std::string blankGraph();

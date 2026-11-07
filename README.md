@@ -117,7 +117,7 @@ its folder on that file.
 | **L / R** | Previous / next file in the folder |
 | **UP / DOWN** | Faster / slower (0.5x, 1x, 1.5x, 2x, 2.5x) |
 | **X** | Video: choose the audio track · Music: No loop → Loop all → Loop one |
-| **Y** | Video: choose subtitles · Music: Bars → Waves → Spectrum |
+| **Y** | Video: choose subtitles · Music: Bars → Waves → Spectrum → Circle |
 | **SELECT** | Video: Fit → Fill → Stretch · Music: Album art → Art + visualizer → Visualizer → None |
 | **START** | Menu: Recent, Settings, About, Exit |
 | **B twice** | Close the video (back to the list) |
@@ -196,7 +196,8 @@ Songs show their title, artist and album on the top screen. While a song plays, 
 - **SELECT: what's shown.** **Album art** (default), **Art + visualizer** (the visualizer over the bottom of the art),
   **Visualizer**, or **None** (just the title: the lightest on the battery). A song without art shows the visualizer.
   Album art can be inside the song file or a `cover.jpg` in the same folder.
-- **Y: the visualizer.** **Bars**, **Waves** or **Spectrum**.
+- **Y: the visualizer.** **Bars**, **Waves**, **Spectrum** or **Circle** (bars round a glowing ring, cyan to pink;
+  with Art + visualizer, the album art sits inside the ring).
 - **X: looping.** **No loop**, **Loop all** (the folder starts again after its last song) or **Loop one** (the same
   song again). Videos never loop.
 

@@ -147,6 +147,8 @@ namespace bp
 		void prop(const char* name, const std::string& value);
 		// an audio file: the visualizer (Audio display) and the title, artist and album over the top panel
 		void applyAudioDisplay();
+		std::string graphFor(int vis, bool overCover);	// visualizerGraph, with Circle's tables made first
+		std::string circleMaps;	// where they are; "-": they couldn't be made
 		int shownMusic() const;	// MusicShow as it comes out for this file (its art or none)
 		void updateOverlay();
 		bool isAudio = false, isPhoto = false;

@@ -1,5 +1,9 @@
 #include "settings.h"
+#include <cmath>
+#include <fstream>
 #include <sstream>
+#include <sys/stat.h>
+#include <vector>
 
 namespace bp
 {
@@ -17,8 +21,8 @@ namespace bp
 
 	static const char* SHOW_IDS[SHOWS] = {"art", "both", "visualizer", "none"};
 	static const char* SHOW_LABELS[SHOWS] = {"Album art", "Art + visualizer", "Visualizer", "None"};
-	static const char* VIS_IDS[VISUALIZERS] = {"bars", "waves", "spectrum"};
-	static const char* VIS_LABELS[VISUALIZERS] = {"Bars", "Waves", "Spectrum"};
+	static const char* VIS_IDS[VISUALIZERS] = {"bars", "waves", "spectrum", "circle"};
+	static const char* VIS_LABELS[VISUALIZERS] = {"Bars", "Waves", "Spectrum", "Circle"};
 	static const char* LOOP_IDS[LOOPS] = {"off", "all", "one"};
 	static const char* LOOP_LABELS[LOOPS] = {"No loop", "Loop all", "Loop one"};
 
@@ -26,8 +30,100 @@ namespace bp
 	const char* visualizerLabel(int v) { return VIS_LABELS[v >= 0 && v < VISUALIZERS ? v : 0]; }
 	const char* loopLabel(int v) { return LOOP_LABELS[v >= 0 && v < LOOPS ? v : 0]; }
 
-	std::string visualizerGraph(int vis, bool overCover)
+	// Circle: the spectrum's bars (BARS_W x BARS_H, low notes left, growing up) and beside them PALETTE columns, the
+	// ring's glow fading out to black; each pixel of the square picture is one of theirs (remap), so a frame costs a
+	// lookup a pixel. The bars run from the top down both sides, mirrored, SEGMENTS a side
+	static const int BARS_W = 256, BARS_H = 128, PALETTE = 16, SEGMENTS = 40;
+	static const double BAR_FROM = 84, BAR_TO = 200, RING = 76, CENTRE_Y = 274;
+	static const char* CIRCLE_MAPS[2] = {"circle2-x.pgm", "circle2-y.pgm"};
+
+	bool writeCircleMaps(const std::string& dir)
 	{
+		const int w = CIRCLE_W, h = CIRCLE_H;
+		size_t bytes = (size_t)w * h * 2;
+		auto ready = [&](const std::string& path) {
+			struct stat st;
+			return stat(path.c_str(), &st) == 0 && (size_t)st.st_size > bytes;
+		};
+		if (ready(dir + "/" + CIRCLE_MAPS[0]) && ready(dir + "/" + CIRCLE_MAPS[1])) return true;
+		std::vector<unsigned char> xs(bytes), ys(bytes);
+		for (int y = 0; y < h; y++)
+			for (int x = 0; x < w; x++)
+			{
+				double dx = x - w / 2.0 + 0.5, dy = y - CENTRE_Y + 0.5, r = std::hypot(dx, dy);
+				double seg = std::fabs(std::atan2(dx, -dy)) / M_PI * SEGMENTS;	// 0 at the top, SEGMENTS at the bottom
+				int mx, my;
+				if (r >= BAR_FROM && r <= BAR_TO && seg - std::floor(seg) < 0.6)
+				{
+					// a bar: its frequency by the angle, its height by the distance out
+					mx = (int)((std::floor(seg) + 0.5) / SEGMENTS * BARS_W);
+					my = (int)std::lround((BARS_H - 1) * (1 - (r - BAR_FROM) / (BAR_TO - BAR_FROM)));
+				}
+				else
+				{
+					// the ring and its glow, else black (the palette's last column)
+					mx = BARS_W + std::min(PALETTE - 1, (int)std::lround(std::fabs(r - RING) * 2));
+					my = 0;
+				}
+				size_t i = ((size_t)y * w + x) * 2;
+				xs[i] = (unsigned char)(mx >> 8);
+				xs[i + 1] = (unsigned char)mx;
+				ys[i] = (unsigned char)(my >> 8);
+				ys[i + 1] = (unsigned char)my;
+			}
+		mkdir(dir.c_str(), 0755);
+		for (int k = 0; k < 2; k++)
+		{
+			std::string path = dir + "/" + CIRCLE_MAPS[k], tmp = path + ".tmp";
+			std::ofstream out(tmp, std::ios::binary | std::ios::trunc);
+			out << "P5\n" << w << " " << h << "\n65535\n";
+			const std::vector<unsigned char>& v = k ? ys : xs;
+			out.write((const char*)v.data(), (std::streamsize)v.size());
+			if (!out.flush()) return false;
+			out.close();
+			if (rename(tmp.c_str(), path.c_str()) != 0) return false;
+		}
+		return true;
+	}
+
+	// a path as a filter's argument: quoted (a ':' would end it); a path with a quote can't be
+	static bool lavfiPath(const std::string& p, std::string& out)
+	{
+		if (p.find('\'') != std::string::npos || p.find('\\') != std::string::npos) return false;
+		out = "'" + p + "'";
+		return true;
+	}
+
+	static std::string circleGraph(bool overCover, const std::string& dir)
+	{
+		std::string xm, ym;
+		lavfiPath(dir + "/" + CIRCLE_MAPS[0], xm);
+		lavfiPath(dir + "/" + CIRCLE_MAPS[1], ym);
+		std::string bars = std::to_string(BARS_W) + "x" + std::to_string(BARS_H);
+		// cyan (left: the low notes, at the top) to blue-purple to pink (the high, at the bottom), multiplied into
+		// the white bars; the ring a pale blue, fading over the palette's columns
+		std::string g =
+			"[aid1] asplit [ao] [a]; "
+			"[a] showfreqs=s=" + bars + ":mode=bar:cmode=combined:ascale=log:fscale=log:win_size=1024:colors=white|white,fps=30,format=gbrp [bars]; "
+			"nullsrc=s=" + bars + ":d=1,format=gbrp,"
+			"geq=r='59+196*clip(2*X/W-1,0,1)':g='232-140*clip(2*X/W,0,1)-13*clip(2*X/W-1,0,1)':b='224+31*clip(2*X/W,0,1)-39*clip(2*X/W-1,0,1)',loop=-1:1 [grad]; "
+			"[bars] [grad] blend=all_mode=multiply [cbars]; "
+			"nullsrc=s=" + std::to_string(PALETTE) + "x" + std::to_string(BARS_H) + ":d=1,format=gbrp,"
+			"geq=r='207*exp(-pow(X/4,2))':g='232*exp(-pow(X/4,2))':b='255*exp(-pow(X/4,2))',loop=-1:1 [pal]; "
+			"[cbars] [pal] hstack [src]; "
+			"movie=" + xm + ",loop=-1:1 [xm]; movie=" + ym + ",loop=-1:1 [ym]; ";
+		if (!overCover) return g + "[src] [xm] [ym] remap [vo]";
+		// the art inside the ring
+		return g + "[src] [xm] [ym] remap [ring]; "
+			"[vid1] scale=96:96:force_original_aspect_ratio=decrease,format=gbrp [cover]; "
+			"[ring] [cover] overlay=x=(W-w)/2:y=" + std::to_string((int)CENTRE_Y) + "-h/2:eof_action=repeat:format=gbrp [vo]";
+	}
+
+	std::string visualizerGraph(int vis, bool overCover, const std::string& mapsDir)
+	{
+		std::string quoted;
+		if (vis == VIS_CIRCLE && !mapsDir.empty() && lavfiPath(mapsDir, quoted)) return circleGraph(overCover, mapsDir);
+		if (vis == VIS_CIRCLE) vis = VIS_BARS;
 		// drawn at the panel's shape (mpv scales it to the panel) and 30 frames a second: light enough for the A55s
 		// beside the decoding
 		int h = overCover ? 200 : 480;

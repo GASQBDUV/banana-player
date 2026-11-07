@@ -61,7 +61,9 @@ docs/make-screenshots.sh <library>                   # the README's docs/img/scr
   setting mpv's global options (`start`, `aid`, `sid`, `alang`, `slang`) before each `loadfile`. `lavfi-complex` must
   be cleared before setting `aid`/`sid`; taking a graph off leaves no audio track chosen (restore `aid`), and `vid`
   has to be set by id. A graph's picture never ends, so mpv never ends a song that has one (every song without art):
-  `checkSongEnd()` ends it, or restarts it for Loop one, once the clock passes the duration.
+  `checkSongEnd()` ends it, or restarts it for Loop one, once the clock passes the duration. Circle's graph reads
+  two `remap` tables with `movie=` from the state folder (`graphFor()` writes them first; without them it's Bars).
+  Keep visualizers cheap: Circle was shaped by timing `ffmpeg -filter_complex_threads 1` against Bars per frame.
 - **Photos** play through mpv too (`isPhoto`): `PhotoView` (zoom over Fit or Fill, pan in mpv's `video-pan` units,
   a user turn) is applied as `video-zoom`/`video-pan-*`/`video-rotate`; the geometry is in `photo.cpp`. Fill is done
   by zoom, not `panscan`. Everything set for a photo at `load()` (vf, dscale, zoom/pan/rotate) is reset for a video.

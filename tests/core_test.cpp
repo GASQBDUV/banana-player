@@ -12,6 +12,7 @@
 #include <cstdio>
 #include <cstring>
 #include <fstream>
+#include <iterator>
 #include <sys/stat.h>
 #include <unistd.h>
 #include <map>
@@ -244,6 +245,29 @@ static void testSettings()
 	CHECK_EQ(visualizerGraph(VIS_WAVES, false).rfind("[aid1] asplit [ao] [v]; [v] showwaves", 0), (size_t)0);
 	CHECK_EQ(visualizerGraph(VIS_SPECTRUM, true).find("[vid1]") != std::string::npos, true);
 	CHECK_EQ(visualizerGraph(VIS_SPECTRUM, true).find("showspectrum=s=640x200") != std::string::npos, true);
+	// Circle: drawn from its tables; without them, as Bars
+	CHECK_EQ(visualizerGraph(VIS_CIRCLE, false).find("showfreqs") != std::string::npos, true);
+	CHECK_EQ(visualizerGraph(VIS_CIRCLE, false).find("remap"), std::string::npos);
+	char cdir[] = "/tmp/bp-circle-XXXXXX";
+	if (mkdtemp(cdir))
+	{
+		CHECK_EQ(writeCircleMaps(cdir), true);
+		CHECK_EQ(writeCircleMaps(cdir), true);	// kept: not made again
+		std::string g = visualizerGraph(VIS_CIRCLE, true, cdir);
+		CHECK_EQ(g.find("remap") != std::string::npos && g.find("[vid1]") != std::string::npos, true);
+		CHECK_EQ(g.find(std::string("movie='") + cdir + "/circle2-x.pgm'") != std::string::npos, true);
+		// the middle is black (the palette's last column), straight up from it a bar's lowest step
+		std::ifstream in(std::string(cdir) + "/circle2-x.pgm", std::ios::binary);
+		std::string pgm((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+		size_t head = pgm.size() - (size_t)CIRCLE_W * CIRCLE_H * 2;
+		auto at = [&](int x, int y) { size_t i = head + ((size_t)y * CIRCLE_W + x) * 2; return (unsigned char)pgm[i] << 8 | (unsigned char)pgm[i + 1]; };
+		CHECK_EQ(at(CIRCLE_W / 2, 274), 256 + 15);			// the middle: black
+		CHECK_EQ(at(CIRCLE_W / 2 - 1, 274 - 90) < 256, true);	// straight up: a bar
+		CHECK_EQ(at(5, 5), 256 + 15);							// the title's corner: black
+		for (const char* f : {"/circle2-x.pgm", "/circle2-y.pgm"}) unlink((std::string(cdir) + f).c_str());
+		rmdir(cdir);
+	}
+	CHECK_EQ(parseSettings("visualizer = circle\n").visualizer, (int)VIS_CIRCLE);
 	CHECK_EQ(std::string(loopLabel(LOOP_ALL)), std::string("Loop all"));
 	// the setting before 0.1.1, carried over
 	Settings old = parseSettings("audio-display = cover-bars\n");

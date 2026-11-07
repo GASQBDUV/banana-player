@@ -231,7 +231,7 @@ namespace bp
 
 		// a visualizer is set before the file opens; a video has none
 		// (the art's choices wait for the file: they depend on whether it has art)
-		if (isAudio && settings.musicShow == SHOW_VIS) prop("lavfi-complex", visualizerGraph(settings.visualizer, false));
+		if (isAudio && settings.musicShow == SHOW_VIS) prop("lavfi-complex", graphFor(settings.visualizer, false));
 		if (isAudio && settings.musicShow == SHOW_NONE) prop("lavfi-complex", blankGraph());
 		// Loop one: the song again and again (mpv's own); a video never loops; a photo stays (an animated one goes round)
 		prop("loop-file", isPhoto || (isAudio && settings.loop == LOOP_ONE) ? "inf" : "no");
@@ -819,10 +819,22 @@ namespace bp
 		return hasCover(tracks) ? settings.musicShow : SHOW_VIS;
 	}
 
+	std::string Player::graphFor(int vis, bool overCover)
+	{
+		// Circle's tables: made the first time it's wanted, beside the settings (or in /tmp with none kept)
+		if (vis == VIS_CIRCLE && circleMaps.empty())
+		{
+			std::string dir = opts.stateDir.empty() ? "/tmp/banana-player" : opts.stateDir;
+			circleMaps = writeCircleMaps(dir) ? dir : "-";
+			if (circleMaps == "-") fprintf(stderr, "banana-player: Circle's tables couldn't be written in %s\n", dir.c_str());
+		}
+		return visualizerGraph(vis, overCover, circleMaps == "-" ? "" : circleMaps);
+	}
+
 	void Player::applyAudioDisplay()
 	{
 		int show = shownMusic();
-		std::string graph = show == SHOW_ART ? "" : show == SHOW_NONE ? blankGraph() : visualizerGraph(settings.visualizer, show == SHOW_BOTH);
+		std::string graph = show == SHOW_ART ? "" : show == SHOW_NONE ? blankGraph() : graphFor(settings.visualizer, show == SHOW_BOTH);
 		bool had = !get("lavfi-complex").empty();
 		if (get("lavfi-complex") != graph) prop("lavfi-complex", graph);
 		if (graph.empty() && had)
@@ -972,7 +984,8 @@ namespace bp
 			// what the top panel shows, as mpv has it now
 			std::string graph = get("lavfi-complex");
 			std::string vis = graph.find("showwaves") != std::string::npos ? "Waves"
-							  : graph.find("showspectrum") != std::string::npos ? "Spectrum" : "Bars";
+							  : graph.find("showspectrum") != std::string::npos ? "Spectrum"
+							  : graph.find("remap") != std::string::npos ? "Circle" : "Bars";
 			row("Top screen", graph == blankGraph() ? "Title only"
 				: graph.find("[vid1]") != std::string::npos ? "Album art + " + vis
 				: !graph.empty() ? "Visualizer: " + vis

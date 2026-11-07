@@ -138,6 +138,9 @@ docker run --rm -v "$PWD":/src:ro debian:trixie bash -c "apt-get update -qq && \
   - [ ] Animated WebP: FFmpeg 7.1 may not decode its animation.
   - [ ] On the handheld: L3 as SDL's `LEFTSTICK`; decode time of a 12 MP JPEG; `dscale=hermite` with
         `correct-downscaling` on Panfrost.
+- [x] **Circle visualizer:** `showfreqs` bars, coloured by a `blend` with a gradient, beside a palette for the
+      ring, bent round by `remap` with two tables (`circle2-{x,y}.pgm` in the state folder, written once by
+      `writeCircleMaps`). Every pixel is one lookup, so it costs what Bars does (about 0.76 ms a frame on an M1).
 - [x] **Loading spinner** on the top panel (from 0.3 s, till mpv's `playback-restart`), for any file.
 - [ ] **On the handheld (needs the hardware):**
   - [ ] Does SDL2's KMSDRM give both panels as two displays, with a GLES window on one and a renderer on the other?
