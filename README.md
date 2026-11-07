@@ -46,11 +46,11 @@
 ## Install
 
 > [!TIP]
-> **Latest: [Banana Player 0.1.1](https://github.com/tonywei92/banana-player/releases/tag/v0.1.1)** (pre-release, tested on
-> an RG DS Plus with BananaOS).
+> **Latest: [Banana Player 0.1.2](https://github.com/tonywei92/banana-player/releases/tag/v0.1.2)** (tested on an RG DS
+> Plus with BananaOS).
 
-1. **Download** `BananaPlayer-0.1.1-aarch64.zip` from
-   [the release](https://github.com/tonywei92/banana-player/releases/tag/v0.1.1) (all versions:
+1. **Download** `BananaPlayer-0.1.2-aarch64.zip` from
+   [the release](https://github.com/tonywei92/banana-player/releases/tag/v0.1.2) (all versions:
    [Releases](https://github.com/tonywei92/banana-player/releases)).
 2. **Unzip it into `roms/ports`** on your BananaOS SD card, with a card reader or over Wi-Fi with BananaOS's file
    sharing (`\\<handheld address>\banana`). You should end up with:
