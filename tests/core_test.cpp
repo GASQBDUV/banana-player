@@ -255,6 +255,9 @@ static void testSettings()
 		CHECK_EQ(writeCircleMaps(cdir), true);	// kept: not made again
 		std::string g = visualizerGraph(VIS_CIRCLE, true, cdir);
 		CHECK_EQ(g.find("remap") != std::string::npos && g.find("[vid1]") != std::string::npos, true);
+		// no source that never ends: past the song's end it would flood mpv (its clock stopped, gigabytes taken)
+		CHECK_EQ(g.find("loop="), std::string::npos);
+		CHECK_EQ(visualizerGraph(VIS_CIRCLE, false, cdir).find("loop="), std::string::npos);
 		CHECK_EQ(g.find(std::string("movie='") + cdir + "/circle2-x.pgm'") != std::string::npos, true);
 		// the middle is black (the palette's last column), straight up from it a bar's lowest step
 		std::ifstream in(std::string(cdir) + "/circle2-x.pgm", std::ios::binary);

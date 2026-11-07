@@ -109,16 +109,20 @@ namespace bp
 		std::string bars = std::to_string(BARS_W) + "x" + std::to_string(BARS_H);
 		// cyan (left: the low notes, at the top) to blue-purple to pink (the high, at the bottom), multiplied into
 		// the white bars; the ring a pale blue, fading over the palette's columns
+		// The still inputs (the gradient, the palette, the tables) are pictures that end, never loops: blend, hstack
+		// and remap go on with an ended input's last frame, and end when the bars (the sound) do. A loop never ends,
+		// so neither did the graph: past the song's end its sources poured out frames as fast as they could, mpv's
+		// clock stopped (the song never ended) and its memory grew by the gigabyte
 		std::string g =
 			"[aid1] asplit [ao] [a]; "
 			"[a] showfreqs=s=" + bars + ":mode=bar:cmode=combined:ascale=log:fscale=log:win_size=1024:colors=white|white,fps=30,format=gbrp [bars]; "
 			"nullsrc=s=" + bars + ":d=1,format=gbrp,"
-			"geq=r='59+196*clip(2*X/W-1,0,1)':g='232-140*clip(2*X/W,0,1)-13*clip(2*X/W-1,0,1)':b='224+31*clip(2*X/W,0,1)-39*clip(2*X/W-1,0,1)',loop=-1:1 [grad]; "
+			"geq=r='59+196*clip(2*X/W-1,0,1)':g='232-140*clip(2*X/W,0,1)-13*clip(2*X/W-1,0,1)':b='224+31*clip(2*X/W,0,1)-39*clip(2*X/W-1,0,1)' [grad]; "
 			"[bars] [grad] blend=all_mode=multiply [cbars]; "
 			"nullsrc=s=" + std::to_string(PALETTE) + "x" + std::to_string(BARS_H) + ":d=1,format=gbrp,"
-			"geq=r='207*exp(-pow(X/4,2))':g='232*exp(-pow(X/4,2))':b='255*exp(-pow(X/4,2))',loop=-1:1 [pal]; "
+			"geq=r='207*exp(-pow(X/4,2))':g='232*exp(-pow(X/4,2))':b='255*exp(-pow(X/4,2))' [pal]; "
 			"[cbars] [pal] hstack [src]; "
-			"movie=" + xm + ",loop=-1:1 [xm]; movie=" + ym + ",loop=-1:1 [ym]; ";
+			"movie=" + xm + " [xm]; movie=" + ym + " [ym]; ";
 		if (!overCover) return g + "[src] [xm] [ym] remap [vo]";
 		// the art inside the ring
 		return g + "[src] [xm] [ym] remap [ring]; "
