@@ -15,8 +15,8 @@
 </p>
 
 > [!NOTE]
-> **In development.** Banana Player isn't in the BananaOS App Store yet. You can try it from the Ports shelf (see
-> [Install](#install)).
+> **Early days.** Banana Player isn't in the BananaOS App Store yet. Install it on the Ports shelf from the
+> [latest release](https://github.com/tonywei92/banana-player/releases) (see [Install](#install)).
 
 <table>
   <tr>
@@ -45,19 +45,34 @@
 
 ## Install
 
-1. Download the latest `BananaPlayer-<version>-aarch64.zip` from
-   [Releases](https://github.com/tonywei92/banana-player/releases) (none published yet: until then, build it
-   yourself, see [DEVELOPMENT.md](DEVELOPMENT.md)).
-2. Unzip it into the **`roms/ports`** folder of your BananaOS SD card (with a card reader, or over Wi-Fi with
-   BananaOS's file sharing). You should end up with:
+> [!TIP]
+> **Latest: [Banana Player 0.1.0](https://github.com/tonywei92/banana-player/releases/tag/v0.1.0)** (pre-release, tested on
+> an RG DS Plus with BananaOS).
+
+1. **Download** `BananaPlayer-0.1.0-aarch64.zip` from
+   [the release](https://github.com/tonywei92/banana-player/releases/tag/v0.1.0) (all versions:
+   [Releases](https://github.com/tonywei92/banana-player/releases)).
+2. **Unzip it into `roms/ports`** on your BananaOS SD card, with a card reader or over Wi-Fi with BananaOS's file
+   sharing (`\\<handheld address>\banana`). You should end up with:
    ```
    roms/ports/Banana Player.sh
    roms/ports/BananaPlayer/
    roms/ports/media/box/Banana Player.png
    ```
-3. Put the card back in the handheld and open the **Ports** shelf. **Banana Player** is there, with its icon.
+   On a Mac, a folder may be created for the zip's contents: move its three items into `roms/ports` itself.
+3. **Play:** put the card back in the handheld, open the **Ports** shelf and choose **Banana Player**.
 
-Put your videos anywhere on the card. A `videos` folder inside `roms` gets its own shortcut in the file list.
+Put your videos and music anywhere on the card. A `videos` folder inside `roms` gets its own shortcut in the file
+list.
+
+**Updating:** unzip the new release over the old one (replace the files when asked). Your settings, resume positions
+and history are kept: they live in `home/.config/banana-player` on the card, not in the player's folder.
+
+**Uninstalling:** delete `Banana Player.sh`, the `BananaPlayer` folder and `media/box/Banana Player.png` from
+`roms/ports`. To remove its settings too, delete `home/.config/banana-player`.
+
+**Something wrong?** The last run's log is in `home/.config/banana-player/log.txt` on the card. Please attach it to an
+[issue](https://github.com/tonywei92/banana-player/issues).
 
 ## What it plays
 
