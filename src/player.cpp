@@ -207,7 +207,8 @@ namespace bp
 		// what this file is remembered with; mpv's options are global, so each one is set for every file
 		const ResumeEntry* e = isPhoto ? nullptr : resume.find(path);
 		char start[32] = "none";
-		if (settings.rememberPosition && e && e->position >= 0) snprintf(start, sizeof start, "%.3f", e->position);
+		// a song always from its start (an album plays through; music isn't a film to come back to)
+		if (settings.rememberPosition && !isAudio && e && e->position >= 0) snprintf(start, sizeof start, "%.3f", e->position);
 		prop("start", start);
 
 		wantAid = settings.rememberAudio && e && e->aid > 0 ? e->aid : 0;
@@ -775,7 +776,7 @@ namespace bp
 		ResumeEntry e;
 		e.path = playlist[current];
 		// played to the end (or as good as): next time from the start
-		if (settings.rememberPosition && !finished && worthResuming(position, duration)) e.position = position;
+		if (settings.rememberPosition && !isAudio && !finished && worthResuming(position, duration)) e.position = position;
 		// the tracks as last seen open (at the end, mpv's list is already gone: it isn't "subtitles off")
 		if (settings.rememberAudio && seenAid > 0) e.aid = seenAid;
 		if (settings.rememberSubs && seenSid >= 0) e.sid = seenSid;

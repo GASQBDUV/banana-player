@@ -41,7 +41,7 @@
   phone.
 - 👆 **Two screens, made for the RG DS:** the picture on top, big touch controls below. Every button has a touch
   equivalent.
-- 💾 **Picks up where you left off:** position, audio track and subtitles per file, plus Recent for the last 30 things
+- 💾 **Picks up where you left off:** a video's position, audio track and subtitles, plus Recent for the last 30 things
   you played.
 - 🔒 **Pocket-proof:** lock the touch screen, turn the bottom screen off, or switch the buttons off while watching.
 - 😴 **Lid-aware:** closing the lid pauses, and opening it doesn't start playing by itself.
@@ -219,7 +219,7 @@ Settings opens on six groups; pick one with **A** or a tap, and **B** goes back 
 | **Photos** | Keep zoom between photos | On | The next photo opens at the same zoom and place. Off: each opens whole |
 | | Pan area | Left | Which side of the bottom screen the photo's pan area is on |
 | | Drag moves | The photo | A drag in the pan area moves the photo (like a phone), or the box over the small photo |
-| **Remember** | Remember position | On | Reopening a file continues where you stopped |
+| **Remember** | Remember position | On | Reopening a video continues where you stopped (songs always start from the beginning) |
 | | Remember audio track | On | Keeps each file's audio track; a new file starts in the language you chose last |
 | | Remember subtitles | On | The same, for subtitles |
 | **Files** | Remember last folder | Off | The file list opens where you last were |

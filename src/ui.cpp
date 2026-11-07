@@ -1,5 +1,6 @@
 #include "ui.h"
 #include "format.h"
+#include "playlist.h"
 #include <algorithm>
 #include <cmath>
 #include <sys/stat.h>
@@ -280,7 +281,8 @@ namespace bp
 		};
 		auto at = [&](const std::string& path) {
 			const ResumeEntry* e = p.resumeStore().find(path);
-			return e && e->position >= 0 ? "at " + formatTime(e->position) : std::string();
+			// a song's (kept by an earlier version) left out: songs start from their start
+			return e && e->position >= 0 && !isAudioFile(path) ? "at " + formatTime(e->position) : std::string();
 		};
 		if (dir.empty())
 		{
