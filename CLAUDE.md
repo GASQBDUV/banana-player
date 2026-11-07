@@ -3,7 +3,7 @@
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 Banana Player: a video and music player for BananaOS (github.com/JorreFog/BananaLinux) on the Anbernic RG DS / RG DS
-Plus (RK3566, aarch64, two 4:3 panels: 640×480 or 1024×768; the bottom one is a touchscreen). C++17, libmpv, SDL2,
+Plus (RK3568, aarch64, two 4:3 panels: 640×480 or 1024×768; the bottom one is a touchscreen). C++17, libmpv, SDL2,
 SDL2_ttf, zlib. `README.md` is for end users; `DEVELOPMENT.md` has the technical detail and the roadmap.
 
 ## Commands
@@ -113,14 +113,15 @@ docs/make-screenshots.sh <library>                   # the README's docs/img/scr
   SDL is patched, and its Mesa needs its own libstdc++. BananaOS has no fonts of its own. The launcher's
   `FONTCONFIG_FILE` points at the bundle's `fonts.conf`, which lists only `assets/fonts` (also set as
   `sub-fonts-dir`/`osd-fonts-dir`, with `osd-font=Inter`).
-- Decoding is software only: BananaOS's kernel disables `CONFIG_MEDIA_SUPPORT` (see
-  `docs/bananalinux-hw-decoding-request.md`).
+- Decoding is software only: BananaOS's kernel disables `CONFIG_MEDIA_SUPPORT`. Requested as modules in
+  JorreFog/BananaLinux#208 (text: `docs/bananalinux-hw-decoding-request.md`). The SoC is an RK3568 (BananaOS's
+  `rk3568-anbernic-rg-ds*.dts`), not an RK3566.
 - The panels use the Nintendo button layout: A is the east button, which is `SDL_CONTROLLER_BUTTON_B`. The RG DS Plus
   has one stick, the left, and it clicks (L3, `SDL_CONTROLLER_BUTTON_LEFTSTICK`).
 - F is SDL's `GUIDE` button and L2 a trigger axis (handled in `main.cpp`, not `Button`): F + L2 screenshot, F + START
   quits. The Back key is mapped to B as `SDLK_AC_BACK` (unconfirmed on the
   handheld); every button press is logged as `input: ...` to find what a key sends.
-- Photos are scaled to 4096 pixels at most: the RK3566's GPU (Mali-G52, Panfrost) may take no texture over 8192
+- Photos are scaled to 4096 pixels at most: the RK3568's GPU (Mali-G52, Panfrost) may take no texture over 8192
   (unverified), and a 50 MP photo's would be 200 MB.
 
 ## Conventions

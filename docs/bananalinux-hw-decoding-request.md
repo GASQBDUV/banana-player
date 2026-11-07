@@ -1,10 +1,10 @@
 # Draft: request to BananaLinux for hardware video decoding
 
-*Not posted. For JorreFog/BananaLinux, as an issue or a PR changing `buildroot/board/rgds/linux-banana.fragment`.*
+*Posted as [JorreFog/BananaLinux#208](https://github.com/JorreFog/BananaLinux/issues/208). It asks for a change to `buildroot/board/rgds/linux-banana.fragment`.*
 
 ---
 
-**Title:** Build the RK3566's video decoders as modules (V4L2 stateless: Hantro and rkvdec)
+**Title:** Build the RK3568's video decoders as modules (V4L2 stateless: Hantro and rkvdec)
 
 **Body:**
 
@@ -12,10 +12,11 @@ Hi! I'm writing [Banana Player](https://github.com/tonywei92/banana-player), a v
 uses both screens: the picture on the top, the controls on the bottom touch screen. It decodes in software today, and
 the A55 cores keep up with 480p/720p H.264 but fall behind on 1080p and HEVC.
 
-The RK3566 has two hardware decoders that mainline drives through V4L2's stateless API:
+The RK3568 has two hardware decoders that mainline drives through V4L2's stateless API:
 
-- **Hantro G1** (`hantro-vpu`): H.264, MPEG-2, VP8
-- **rkvdec** (`rockchip-vdec`): H.264, HEVC, VP9
+- **Hantro G1** (`hantro-vpu`, `rockchip,rk3568-vpu`): H.264, MPEG-2, VP8
+- **rkvdec** (`rockchip-vdec`): H.264, HEVC, VP9 (the RK3568's VDPU346; support for it is recent, so it's worth
+  checking that 7.2 has it)
 
 ROCKNIX's config (`linux-rocknix.config`) has both (`CONFIG_VIDEO_HANTRO=m`, `CONFIG_VIDEO_HANTRO_ROCKCHIP=y`,
 `CONFIG_VIDEO_ROCKCHIP_VDEC=y`). `linux-banana.fragment` turns all of media off (`# CONFIG_MEDIA_SUPPORT is not set`),
@@ -40,7 +41,8 @@ CONFIG_VIDEO_HANTRO_ROCKCHIP=y
 CONFIG_VIDEO_ROCKCHIP_VDEC=m
 ```
 
-(The exact symbols may need adjusting for 7.2: rkvdec has moved out of staging in recent kernels.) The device tree
+(The exact symbols may need adjusting for 7.2.7: rkvdec has moved out of staging in recent kernels, and ROCKNIX's
+config already has it as `CONFIG_VIDEO_ROCKCHIP_VDEC`.) The device tree
 also needs the `vpu` and `vdec` nodes enabled (`status = "okay"`) for the RG DS and RG DS Plus, if ROCKNIX doesn't
 already enable them.
 

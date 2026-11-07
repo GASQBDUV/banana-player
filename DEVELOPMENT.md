@@ -159,8 +159,9 @@ docker run --rm -v "$PWD":/src:ro debian:trixie bash -c "apt-get update -qq && \
 - [x] **Software decoding, fast:** mpv's `fast` profile, `vd-lavc-fast`, `vd-lavc-skiploopfilter=nonref`,
       `framedrop=decoder+vo`.
 - [ ] **Hardware decoding: blocked on BananaOS.** Its kernel fragment disables `CONFIG_MEDIA_SUPPORT`, so the
-      RK3566's Hantro and rkvdec decoders aren't built and there's no `/dev/video*`. A draft request to build them as
-      modules is in [docs/bananalinux-hw-decoding-request.md](docs/bananalinux-hw-decoding-request.md). Once they
+      RK3568's Hantro and rkvdec decoders aren't built and there's no `/dev/video*`. The request to build them as
+      modules is [BananaLinux#208](https://github.com/JorreFog/BananaLinux/issues/208) (its text:
+      [docs/bananalinux-hw-decoding-request.md](docs/bananalinux-hw-decoding-request.md)). Once they
       exist: FFmpeg with the v4l2-request hwaccel (Kwiboo's patches), mpv `hwdec=drm` (zero-copy through EGL
       dma-buf import) with `drm-copy` and software as fallbacks, and `modprobe hantro-vpu rockchip-vdec` in the
       launcher.
