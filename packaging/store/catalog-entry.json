@@ -1,0 +1,47 @@
+  {
+   "id": "bananaplayer",
+   "name": "Banana Player",
+   "tile": "Banana Player",
+   "kind": "app",
+   "developer": "tonywei92",
+   "genre": "Media",
+   "players": "1",
+   "releasedate": "20261107T000000",
+   "accent": "#8a6a10",
+   "summary": "Videos and music on both screens: the picture on top, touch controls below.",
+   "description": "A video and music player made for the two screens: the picture plays on the top screen, and the bottom one has the controls, by button or touch (seek, scrub with a finger, speed from 0.5x to 2.5x, Fit, Fill or Stretch). Plays MP4, MKV, WebM, AVI and more, with subtitles (in the file or beside it, in many languages) and audio tracks, and music (MP3, FLAC, OGG, WAV and more) with its album art, a visualizer or both, looping one song or a whole folder. A file list finds what's on both cards; a folder plays as a playlist, and each file comes back where you left it, with its audio track and subtitles. Touch lock, the bottom screen off, pause when the lid closes, and F + L2 for a screenshot. Put videos and music anywhere on the card (a videos folder in roms gets its own shortcut); its settings and places stay in the card's home/.config/banana-player, also when the app is removed. Decoding is done by the CPU: up to 720p plays smoothly. Made by tonywei92 (free software, MIT); the Store follows its releases.",
+   "icon": "apps/bananaplayer/icon.png",
+   "screenshots": [
+    "apps/bananaplayer/screen.png"
+   ],
+   "devices": [
+    "rgds",
+    "rgds-plus"
+   ],
+   "release": {
+    "github": "tonywei92/banana-player",
+    "tag_prefix": "v",
+    "asset": "BananaPlayer-{version}-aarch64.zip"
+   },
+   "package": {
+    "root": "BananaPlayer",
+    "dest": "/storage/.config/rocknixds/bananaplayer",
+    "check": "bin/banana-player",
+    "executable": [
+     "launch.sh",
+     "bin/banana-player"
+    ],
+    "version_file": "VERSION",
+    "version_match": "([0-9][0-9.]*)"
+   },
+   "menu": {
+    "system": "bananaplayer",
+    "folder": "/storage/.config/rocknixds/apps/bananaplayer",
+    "entry": "BananaPlayer.sh",
+    "launch": "launch.sh",
+    "ports": false,
+    "media": {
+     "image": "share/banana-player/icon.png"
+    }
+   }
+  }

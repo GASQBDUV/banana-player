@@ -123,6 +123,11 @@ cat > "$B/share/banana-player/fonts.conf" <<'CONF'
 </fontconfig>
 CONF
 cp /src/LICENSE /src/README.md "$B/"
+# the launcher (the Store's menu.launch, and what the Ports shelf's script runs), the version the Store reads
+# (package.version_file) and the tile's picture (menu.media.image)
+cp /src/packaging/launch.sh "$B/launch.sh"
+echo "$VERSION" > "$B/VERSION"
+python3 /src/packaging/icon/make-icon.py "$B/share/banana-player/icon.png" 16
 
 # what the player loads that BananaOS doesn't have: libmpv and everything it needs, minus the system's own
 SYSTEM='^(linux-vdso|ld-linux|libc\.|libm\.|libdl\.|libpthread\.|librt\.|libresolv\.|libstdc\+\+|libgcc_s|libSDL2|libasound|libfreetype|libz\.|libpng|libdrm|libEGL|libGLES|libGL\.|libgbm|libGLdispatch|libGLX|libX|libxcb|libwayland|libbz2|libbrotli)'
@@ -153,7 +158,7 @@ cp /src/packaging/banana-player-port.sh "$OUT/Banana Player.sh"
 # the shelf's picture: BananaOS looks for media/box/<entry's name>.png beside the entries
 mkdir -p "$OUT/media/box"
 python3 /src/packaging/icon/make-icon.py "$OUT/media/box/Banana Player.png" 16
-chmod +x "$OUT/Banana Player.sh" "$B/bin/banana-player"
+chmod +x "$OUT/Banana Player.sh" "$B/launch.sh" "$B/bin/banana-player"
 
 echo "bundled libraries:"; ls "$B/lib" | sed 's/^/  /'
 du -sh "$B"
