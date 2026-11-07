@@ -27,15 +27,18 @@ namespace bp
 	std::string visualizerGraph(int vis, bool overCover)
 	{
 		// drawn at the panel's shape (mpv scales it to the panel) and 30 frames a second: light enough for the A55s
-		// beside the decoding. BananaOS's yellow on black.
+		// beside the decoding
 		int h = overCover ? 200 : 480;
 		std::string size = "s=640x" + std::to_string(h);
 		std::string draw;
+		// a soft amber, not the menu's bright yellow: it fills much of a dark screen. One colour a channel: the filters
+		// give a channel with none its own (white for the second), and stereo is most music
+		const std::string ink = "0xC08A22|0xC08A22";
 		switch (vis)
 		{
-		case VIS_WAVES: draw = "showwaves=" + size + ":mode=cline:rate=30:colors=0xF0B429"; break;
+		case VIS_WAVES: draw = "showwaves=" + size + ":mode=cline:split_channels=0:rate=30:colors=" + ink; break;
 		case VIS_SPECTRUM: draw = "showspectrum=" + size + ":slide=scroll:mode=combined:color=fire:scale=log,fps=30"; break;
-		default: draw = "showfreqs=" + size + ":mode=bar:ascale=log:fscale=log:win_size=1024:colors=0xF0B429,fps=30"; break;
+		default: draw = "showfreqs=" + size + ":mode=bar:cmode=combined:ascale=log:fscale=log:win_size=1024:colors=" + ink + ",fps=30"; break;
 		}
 		if (!overCover) return "[aid1] asplit [ao] [v]; [v] " + draw + ",format=yuv420p [vo]";
 		// the art (one picture: overlay repeats it) fitted on a black canvas timed by the visualizer, and the
