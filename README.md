@@ -20,14 +20,14 @@ photos with a finger. When a new version is out, it updates itself.
 
 <table>
   <tr>
-    <td align="center" width="33%"><img src="docs/img/screen-browser.png" alt="The file list on the bottom screen, the Banana Player logo on the top"><br><sub><b>Your files.</b> Icons, sizes, and where you left off in each film</sub></td>
-    <td align="center" width="33%"><img src="docs/img/screen-network.png" alt="The Network tab on the bottom screen, with saved connections"><br><sub><b>Network folders.</b> Your computer or NAS on the Wi-Fi, found by name</sub></td>
-    <td align="center" width="33%"><img src="docs/img/screen-playing.png" alt="A film playing on the top screen, the controls on the bottom"><br><sub><b>Watching.</b> Seek, skip, speed, subtitles and audio tracks, by button or by touch</sub></td>
+    <td align="center" width="33%"><img src="docs/img/screen-browser.png?v=0.3.0" alt="The file list on the bottom screen, the Banana Player logo on the top"><br><sub><b>Your files.</b> Icons, sizes, and where you left off in each film</sub></td>
+    <td align="center" width="33%"><img src="docs/img/screen-network.png?v=0.3.0" alt="The Network tab on the bottom screen, with saved connections"><br><sub><b>Network folders.</b> Your computer or NAS on the Wi-Fi, found by name</sub></td>
+    <td align="center" width="33%"><img src="docs/img/screen-playing.png?v=0.3.0" alt="A film playing on the top screen, the controls on the bottom"><br><sub><b>Watching.</b> Seek, skip, speed, subtitles and audio tracks, by button or by touch</sub></td>
   </tr>
   <tr>
-    <td align="center"><img src="docs/img/screen-music.png" alt="A song with its album art inside the Circle visualizer"><br><sub><b>Music.</b> Album art, a visualizer, or both (here: Circle)</sub></td>
-    <td align="center"><img src="docs/img/screen-photo.png" alt="A photo zoomed in on the top screen, the pan area and its buttons on the bottom"><br><sub><b>Photos.</b> Zoom in and drag the box to look around</sub></td>
-    <td align="center"><img src="docs/img/screen-settings.png" alt="Settings › Subtitles, with a subtitle preview"><br><sub><b>Settings</b> as tiles, with a help line for each and a live subtitle preview</sub></td>
+    <td align="center"><img src="docs/img/screen-music.png?v=0.3.0" alt="A song with its album art inside the Circle visualizer"><br><sub><b>Music.</b> Album art, a visualizer, or both (here: Circle)</sub></td>
+    <td align="center"><img src="docs/img/screen-photo.png?v=0.3.0" alt="A photo zoomed in on the top screen, the pan area and its buttons on the bottom"><br><sub><b>Photos.</b> Zoom in and drag the box to look around</sub></td>
+    <td align="center"><img src="docs/img/screen-settings.png?v=0.3.0" alt="Settings › Subtitles, with a subtitle preview"><br><sub><b>Settings</b> as tiles, with a help line for each and a live subtitle preview</sub></td>
   </tr>
 </table>
 
