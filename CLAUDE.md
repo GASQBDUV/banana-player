@@ -39,8 +39,9 @@ docs/make-screenshots.sh <library>                   # the README's docs/img/scr
   user events (`evMpv`, `evRender`, `evTouch`, `evLevel`), or for pause call libmpv directly, which is thread-safe.
 - **`Player`** wraps libmpv and owns everything about playing: the playlist (the file's folder, `playlist.*`),
   per-file resume (`resume.tsv`, which also keeps the last audio/subtitle languages and the browser's last folder),
-  play history (`history.tsv`, 30 entries), `settings.conf`, the audio display (`lavfi-complex` visualizer graphs; Auto
-  and Cover+bars decide at `FILE_LOADED` from whether there's an album-art track), and the top-panel overlays drawn as
+  play history (`history.tsv`, 30 entries), `settings.conf`, music display (`lavfi-complex` graphs: visualizer, art +
+  visualizer, a tiny black picture for None; the art choices are decided at `FILE_LOADED`, from whether there's an
+  album-art track) and Loop (one: `loop-file`; all: `advance()`), and the top-panel overlays drawn as
   ASS through `osd-overlay` (1: song title, 2: volume/brightness card, 3: idle logo). Track choices are applied by
   setting mpv's global options (`start`, `aid`, `sid`, `alang`, `slang`) before each `loadfile`. `lavfi-complex` must
   be cleared before setting `aid`/`sid`.
@@ -83,6 +84,9 @@ docs/make-screenshots.sh <library>                   # the README's docs/img/scr
 ## Conventions
 
 - Code style follows BananaLinux's: tabs, and comments that say why rather than what.
+- Fonts: SDL_ttf (bottom panel) has no fallback, so `Ui::runs()` picks a font per text or per run of characters.
+  libass (subtitles, titles) is built with fontconfig, and the bundle's `fonts.conf` lists only the player's own fonts.
+  `BP_FONT_PROVIDER=none` shows libass the way it would be without that.
 - The icon's 32×32 grid lives in both `packaging/icon/make-icon.py` and `src/logo.h`; change them together.
 - Screenshots and the README use Blender's *Sintel* (CC BY 3.0, credited in the README). Don't use copyrighted
   material.

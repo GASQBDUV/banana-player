@@ -33,7 +33,7 @@ apt-get update -qq
 apt-get install -y -qq --no-install-recommends \
 	build-essential pkg-config cmake meson ninja-build nasm git ca-certificates curl xz-utils zip patchelf file \
 	python3 python3-jinja2 python3-pip \
-	libdav1d-dev libfreetype-dev libfribidi-dev libharfbuzz-dev zlib1g-dev libasound2-dev \
+	libdav1d-dev libfreetype-dev libfribidi-dev libharfbuzz-dev libfontconfig-dev zlib1g-dev libasound2-dev \
 	libsdl2-dev libsdl2-ttf-dev libegl-dev libgles-dev libdrm-dev >/dev/null
 
 # mpv wants Meson 1.3 or newer; Debian 12 has 1.0
@@ -75,11 +75,15 @@ fi
 
 echo "== libass $LIBASS_VERSION"
 fetch https://github.com/libass/libass/releases/download/$LIBASS_VERSION/libass-$LIBASS_VERSION.tar.xz libass-$LIBASS_VERSION -J
-if [ ! -f $PREFIX/lib/libass.so ]; then
+# with fontconfig: the one way libass falls back, character by character, to the font that has it (Korean, Thai,
+# Arabic... in subtitles and titles). The bundled fonts.conf lists only the player's own fonts. (A libass from before
+# that, without it, is built again, and mpv on it.)
+if [ ! -f $PREFIX/lib/.libass-fontconfig ]; then
+	rm -f $PREFIX/lib/libass.* $PREFIX/lib/libmpv.*
 	cd $SRC/libass-$LIBASS_VERSION
-	# no fontconfig: the player names its own fonts (share/banana-player/fonts, mpv's sub-fonts-dir)
-	./configure --prefix=$PREFIX --disable-static --disable-fontconfig --disable-require-system-font-provider >/dev/null
-	make -j$JOBS >/dev/null && make install >/dev/null
+	make distclean >/dev/null 2>&1 || true
+	./configure --prefix=$PREFIX --disable-static --enable-fontconfig >/dev/null
+	make -j$JOBS >/dev/null && make install >/dev/null && touch $PREFIX/lib/.libass-fontconfig
 fi
 
 echo "== mpv $MPV_VERSION"
@@ -108,10 +112,20 @@ B="$OUT/BananaPlayer"
 rm -rf "$OUT" && mkdir -p "$B/bin" "$B/lib" "$B/share/banana-player"
 cp /tmp/bp-build/banana-player "$B/bin/"
 cp -r /src/assets/fonts "$B/share/banana-player/"
+# fontconfig's view of the fonts: the player's folder only (the launcher sets FONTCONFIG_FILE), its cache in
+# $XDG_CACHE_HOME (run-port: /data/home/.cache)
+cat > "$B/share/banana-player/fonts.conf" <<'CONF'
+<?xml version="1.0"?>
+<!DOCTYPE fontconfig SYSTEM "urn:fontconfig:fonts.dtd">
+<fontconfig>
+	<dir prefix="relative">fonts</dir>
+	<cachedir prefix="xdg">fontconfig</cachedir>
+</fontconfig>
+CONF
 cp /src/LICENSE /src/README.md "$B/"
 
 # what the player loads that BananaOS doesn't have: libmpv and everything it needs, minus the system's own
-SYSTEM='^(linux-vdso|ld-linux|libc\.|libm\.|libdl\.|libpthread\.|librt\.|libresolv\.|libstdc\+\+|libgcc_s|libSDL2|libasound|libfreetype|libz\.|libpng|libdrm|libEGL|libGLES|libGL\.|libgbm|libGLdispatch|libGLX|libX|libxcb|libwayland|libbz2|libbrotli|libexpat)'
+SYSTEM='^(linux-vdso|ld-linux|libc\.|libm\.|libdl\.|libpthread\.|librt\.|libresolv\.|libstdc\+\+|libgcc_s|libSDL2|libasound|libfreetype|libz\.|libpng|libdrm|libEGL|libGLES|libGL\.|libgbm|libGLdispatch|libGLX|libX|libxcb|libwayland|libbz2|libbrotli)'
 # a file's own NEEDED entries (not ldd's whole tree: a system library's needs are the system's), with where each is
 needed() {
 	local f=$1

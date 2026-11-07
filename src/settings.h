@@ -4,15 +4,23 @@
 
 namespace bp
 {
-	// What the top panel shows for an audio file (mp3, flac...): its cover (embedded, or cover.jpg beside it), or a
-	// visualizer drawn from the sound by FFmpeg's filters; the title, artist and album over either.
-	enum AudioDisplay { AUDIO_AUTO, AUDIO_COVER_BARS, AUDIO_BARS, AUDIO_WAVES, AUDIO_SPECTRUM, AUDIO_COVER, AUDIO_DISPLAYS };
-	// "Auto": the cover when there is one, else the bars. "Cover + bars": the bars over the cover's lower part (the
-	// bars alone with no cover). Both wait for the file to say if it has a cover.
-	const char* audioDisplayLabel(int d);
-	// mpv's lavfi-complex for a visualizer: the first audio track to the speakers and, drawn, to the picture (Cover +
-	// bars: over the first video track, the cover); "" for none (the cover, or nothing). Auto draws as Bars.
-	std::string audioVisualizerGraph(int d);
+	// Music on the top panel: its album art (embedded, or cover.jpg beside it), a visualizer drawn from the sound by
+	// FFmpeg's filters, or the art with the visualizer over its lower part; a song with no art shows the visualizer
+	// whatever this says. The title, artist and album over either.
+	// None: neither, the title alone on black (the lightest)
+	enum MusicShow { SHOW_ART, SHOW_BOTH, SHOW_VIS, SHOW_NONE, SHOWS };
+	enum Visualizer { VIS_BARS, VIS_WAVES, VIS_SPECTRUM, VISUALIZERS };
+	// music only (a video never loops): all = back to the folder's first file after its last
+	enum Loop { LOOP_OFF, LOOP_ALL, LOOP_ONE, LOOPS };
+	const char* musicShowLabel(int v);
+	const char* visualizerLabel(int v);
+	const char* loopLabel(int v);
+	// mpv's lavfi-complex: the first audio track to the speakers and, drawn, to the picture; overCover: over the first
+	// video track (the art), on its lower part
+	std::string visualizerGraph(int vis, bool overCover);
+	// None's picture: black, a tiny one at 5 frames a second drawn from the sound (so it ends with it): the last
+	// visualizer's frame would stay otherwise
+	std::string blankGraph();
 
 	// <stateDir>/settings.conf: what the Settings page changes, for every file
 	struct Settings
@@ -27,7 +35,7 @@ namespace bp
 		// the handheld's buttons while a video plays; off: only touch acts there (no press by accident in a pocket
 		// or a hand), the menus' and the browser's buttons still work
 		bool buttonHotkeys = true;
-		int audioDisplay = AUDIO_AUTO;
+		int musicShow = SHOW_ART, visualizer = VIS_BARS, loop = LOOP_OFF;
 		// folders with a ".hidden" file in them: listed (and their videos in Recent) only when this is on
 		bool showHiddenFolders = false;
 	};

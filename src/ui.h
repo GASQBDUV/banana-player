@@ -7,6 +7,7 @@
 #include <SDL.h>
 #include <SDL_ttf.h>
 #include <string>
+#include <array>
 #include <map>
 #include <unordered_map>
 
@@ -108,6 +109,8 @@ namespace bp
 		bool clearHistory(Player& p);	// true when it cleared (the second time)
 		bool act(int id, Player& p);	// a touch button let go of on it
 		bool pressAnyway(Button b, Player& p);
+		// music playing: X loop, Y visualizer, SELECT what's shown (a video: audio, subtitles, picture size)
+		bool musicKey(Button b, Player& p);
 		Rect buttonRect(int id) const;
 		std::string signature(const Player& p) const;
 
@@ -133,6 +136,13 @@ namespace bp
 
 		SDL_Renderer* ren = nullptr;
 		TTF_Font* fonts[3] = {};	// small, normal, large
+		// for text Pixelify Sans has no glyphs for, at the same sizes: Fusion Pixel (Chinese, Japanese, Korean,
+		// Vietnamese, Greek), then Noto Sans Thai, Arabic, Hebrew, Devanagari
+		std::vector<std::array<TTF_Font*, 3>> fallbacks;
+		// the text in pieces, each with a font that has its characters: one piece in one font when one font has
+		// them all (no mix of looks in a name), else a font a run of characters (an Arabic name's ".mkv")
+		std::vector<std::pair<TTF_Font*, std::string>> runs(const std::string& s, int size) const;
+		int textWidth(const std::string& s, int size) const;
 		std::unordered_map<std::string, SDL_Texture*> cache;
 		std::string drawn, fontsDir;
 
@@ -167,8 +177,9 @@ namespace bp
 		// the settings' rows: Quit, the subtitle style, Audio display, the switches, Clear play history, About
 		// the settings' rows: the subtitle style, Audio display, the switches, Clear play history (Quit and About are
 		// the menu's own tabs: QUIT_ROW and ABOUT_ROW match no row)
-		static constexpr int QUIT_ROW = -1, STYLE_ROW0 = 0, AUDIO_ROW = STYLE_KEYS, TOGGLE_ROW = STYLE_KEYS + 1;
-		static constexpr int SET_Y = 54, SET_H = 34, SET_ROWS = STYLE_KEYS + 9, SET_SHOWN = 9,
+		static constexpr int QUIT_ROW = -1, STYLE_ROW0 = 0, MUSIC_ROW = STYLE_KEYS, VIS_ROW = STYLE_KEYS + 1,
+			TOGGLE_ROW = STYLE_KEYS + 2;
+		static constexpr int SET_Y = 54, SET_H = 34, SET_ROWS = STYLE_KEYS + 10, SET_SHOWN = 9,
 			CLEAR_ROW = SET_ROWS - 1, ABOUT_ROW = -2;
 		static constexpr int64_t STYLE_ROW = -2;	// the subtitle menu's last row: the settings page
 		static constexpr int QUIT_BTN = 10, BACK_BTN = 11, SCREEN_BTN = 12, INFO_BTN = 13, LOCK_BTN = 14, EXIT_BTN = 15;

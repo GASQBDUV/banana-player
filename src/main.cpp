@@ -467,7 +467,7 @@ int main(int argc, char** argv)
 				// played to its end: next time from the start; on to the next video, or out after the last
 				player.saveResume();
 				player.finished = false;
-				if (!player.next()) leave();
+				if (!player.advance()) leave();
 			}
 			// the place is kept now and then too: a battery that runs out, a power-off after sleeping
 			bool woke = slept.exchange(false);
@@ -485,7 +485,7 @@ int main(int argc, char** argv)
 				player.open(list, index);
 				ui.showPlayer();
 			}
-			if (scripted && (player.loaded || !player.playing()) && running)
+			if (scripted && (player.loaded || !player.playing() || !player.error.empty()) && running)
 			{
 				static Uint32 next = SDL_GetTicks() + 800;
 				static size_t pressed = 0;

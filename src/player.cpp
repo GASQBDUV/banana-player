@@ -59,6 +59,8 @@ namespace bp
 			opt("sub-fonts-dir", o.fontsDir.c_str());
 			opt("osd-fonts-dir", o.fontsDir.c_str());
 			opt("osd-font", "Inter");
+			// tests: libass with no system fonts, as on BananaOS (BP_FONT_PROVIDER=none)
+			if (const char* fp = getenv("BP_FONT_PROVIDER")) opt("sub-font-provider", fp);
 		}
 		opt("osd-font-size", "40");
 		opt("idle", "yes");				// stay up between files and after the last: we decide when to leave
@@ -130,6 +132,17 @@ namespace bp
 		load();
 	}
 
+	bool Player::advance()
+	{
+		if (next()) return true;
+		// Loop all (music): from the last back to the first
+		if (!isAudio || settings.loop != LOOP_ALL || playlist.empty()) return false;
+		saveResume();
+		current = 0;
+		load();
+		return true;
+	}
+
 	bool Player::next()
 	{
 		if (current + 1 >= count()) return false;
@@ -190,9 +203,11 @@ namespace bp
 
 		// a visualizer is set before the file opens (Auto's waits to see if there's a cover); a video has none
 		isAudio = isAudioFile(path);
-		// (Auto and Cover + bars wait for the file: they depend on its cover)
-		bool vis = isAudio && settings.audioDisplay != AUDIO_AUTO && settings.audioDisplay != AUDIO_COVER_BARS;
-		if (vis) prop("lavfi-complex", audioVisualizerGraph(settings.audioDisplay));
+		// (the art's choices wait for the file: they depend on whether it has art)
+		if (isAudio && settings.musicShow == SHOW_VIS) prop("lavfi-complex", visualizerGraph(settings.visualizer, false));
+		if (isAudio && settings.musicShow == SHOW_NONE) prop("lavfi-complex", blankGraph());
+		// Loop one: the song again and again (mpv's own); a video never loops
+		prop("loop-file", isAudio && settings.loop == LOOP_ONE ? "inf" : "no");
 
 		if (settings.keepHistory)
 		{
@@ -240,7 +255,7 @@ namespace bp
 				};
 				if (wantAid > 0 && missing(TrackType::Audio, wantAid)) prop("aid", "auto");
 				if (wantSid > 0 && missing(TrackType::Sub, wantSid)) prop("sid", "auto");
-				if (isAudio && (settings.audioDisplay == AUDIO_AUTO || settings.audioDisplay == AUDIO_COVER_BARS)) applyAudioDisplay();
+				if (isAudio && (settings.musicShow == SHOW_ART || settings.musicShow == SHOW_BOTH)) applyAudioDisplay();
 				updateOverlay();
 				break;
 			}
@@ -402,13 +417,15 @@ namespace bp
 	void Player::setSettings(const Settings& s)
 	{
 		for (auto& p : subStyleProperties(s.style)) prop(p.first.c_str(), p.second);
-		bool displayChanged = s.audioDisplay != settings.audioDisplay;
+		bool displayChanged = s.musicShow != settings.musicShow || s.visualizer != settings.visualizer;
+		bool loopChanged = s.loop != settings.loop;
 		settings = s;
 		if (displayChanged && isAudio && loaded)
 		{
 			applyAudioDisplay();
 			updateOverlay();
 		}
+		if (loopChanged && isAudio) prop("loop-file", s.loop == LOOP_ONE ? "inf" : "no");
 		// switched off: nothing kept from now, and what was kept goes
 		if (!s.keepHistory) clearHistory();
 		// switched off: the folder kept so far goes too
@@ -536,24 +553,29 @@ namespace bp
 		return false;
 	}
 
-	int Player::shownAudioDisplay() const
+	int Player::shownMusic() const
 	{
-		// Auto: the cover when the file (or its folder) has one, the bars otherwise; Cover + bars: the bars alone
-		// when there's no cover
-		bool cover = hasCover(tracks);
-		switch (settings.audioDisplay)
-		{
-		case AUDIO_AUTO: return cover ? AUDIO_COVER : AUDIO_BARS;
-		case AUDIO_COVER_BARS: return cover ? AUDIO_COVER_BARS : AUDIO_BARS;
-		default: return settings.audioDisplay;
-		}
+		// the art's choices need art: a song with none shows the visualizer (None is none either way)
+		if (settings.musicShow == SHOW_NONE) return SHOW_NONE;
+		return hasCover(tracks) ? settings.musicShow : SHOW_VIS;
 	}
 
 	void Player::applyAudioDisplay()
 	{
-		int d = shownAudioDisplay();
-		std::string graph = audioVisualizerGraph(d);
+		int show = shownMusic();
+		std::string graph = show == SHOW_ART ? "" : show == SHOW_NONE ? blankGraph() : visualizerGraph(settings.visualizer, show == SHOW_BOTH);
+		bool had = !get("lavfi-complex").empty();
 		if (get("lavfi-complex") != graph) prop("lavfi-complex", graph);
+		if (graph.empty() && had)
+		{
+			// a graph taken off leaves no track chosen: the song's sound and its art back
+			prop("aid", seenAid > 0 ? std::to_string(seenAid) : "auto");
+			// by its id: "auto" while playing doesn't pick the art again
+			int64_t art = 0;
+			for (auto& t : tracks)
+				if (t.type == TrackType::Video && !art) art = t.id;
+			prop("vid", art ? std::to_string(art) : "auto");
+		}
 	}
 
 	// ASS text: braces and backslashes would be its codes
@@ -577,11 +599,10 @@ namespace bp
 			return;
 		}
 		std::string title = get("media-title"), artist = get("metadata/by-key/Artist"), album = get("metadata/by-key/Album");
-		int d = shownAudioDisplay();
-		bool cover = d == AUDIO_COVER && hasCover(tracks);
-		// over a visualizer: at the top; over a cover: at the bottom; on black: in the middle, bigger
-		const char* at = d == AUDIO_COVER ? (cover ? "{\\an2}" : "{\\an5}") : "{\\an8}";
-		int big = cover || d != AUDIO_COVER ? 40 : 56;
+		// over the art alone: at the bottom; with a visualizer (along the bottom): at the top; alone: in the middle, bigger
+		int show = shownMusic();
+		const char* at = show == SHOW_ART ? "{\\an2}" : show == SHOW_NONE ? "{\\an5}" : "{\\an8}";
+		int big = show == SHOW_NONE ? 56 : 40;
 		std::string text = std::string(at) + "{\\bord3}{\\fs" + std::to_string(big) + "}{\\b1}" + assText(title) + "{\\b0}";
 		if (!artist.empty()) text += "\\N{\\fs" + std::to_string(big * 3 / 4) + "}" + assText(artist);
 		if (!album.empty()) text += "\\N{\\fs" + std::to_string(big * 2 / 3) + "}{\\c&HB4B4B4&}" + assText(album);
@@ -667,12 +688,13 @@ namespace bp
 		{
 			// what the top panel shows, as mpv has it now
 			std::string graph = get("lavfi-complex");
-			row("Top screen", graph.find("[vid1]") != std::string::npos ? "Cover + bars"
-				: graph.find("showfreqs") != std::string::npos ? "Bars"
-				: graph.find("showwaves") != std::string::npos      ? "Waves"
-				: graph.find("showspectrum") != std::string::npos   ? "Spectrum"
-				: hasCover(tracks)                                  ? "Cover"
-																	: "Title");
+			std::string vis = graph.find("showwaves") != std::string::npos ? "Waves"
+							  : graph.find("showspectrum") != std::string::npos ? "Spectrum" : "Bars";
+			row("Top screen", graph == blankGraph() ? "Title only"
+				: graph.find("[vid1]") != std::string::npos ? "Album art + " + vis
+				: !graph.empty() ? "Visualizer: " + vis
+				: shownMusic() == SHOW_NONE ? "Title only"
+				: hasCover(tracks) ? "Album art" : "Title");
 		}
 		if (a)
 		{

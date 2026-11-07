@@ -25,6 +25,11 @@ tested and laid out.
 - **Bottom panel:** `Ui` draws with SDL_Renderer and SDL_ttf. The layout is in 640×480 units (the RG DS panel), and
   text is rendered at the panel's real size, so Pixelify Sans stays sharp on the RG DS Plus's 1024×768 (the same 4:3
   shape, scaled ×1.6).
+- **Fonts:** the bottom panel draws with SDL_ttf: Pixelify Sans, else (per text, or per run of characters when no
+  one font has them all) Fusion Pixel and Noto Sans Thai/Arabic/Hebrew/Devanagari. SDL_ttf on BananaOS doesn't shape,
+  so Arabic and Hebrew names read left to right there. libass (subtitles, titles) is built with fontconfig, and the
+  bundled `share/banana-player/fonts.conf` (`FONTCONFIG_FILE`, set by the launcher) lists only the player's fonts:
+  that's how it falls back per character with no system fonts. `BP_FONT_PROVIDER=none` shows libass without it.
 - **Sound:** ALSA `default`. There's no sound server: bananad writes `/run/banana/asound.conf` (speaker, headphones or
   Bluetooth through bluez-alsa).
 

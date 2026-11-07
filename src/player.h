@@ -36,6 +36,9 @@ namespace bp
 		void open(const std::vector<std::string>& list, int index);
 		bool next();	// false on the last one
 		bool prev();	// false on the first one
+		// at a file's end: the next one, or (Loop all, music) the first again; false when that's all
+		bool advance();
+		bool playingAudio() const { return isAudio && !playlist.empty(); }
 		int index() const { return current; }
 		int count() const { return (int)playlist.size(); }
 
@@ -105,7 +108,7 @@ namespace bp
 		void prop(const char* name, const std::string& value);
 		// an audio file: the visualizer (Audio display) and the title, artist and album over the top panel
 		void applyAudioDisplay();
-		int shownAudioDisplay() const;	// the setting as it comes out for this file (its cover or none)
+		int shownMusic() const;	// MusicShow as it comes out for this file (its art or none)
 		void updateOverlay();
 		bool isAudio = false;
 		std::string get(const char* name) const;	// "" where mpv has none

@@ -30,7 +30,8 @@ namespace bp
 		"Remember last folder", "Keep play history", "Button hotkeys", "Show hidden folders"};
 	static bool Settings::*const REMEMBER[7] = {&Settings::rememberPosition, &Settings::rememberAudio, &Settings::rememberSubs,
 		&Settings::rememberFolder, &Settings::keepHistory, &Settings::buttonHotkeys, &Settings::showHiddenFolders};
-	static const char* RECENT = "\x01recent";	// the browser's recent videos: not a folder
+	static const char* RECENT = "\x01recent";
+	static const char* SHOW_SHORT[SHOWS] = {"Art", "Art+Viz", "Viz", "None"};	// MusicShow on a button	// the browser's recent videos: not a folder
 
 	static std::string baseName(const std::string& p)
 	{
@@ -66,7 +67,73 @@ namespace bp
 				return false;
 			}
 		}
+		static const char* FALLBACKS[] = {"fusion-pixel-12px-proportional-zh_hans.ttf", "NotoSansThai.ttf",
+			"NotoSansArabic.ttf", "NotoSansHebrew.ttf", "NotoSansDevanagari.ttf"};
+		for (const char* name : FALLBACKS)
+		{
+			std::array<TTF_Font*, 3> f = {};
+			for (int i = 0; i < 3; i++)
+			{
+				// Fusion Pixel is a 12-pixel font: at whole multiples of 12 its pixels stay square
+				int px = (int)std::lround(SIZES[i] * sy);
+				if (name == FALLBACKS[0]) px = std::max(12, (int)std::lround(SIZES[i] * sy / 12.0) * 12);
+				f[i] = TTF_OpenFont((fontsDir + "/" + name).c_str(), px);
+			}
+			if (f[0] && f[1] && f[2]) fallbacks.push_back(f);
+			else for (auto* x : f) if (x) TTF_CloseFont(x);
+		}
 		return true;
+	}
+
+	std::vector<std::pair<TTF_Font*, std::string>> Ui::runs(const std::string& s, int size) const
+	{
+		// the characters, each with its bytes
+		std::vector<std::pair<Uint32, std::string>> chars;
+		for (size_t i = 0; i < s.size();)
+		{
+			unsigned char c = s[i];
+			Uint32 cp = c;
+			int n = c < 0x80 ? 1 : (c >> 5) == 6 ? 2 : (c >> 4) == 14 ? 3 : 4;
+			if (n > 1)
+			{
+				cp = c & (0x7F >> n);
+				for (int k = 1; k < n && i + k < s.size(); k++) cp = (cp << 6) | (s[i + k] & 0x3F);
+			}
+			chars.push_back({cp, s.substr(i, n)});
+			i += n;
+		}
+		auto hasAll = [&](TTF_Font* f) {
+			for (auto& c : chars)
+				if (c.first >= 0x20 && !TTF_GlyphIsProvided32(f, c.first)) return false;
+			return true;
+		};
+		if (hasAll(fonts[size])) return {{fonts[size], s}};
+		for (auto& f : fallbacks)
+			if (hasAll(f[size])) return {{f[size], s}};
+		// no one font has them all: Pixelify Sans where it can, else the first fallback that has the character
+		std::vector<std::pair<TTF_Font*, std::string>> out;
+		for (auto& c : chars)
+		{
+			TTF_Font* f = fonts[size];
+			if (c.first >= 0x20 && !TTF_GlyphIsProvided32(f, c.first))
+				for (auto& fb : fallbacks)
+					if (TTF_GlyphIsProvided32(fb[size], c.first)) { f = fb[size]; break; }
+			if (!out.empty() && out.back().first == f) out.back().second += c.second;
+			else out.push_back({f, c.second});
+		}
+		return out;
+	}
+
+	int Ui::textWidth(const std::string& s, int size) const
+	{
+		int total = 0;
+		for (auto& r : runs(s, size))
+		{
+			int w = 0;
+			TTF_SizeUTF8(r.first, r.second.c_str(), &w, nullptr);
+			total += w;
+		}
+		return total;
 	}
 
 	Ui::~Ui()
@@ -74,6 +141,8 @@ namespace bp
 		for (auto& c : cache) SDL_DestroyTexture(c.second);
 		for (auto* f : fonts)
 			if (f) TTF_CloseFont(f);
+		for (auto& f : fallbacks)
+			for (auto* x : f) TTF_CloseFont(x);
 		if (ren) SDL_DestroyRenderer(ren);
 	}
 
@@ -309,7 +378,8 @@ namespace bp
 		if (row == ABOUT_ROW) { openAbout(p); return; }
 		Settings s = p.settings;
 		if (row - STYLE_ROW0 < STYLE_KEYS) stepStyle(s.style, (StyleKey)(row - STYLE_ROW0), dir);
-		else if (row == AUDIO_ROW) s.audioDisplay = ((s.audioDisplay + dir) % AUDIO_DISPLAYS + AUDIO_DISPLAYS) % AUDIO_DISPLAYS;
+		else if (row == MUSIC_ROW) s.musicShow = ((s.musicShow + dir) % SHOWS + SHOWS) % SHOWS;
+		else if (row == VIS_ROW) s.visualizer = ((s.visualizer + dir) % VISUALIZERS + VISUALIZERS) % VISUALIZERS;
 		else s.*REMEMBER[row - TOGGLE_ROW] = !(s.*REMEMBER[row - TOGGLE_ROW]);
 		p.setSettings(s);
 	}
@@ -329,6 +399,32 @@ namespace bp
 		bool r = press(b, p);
 		p.settings.buttonHotkeys = keep;
 		return r;
+	}
+
+	bool Ui::musicKey(Button b, Player& p)
+	{
+		if (!p.playingAudio()) return false;
+		Settings s = p.settings;
+		std::string said;
+		if (b == Button::X)
+		{
+			s.loop = (s.loop + 1) % LOOPS;
+			said = loopLabel(s.loop);
+		}
+		else if (b == Button::Y)
+		{
+			s.visualizer = (s.visualizer + 1) % VISUALIZERS;
+			said = std::string("Visualizer: ") + visualizerLabel(s.visualizer);
+		}
+		else if (b == Button::Select)
+		{
+			s.musicShow = (s.musicShow + 1) % SHOWS;
+			said = std::string("Show: ") + musicShowLabel(s.musicShow);
+		}
+		else return false;
+		p.setSettings(s);
+		p.osd(said);
+		return true;
 	}
 
 	bool Ui::press(Button b, Player& p)
@@ -433,10 +529,11 @@ namespace bp
 			p.osd(std::string(p.settings.buttonHotkeys ? "Press B" : "Tap") + " again to " + (browserMode ? "close" : "quit"),
 				QUIT_WINDOW_MS);
 			break;
-		case Button::X: openMenu(Page::Audio, p); break;
-		case Button::Y: openMenu(Page::Subs, p); break;
+		case Button::X: if (!musicKey(b, p)) openMenu(Page::Audio, p); break;
+		case Button::Y: if (!musicKey(b, p)) openMenu(Page::Subs, p); break;
 		case Button::Start: openMainMenu(p); break;
 		case Button::Select:
+			if (musicKey(b, p)) break;
 			p.setAspect(nextAspect(p.aspect));
 			p.osd(std::string("Aspect: ") + aspectName(p.aspect));
 			break;
@@ -487,12 +584,6 @@ namespace bp
 			return false;
 		}
 		Button b = GRID[id / 5][id % 5].button;
-		if (b == Button::Select)
-		{
-			p.setAspect(nextAspect(p.aspect));
-			p.osd(std::string("Aspect: ") + aspectName(p.aspect));
-			return false;
-		}
 		if (b != Button::Up) return pressAnyway(b, p);
 		// a tap on the speed goes round its choices
 		double s = stepSpeed(p.speed, 1, true);
@@ -697,7 +788,36 @@ namespace bp
 			for (auto& t : cache) SDL_DestroyTexture(t.second);
 			cache.clear();
 		}
-		SDL_Surface* surf = TTF_RenderUTF8_Blended(fonts[size], s.empty() ? " " : s.c_str(), c);
+		// each piece in its font, side by side on one baseline
+		std::vector<SDL_Surface*> parts;
+		int w = 0, ascent = 0, below = 0;
+		auto pieces = runs(s.empty() ? " " : s, size);
+		std::vector<TTF_Font*> partFonts;
+		for (auto& r : pieces)
+		{
+			SDL_Surface* p = TTF_RenderUTF8_Blended(r.first, r.second.c_str(), c);
+			if (!p) continue;
+			partFonts.push_back(r.first);
+			parts.push_back(p);
+			w += p->w;
+			ascent = std::max(ascent, TTF_FontAscent(r.first));
+			below = std::max(below, p->h - TTF_FontAscent(r.first));
+		}
+		if (parts.empty()) return nullptr;
+		SDL_Surface* surf = parts.size() == 1 ? parts[0] : SDL_CreateRGBSurfaceWithFormat(0, w, ascent + below, 32, SDL_PIXELFORMAT_ARGB8888);
+		if (parts.size() > 1)
+		{
+			int x = 0;
+			for (size_t i = 0; i < parts.size(); i++)
+			{
+				SDL_Surface* p = parts[i];
+				SDL_SetSurfaceBlendMode(p, SDL_BLENDMODE_NONE);
+				SDL_Rect at{x, ascent - TTF_FontAscent(partFonts[i]), p->w, p->h};
+				SDL_BlitSurface(p, nullptr, surf, &at);
+				x += p->w;
+				SDL_FreeSurface(p);
+			}
+		}
 		if (!surf) return nullptr;
 		SDL_Texture* t = SDL_CreateTextureFromSurface(ren, surf);
 		SDL_FreeSurface(surf);
@@ -712,14 +832,14 @@ namespace bp
 		if (maxW > 0)
 		{
 			int w = 0, limit = (int)(maxW * sx);
-			TTF_SizeUTF8(fonts[size], str.c_str(), &w, nullptr);
+			w = textWidth(str, size);
 			bool cut = false;
 			while (w > limit && !str.empty())
 			{
 				// drop one UTF-8 character
 				do str.pop_back(); while (!str.empty() && ((unsigned char)str.back() & 0xC0) == 0x80);
 				cut = true;
-				TTF_SizeUTF8(fonts[size], (str + "...").c_str(), &w, nullptr);
+				w = textWidth(str + "...", size);
 			}
 			if (cut) str += "...";
 		}
@@ -1055,10 +1175,15 @@ namespace bp
 					clearArmed ? YELLOW : at ? YELLOW : DIM, 608, y + 4, 0, 1);
 				continue;
 			}
-			else if (i == AUDIO_ROW)
+			else if (i == MUSIC_ROW)
 			{
-				label = "Audio display";
-				value = audioDisplayLabel(p.settings.audioDisplay);
+				label = "Music display";
+				value = musicShowLabel(p.settings.musicShow);
+			}
+			else if (i == VIS_ROW)
+			{
+				label = "Visualizer";
+				value = visualizerLabel(p.settings.visualizer);
 			}
 			else
 			{
@@ -1160,9 +1285,10 @@ namespace bp
 				case Button::A: label = p.paused ? "Play" : "Pause"; break;
 				case Button::Right: label = "+10s"; break;
 				case Button::R: label = "Next"; off = p.index() + 1 >= p.count(); break;
-				case Button::X: label = "Audio"; break;
-				case Button::Y: label = "Subs"; break;
-				case Button::Select: label = aspectName(p.aspect); break;
+				// music: loop, visualizer, what's shown; a video: audio, subtitles, picture size
+				case Button::X: label = p.playingAudio() ? loopLabel(p.settings.loop) : "Audio"; break;
+				case Button::Y: label = p.playingAudio() ? visualizerLabel(p.settings.visualizer) : "Subs"; break;
+				case Button::Select: label = p.playingAudio() ? SHOW_SHORT[p.settings.musicShow] : aspectName(p.aspect); break;
 				case Button::Up: label = speedLabel(p.speed); break;
 				default: label = "Menu"; break;
 				}
@@ -1184,7 +1310,10 @@ namespace bp
 			return trackLabel(*t, n);
 		};
 		drawText("Audio: " + label(a, TrackType::Audio), 0, CREAM, 24, 374, 592);
-		drawText("Subtitles: " + label(s, TrackType::Sub), 0, CREAM, 24, 402, 592);
+		if (p.playingAudio())
+			drawText(std::string(loopLabel(p.settings.loop)) + "   " + musicShowLabel(p.settings.musicShow) + " · " +
+				visualizerLabel(p.settings.visualizer), 0, CREAM, 24, 402, 592);
+		else drawText("Subtitles: " + label(s, TrackType::Sub), 0, CREAM, 24, 402, 592);
 		Rect lk = buttonRect(LOCK_BTN);
 		bool holding = touchLocked && lockHoldAt;
 		fill(lk, holding ? PRESSED : touchLocked ? YELLOW : pressedBtn == LOCK_BTN ? PRESSED : TEAL);

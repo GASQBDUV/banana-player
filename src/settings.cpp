@@ -13,46 +13,53 @@ namespace bp
 		{"show-hidden-folders", &Settings::showHiddenFolders},
 	};
 
-	static const char* AUDIO_IDS[AUDIO_DISPLAYS] = {"auto", "cover-bars", "bars", "waves", "spectrum", "cover"};
-	static const char* AUDIO_LABELS[AUDIO_DISPLAYS] = {"Auto", "Cover + bars", "Bars", "Waves", "Spectrum", "Cover only"};
+	static const char* SHOW_IDS[SHOWS] = {"art", "both", "visualizer", "none"};
+	static const char* SHOW_LABELS[SHOWS] = {"Album art", "Art + visualizer", "Visualizer", "None"};
+	static const char* VIS_IDS[VISUALIZERS] = {"bars", "waves", "spectrum"};
+	static const char* VIS_LABELS[VISUALIZERS] = {"Bars", "Waves", "Spectrum"};
+	static const char* LOOP_IDS[LOOPS] = {"off", "all", "one"};
+	static const char* LOOP_LABELS[LOOPS] = {"No loop", "Loop all", "Loop one"};
 
-	const char* audioDisplayLabel(int d)
+	const char* musicShowLabel(int v) { return SHOW_LABELS[v >= 0 && v < SHOWS ? v : 0]; }
+	const char* visualizerLabel(int v) { return VIS_LABELS[v >= 0 && v < VISUALIZERS ? v : 0]; }
+	const char* loopLabel(int v) { return LOOP_LABELS[v >= 0 && v < LOOPS ? v : 0]; }
+
+	std::string visualizerGraph(int vis, bool overCover)
 	{
-		return d >= 0 && d < AUDIO_DISPLAYS ? AUDIO_LABELS[d] : AUDIO_LABELS[0];
+		// drawn at the panel's shape (mpv scales it to the panel) and 30 frames a second: light enough for the A55s
+		// beside the decoding. BananaOS's yellow on black.
+		int h = overCover ? 200 : 480;
+		std::string size = "s=640x" + std::to_string(h);
+		std::string draw;
+		switch (vis)
+		{
+		case VIS_WAVES: draw = "showwaves=" + size + ":mode=cline:rate=30:colors=0xF0B429"; break;
+		case VIS_SPECTRUM: draw = "showspectrum=" + size + ":slide=scroll:mode=combined:color=fire:scale=log,fps=30"; break;
+		default: draw = "showfreqs=" + size + ":mode=bar:ascale=log:fscale=log:win_size=1024:colors=0xF0B429,fps=30"; break;
+		}
+		if (!overCover) return "[aid1] asplit [ao] [v]; [v] " + draw + ",format=yuv420p [vo]";
+		// the art (one picture: overlay repeats it) fitted on a black canvas timed by the visualizer, and the
+		// visualizer, its black keyed out, over the lower part
+		return "[aid1] asplit [ao] [a]; "
+			   "[a] " + draw + ",pad=640:480:0:280,split [t] [b]; "
+			   "[t] drawbox=c=black:t=fill [canvas]; "
+			   "[vid1] scale=640:480:force_original_aspect_ratio=decrease [cover]; "
+			   "[canvas] [cover] overlay=x=(W-w)/2:y=(H-h)/2:eof_action=repeat [base]; "
+			   "[b] colorkey=black:0.1 [vis]; "
+			   "[base] [vis] overlay,format=yuv420p [vo]";
 	}
 
-	std::string audioVisualizerGraph(int d)
+	std::string blankGraph()
 	{
-		// drawn at 640x480 (the panel's shape; mpv scales it to the panel) and 30 frames a second: light enough for
-		// the RK3568's cores beside the decoding. BananaOS's yellow on black.
-		std::string draw;
-		switch (d)
-		{
-		case AUDIO_COVER_BARS:
-			// the cover (one picture: overlay repeats it) fitted on a black canvas timed by the bars, and the bars,
-			// their black keyed out, over its lower part
-			return "[aid1] asplit [ao] [a]; "
-				   "[a] showfreqs=s=640x200:mode=bar:ascale=log:fscale=log:win_size=1024:colors=0xF0B429,fps=30,"
-				   "pad=640:480:0:280,split [t] [b]; "
-				   "[t] drawbox=c=black:t=fill [canvas]; "
-				   "[vid1] scale=640:480:force_original_aspect_ratio=decrease [cover]; "
-				   "[canvas] [cover] overlay=x=(W-w)/2:y=(H-h)/2:eof_action=repeat [base]; "
-				   "[b] colorkey=black:0.1 [bars]; "
-				   "[base] [bars] overlay,format=yuv420p [vo]";
-		case AUDIO_AUTO: case AUDIO_BARS:
-			draw = "showfreqs=s=640x480:mode=bar:ascale=log:fscale=log:win_size=1024:colors=0xF0B429,fps=30";
-			break;
-		case AUDIO_WAVES: draw = "showwaves=s=640x480:mode=cline:rate=30:colors=0xF0B429"; break;
-		case AUDIO_SPECTRUM: draw = "showspectrum=s=640x480:slide=scroll:mode=combined:color=fire:scale=log,fps=30"; break;
-		default: return "";
-		}
-		return "[aid1] asplit [ao] [v]; [v] " + draw + ",format=yuv420p [vo]";
+		return "[aid1] asplit [ao] [a]; [a] showwaves=s=32x24:rate=5,drawbox=c=black:t=fill,format=yuv420p [vo]";
 	}
 
 	std::string serializeSettings(const Settings& s)
 	{
 		std::string out = serializeSubStyle(s.style);
-		out += std::string("audio-display = ") + AUDIO_IDS[s.audioDisplay] + "\n";
+		out += std::string("music-show = ") + SHOW_IDS[s.musicShow] + "\n";
+		out += std::string("visualizer = ") + VIS_IDS[s.visualizer] + "\n";
+		out += std::string("loop = ") + LOOP_IDS[s.loop] + "\n";
 		for (auto& r : REMEMBER) out += std::string(r.key) + " = " + (s.*r.field ? "yes" : "no") + "\n";
 		return out;
 	}
@@ -74,8 +81,23 @@ namespace bp
 			std::string key = trim(line.substr(0, eq)), value = trim(line.substr(eq + 1));
 			for (auto& r : REMEMBER)
 				if (key == r.key && (value == "yes" || value == "no")) s.*r.field = value == "yes";
-			for (int d = 0; d < AUDIO_DISPLAYS; d++)
-				if (key == "audio-display" && value == AUDIO_IDS[d]) s.audioDisplay = d;
+			for (int v = 0; v < SHOWS; v++)
+				if (key == "music-show" && value == SHOW_IDS[v]) s.musicShow = v;
+			for (int v = 0; v < VISUALIZERS; v++)
+				if (key == "visualizer" && value == VIS_IDS[v]) s.visualizer = v;
+			for (int v = 0; v < LOOPS; v++)
+				if (key == "loop" && value == LOOP_IDS[v]) s.loop = v;
+			// the one setting before 0.1.1, kept: auto, cover-bars, bars, waves, spectrum, cover
+			if (key == "audio-display")
+			{
+				if (value == "cover-bars") { s.musicShow = SHOW_BOTH; s.visualizer = VIS_BARS; }
+				else if (value == "bars" || value == "waves" || value == "spectrum")
+				{
+					s.musicShow = SHOW_VIS;
+					s.visualizer = value == "bars" ? VIS_BARS : value == "waves" ? VIS_WAVES : VIS_SPECTRUM;
+				}
+				else s.musicShow = SHOW_ART;
+			}
 		}
 		return s;
 	}

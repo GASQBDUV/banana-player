@@ -66,6 +66,7 @@ Put your videos anywhere on the card. A `videos` folder inside `roms` gets its o
 | **Video** | MP4, MKV, WebM, AVI, MOV, TS, M4V, MPG, WMV, FLV and more: H.264, HEVC, VP9, AV1, MPEG-2/4… |
 | **Music** | MP3, FLAC, OGG, WAV, M4A, AAC, Opus, WMA, AIFF, APE and more |
 | **Subtitles** | Inside the video (SRT, ASS/SSA, PGS, VobSub, VTT), or files next to it (`movie.srt`, `movie.en.ass`) |
+| **Languages** | Subtitles, titles and file names in Latin scripts (Vietnamese too), Cyrillic, Greek, Chinese, Japanese, Korean, Thai, Arabic, Hebrew and Hindi |
 
 Videos are decoded by the handheld's CPU. Up to 720p plays smoothly; 1080p, and especially HEVC (x265), may drop
 frames. **Info** shows how it's keeping up.
@@ -95,9 +96,9 @@ you were playing.
 | **LEFT / RIGHT** | Back 5 seconds / forward 10 seconds (hold to keep going) |
 | **L / R** | Previous / next file in the folder |
 | **UP / DOWN** | Faster / slower (0.5x, 1x, 1.5x, 2x, 2.5x) |
-| **X** | Choose the audio track |
-| **Y** | Choose subtitles (or turn them off) |
-| **SELECT** | Picture size: Fit → Fill → Stretch |
+| **X** | Video: choose the audio track · Music: No loop → Loop all → Loop one |
+| **Y** | Video: choose subtitles · Music: Bars → Waves → Spectrum |
+| **SELECT** | Video: Fit → Fill → Stretch · Music: Album art → Art + visualizer → Visualizer → None |
 | **START** | Menu: Recent, Settings, About, Exit |
 | **B twice** | Close the video (back to the list) |
 | **F + L2** | Screenshot of both screens (saved in the card's `screenshots` folder) |
@@ -140,22 +141,23 @@ Four tabs. Switch with **L/R** or a tap; **B** or **START** closes it.
 
 ## Music
 
-Songs show their title, artist and album on the top screen. **Settings › Audio display** picks what's behind them:
+Songs show their title, artist and album on the top screen. While a song plays, three buttons change how:
 
-- **Auto** (default): the album art, or bars when a song has none.
-- **Cover + bars:** the album art with moving bars over it.
-- **Bars**, **Waves** or **Spectrum:** always that visualizer.
-- **Cover only:** the album art, or just the title.
+- **SELECT: what's shown.** **Album art** (default), **Art + visualizer** (the visualizer over the bottom of the art),
+  **Visualizer**, or **None** (just the title: the lightest on the battery). A song without art shows the visualizer.
+  Album art can be inside the song file or a `cover.jpg` in the same folder.
+- **Y: the visualizer.** **Bars**, **Waves** or **Spectrum**.
+- **X: looping.** **No loop**, **Loop all** (the folder starts again after its last song) or **Loop one** (the same
+  song again). Videos never loop.
 
-Album art can be inside the song file or a `cover.jpg` in the same folder. It's decided for every song, so a song
-without art falls back to the visualizer.
+All three are remembered.
 
 ## Settings
 
 | Setting | Default | |
 |---|---|---|
 | Subtitle font, size, colour, border, border colour | Inter, Medium, White, Normal, Black | How plain subtitles (SRT, VTT…) look, with a live preview. Styled subtitles (ASS/SSA) keep their own look. |
-| Audio display | Auto | What the top screen shows for music |
+| Music display, Visualizer | Album art, Bars | What the top screen shows for music (also on SELECT and Y while a song plays) |
 | Remember position | On | Reopening a file continues where you stopped |
 | Remember audio track | On | Keeps each file's audio track; a new file starts in the language you chose last |
 | Remember subtitles | On | The same, for subtitles |
@@ -179,8 +181,9 @@ without art falls back to the visualizer.
 - Made by [tonywei92](https://github.com/tonywei92) for [BananaOS](https://github.com/JorreFog/BananaLinux) by
   JorreFog and the Banana contributors.
 - Plays with [mpv](https://mpv.io) and [FFmpeg](https://ffmpeg.org). Drawn with [SDL](https://libsdl.org).
-- Fonts: [Pixelify Sans](https://github.com/eifetx/Pixelify-Sans), [Inter](https://github.com/rsms/inter) and
-  [Fusion Pixel](https://github.com/TakWolf/fusion-pixel-font), under the SIL Open Font License 1.1.
+- Fonts: [Pixelify Sans](https://github.com/eifetx/Pixelify-Sans), [Inter](https://github.com/rsms/inter),
+  [Fusion Pixel](https://github.com/TakWolf/fusion-pixel-font) and [Noto Sans](https://notofonts.github.io) Thai,
+  Arabic, Hebrew and Devanagari, under the SIL Open Font License 1.1.
 - The film in the screenshots is [Sintel](https://durian.blender.org), © copyright Blender Foundation |
   durian.blender.org, under [CC BY 3.0](https://creativecommons.org/licenses/by/3.0/).
 

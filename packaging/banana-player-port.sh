@@ -15,5 +15,7 @@ fi
 LOG_DIR="${XDG_CONFIG_HOME:-/data/home/.config}/banana-player"
 mkdir -p "$LOG_DIR"
 export LD_LIBRARY_PATH="$D/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+# the player's fonts for subtitles and titles in any script (BananaOS has none of its own)
+export FONTCONFIG_FILE="$D/share/banana-player/fonts.conf"
 # the last run's log, for a report: home/.config/banana-player/log.txt on the card
 exec "$D/bin/banana-player" "$@" > "$LOG_DIR/log.txt" 2>&1
