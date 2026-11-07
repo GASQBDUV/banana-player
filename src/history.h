@@ -16,6 +16,8 @@ namespace bp
 		// first, and only once
 		void add(const std::string& path);
 		void clear() { paths.clear(); }
+		// those for which drop is true taken out (the network's: their history switched off)
+		void removeIf(bool (*drop)(const std::string&));
 		const std::vector<std::string>& items() const { return paths; }
 
 	private:

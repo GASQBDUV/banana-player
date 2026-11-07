@@ -14,6 +14,7 @@ namespace bp
 		{"remember-subtitles", &Settings::rememberSubs},
 		{"remember-folder", &Settings::rememberFolder},
 		{"keep-history", &Settings::keepHistory},
+		{"keep-network-history", &Settings::keepNetHistory},
 		{"button-hotkeys", &Settings::buttonHotkeys},
 		{"show-hidden-folders", &Settings::showHiddenFolders},
 		{"battery-percent", &Settings::batteryPercent},

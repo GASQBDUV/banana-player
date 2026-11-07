@@ -1,6 +1,7 @@
 #include "ui.h"
 #include "format.h"
 #include "playlist.h"
+#include "netpath.h"
 #include <algorithm>
 #include <cmath>
 #include <ctime>
@@ -12,7 +13,9 @@ namespace bp
 	// BananaOS's colours
 	static const SDL_Color BG{0x17, 0x16, 0x1C, 255}, CREAM{0xF1, 0xED, 0xE2, 255}, YELLOW{0xF0, 0xB4, 0x29, 255},
 		TEAL{0x23, 0x43, 0x46, 255}, DIM{0x8A, 0x86, 0x7C, 255}, RED{0xE0, 0x5A, 0x4F, 255}, SCREEN{0x3A, 0x3A, 0x44, 255},
-		PRESSED{0x3A, 0x6E, 0x72, 255};
+		PRESSED{0x3A, 0x6E, 0x72, 255},
+		// a panel's body (dialogs, empty states), and secondary text on teal (DIM there is too faint)
+		SURFACE{0x21, 0x1F, 0x28, 255}, DIM_TEAL{0xB4, 0xAF, 0xA3, 255};
 	static const int SIZES[3] = {18, 24, 32};
 	static const Uint32 QUIT_WINDOW_MS = 2000, SCRUB_MS = 100;
 	static const double BACK_S = 5, FORWARD_S = 10;
@@ -21,6 +24,77 @@ namespace bp
 
 	static float sx = 1, sy = 1;	// logical 640x480 -> the panel's pixels
 
+	// ---- glyphs: small pictures as rows of cells ('#' drawn), every icon on one grid ----
+
+#define GLYPH(name, ...) static const char* const name##_ROWS[] = {__VA_ARGS__}; \
+	static const Ui::Glyph name{name##_ROWS, (int)(sizeof name##_ROWS / sizeof *name##_ROWS)};
+	GLYPH(G_CLOCK, "...#####...", ".#########.", ".####.####.", "#####.#####", "#####.#####", "#####...###", "###########",
+		".#########.", ".#########.", "...#####...")
+	GLYPH(G_CARD, "...#######", "..##.#.#.#", ".###.#.#.#", ".#########", ".#########", ".#########", ".#########",
+		".#########", ".#########", ".#########")
+	GLYPH(G_FOLDER, "#####......", "###########", "###########", "###########", "###########", "###########",
+		"###########", "###########", "###########")
+	GLYPH(G_FILM, "###########", "#.#.#.#.#.#", "###########", "###########", "###########", "###########",
+		"###########", "#.#.#.#.#.#", "###########")
+	GLYPH(G_NOTE, "......####", "......####", "......#..#", "......#...", "......#...", "......#...", "...####...",
+		"..#####...", "..#####...", "...###....")
+	GLYPH(G_PICTURE, "###########", "#.........#", "#......##.#", "#......##.#", "#....#....#", "#...###...#",
+		"#..#####..#", "#.#######.#", "#.........#", "###########")
+	GLYPH(G_NETWORK, "...#####...", "...#####...", "...#####...", ".....#.....", ".#########.", ".#.......#.",
+		"###.....###", "###.....###", "###.....###")
+	GLYPH(G_PLAY, "##......", "####....", "######..", "########", "########", "######..", "####....", "##......")
+	GLYPH(G_PAUSE, "###..###", "###..###", "###..###", "###..###", "###..###", "###..###", "###..###", "###..###")
+	GLYPH(G_PREV, "##.....##", "##....###", "##..#####", "#########", "#########", "##..#####", "##....###", "##.....##")
+	GLYPH(G_NEXT, "##.....##", "###....##", "#####..##", "#########", "#########", "#####..##", "###....##", "##.....##")
+	GLYPH(G_GEAR, "...###...", ".#.###.#.", "#########", ".###.###.", "###...###", ".###.###.", "#########",
+		".#.###.#.", "...###...")
+	GLYPH(G_INFO, "..#####..", ".###.###.", "#########", "###..####", "####.####", "####.####", "####.####",
+		".##...##.", "..#####..")
+	GLYPH(G_LOCK, "..#####..", ".##...##.", ".#.....#.", ".#.....#.", "#########", "#########", "####.####",
+		"####.####", "#########", "#########")
+	GLYPH(G_MOON, "...####..", ".####....", ".###.....", "###......", "###......", "###......", ".###....#",
+		".#######.", "...####..")
+	GLYPH(G_SPEAKER, "....#....", "...##..#.", "####.#..#", "####..#.#", "####..#.#", "####.#..#", "...##..#.",
+		"....#....")
+	GLYPH(G_CC, "###########", "###########", "#.......###", "###########", "###########", "##.....##.#",
+		"###########", "###########")
+	GLYPH(G_POWER, "....#....", ".#..#..#.", "#...#...#", "#...#...#", "#.......#", "#.......#", ".#.....#.",
+		"..#####..")
+	GLYPH(G_CROSS, "##.....##", "###...###", ".###.###.", "..#####..", "...###...", "..#####..", ".###.###.",
+		"###...###", "##.....##")
+	GLYPH(G_SUN, "....#....", ".#.....#.", "...###...", "..#####..", "#.#####.#", "..#####..", "...###...",
+		".#.....#.", "....#....")
+	GLYPH(G_CHECK, "........#", ".......##", "#.....##.", "##...##..", ".##.##...", "..###....", "...#.....")
+	GLYPH(G_ALERT, ".....#.....", "....###....", "...##.##...", "...##.##...", "..###.###..", "..###.###..",
+		".#########.", ".####.####.", "###########")
+	GLYPH(G_BOOKMARK, "#######", "#######", "#######", "#######", "#######", "#######", "#######", "###.###",
+		"##...##", "#.....#")
+	GLYPH(G_DOWNLOAD, "...###...", "...###...", "...###...", "#########", ".#######.", "..#####..", "...###...",
+		"....#....", ".........", "#########")
+	GLYPH(G_RADIO, "..###..", ".#...#.", "#.....#", "#.....#", "#.....#", ".#...#.", "..###..")
+	GLYPH(G_RADIO_ON, "..###..", ".#...#.", "#.###.#", "#.###.#", "#.###.#", ".#...#.", "..###..")
+	GLYPH(G_DOWN, "##.....##", ".##...##.", "..##.##..", "...###...", "....#....")
+	GLYPH(G_UP, "....#....", "...###...", "..##.##..", ".##...##.", "##.....##")
+	GLYPH(G_RIGHT, "##...", ".##..", "..##.", "...##", "..##.", ".##..", "##...")
+	GLYPH(G_LEFT, "...##", "..##.", ".##..", "##...", ".##..", "..##.", "...##")
+	GLYPH(G_MINUS, "#########", "#########", "#########")
+	GLYPH(G_PLUS, "...###...", "...###...", "...###...", "#########", "#########", "#########", "...###...",
+		"...###...", "...###...")
+	GLYPH(G_SEARCH, "..####...", ".##..##..", "##....##.", "##....##.", ".##..##..", "..######.", "......###",
+		".......##")
+	GLYPH(G_REFRESH, "...#####.#", ".##.....##", "#.....####", "#.........", "#........#", "#........#", ".##....##.",
+		"...####...")
+	GLYPH(G_EYE, "...#####...", ".##.....##.", "##..###..##", "#..#####..#", "##..###..##", ".##.....##.",
+		"...#####...")
+	GLYPH(G_PENCIL, "......###", ".....####", "....####.", "...####..", "..####...", ".####....", "####.....",
+		"###......", "##.......")
+	GLYPH(G_TRASH, "...###...", "#########", ".........", ".#######.", ".#.#.#.#.", ".#.#.#.#.", ".#.#.#.#.",
+		".#.#.#.#.", ".#######.")
+	GLYPH(G_PLUG, "..#...#..", "..#...#..", "#########", "#########", ".#######.", "..#####..", "...###...",
+		"....#....", "....#....")
+	GLYPH(G_BACK, "....##", "...##.", "..##..", ".##...", "##....", ".##...", "..##..", "...##.", "....##")
+#undef GLYPH
+
 	// the two rows of buttons: what each does is the button it stands for
 	static const struct { Button button; const char* hint; } GRID[2][5] = {
 		{{Button::L, "L"}, {Button::Left, "LEFT"}, {Button::A, "A"}, {Button::Right, "RIGHT"}, {Button::R, "R"}},
@@ -28,22 +102,43 @@ namespace bp
 	};
 
 	// the settings' on/off rows (TOGGLE_ROW + their index)
-	static const char* REMEMBER_LABELS[11] = {"Remember position", "Remember audio track", "Remember subtitles",
+	static const char* REMEMBER_LABELS[12] = {"Remember position", "Remember audio track", "Remember subtitles",
 		"Remember last folder", "Keep play history", "Button hotkeys", "Show hidden folders", "Battery percentage",
-		"Keep zoom between photos", "Check automatically", "Same for both screens"};
-	static bool Settings::*const REMEMBER[11] = {&Settings::rememberPosition, &Settings::rememberAudio, &Settings::rememberSubs,
+		"Keep zoom between photos", "Check automatically", "Same for both screens", "Network files in Recent"};
+	static bool Settings::*const REMEMBER[12] = {&Settings::rememberPosition, &Settings::rememberAudio, &Settings::rememberSubs,
 		&Settings::rememberFolder, &Settings::keepHistory, &Settings::buttonHotkeys, &Settings::showHiddenFolders,
-		&Settings::batteryPercent, &Settings::keepPhotoZoom, &Settings::checkUpdates, &Settings::sameBrightness};
+		&Settings::batteryPercent, &Settings::keepPhotoZoom, &Settings::checkUpdates, &Settings::sameBrightness,
+		&Settings::keepNetHistory};
 	static const struct { const char* name; const char* about; } GROUP_NAMES[] = {
-		{"Subtitles", "Font, size, colour, border"},
-		{"Music", "What's shown, visualizer"},
-		{"Photos", "Zoom, pan area"},
-		{"Remember", "Position, audio track, subtitles"},
-		{"Files", "Last folder, hidden folders, play history"},
-		{"Controls & screen", "Brightness, button hotkeys, battery percentage"},
-		{"Updates", "Check for a new version, update"},
+		{"Subtitles", "Font, size, colour"},
+		{"Music", "Display, visualizer"},
+		{"Photos", "Zoom, pan area, drag"},
+		{"Remember", "Position, tracks"},
+		{"Files", "Folders, play history"},
+		{"Controls & screen", "Brightness, buttons"},
+		{"Updates", "New versions"},
 	};
 	static const char* RECENT = "\x01recent";
+	static const char* NETROOT = "\x01net";	// the Network tab's first page: the saved connections
+	static const char* FORMDIR = "\x01form";	// a connection's form (Add connection, Edit)
+	static const char* FINDNET = "\x01find";	// the servers found on the network
+	// the form's rows
+	enum { FORM_TYPE = 20, FORM_NAME, FORM_HOST, FORM_PORT, FORM_SHARE, FORM_FOLDER, FORM_SIGNIN, FORM_USER, FORM_PASS, FORM_FTPS, FORM_TEST, FORM_SAVE };
+	// the found servers' rows
+	enum { R_FOUND = 50, R_SEARCH, R_TYPE_ADDRESS };
+	// a note drawn dim (a placeholder: what an empty field comes out as)
+	static const char DIM_NOTE = '\x02';
+	// a file's note: where it was left and its size ("at 0:42 · 13.9 MB")
+	static std::string fileNote(const std::string& at, long long size)
+	{
+		std::string sz = size >= 0 ? formatBytes(size) : "";
+		return at.empty() ? sz : sz.empty() ? at : at + " \xC2\xB7 " + sz;
+	}
+	static long long fileSize(const std::string& path)
+	{
+		struct stat st;
+		return stat(path.c_str(), &st) == 0 && S_ISREG(st.st_mode) ? (long long)st.st_size : -1;
+	}
 	static const char* SHOW_SHORT[SHOWS] = {"Art", "Art+Viz", "Viz", "None"};	// MusicShow on a button	// the browser's recent videos: not a folder
 
 	static std::string baseName(const std::string& p)
@@ -84,6 +179,11 @@ namespace bp
 				return false;
 			}
 		}
+		for (int i = 0; i < 3; i++)
+		{
+			int minx, maxx, miny, maxy, adv;
+			capHeight[i] = TTF_GlyphMetrics(fonts[i], 'H', &minx, &maxx, &miny, &maxy, &adv) == 0 ? maxy : TTF_FontAscent(fonts[i]) * 3 / 4;
+		}
 		static const char* FALLBACKS[] = {"fusion-pixel-12px-proportional-zh_hans.ttf", "NotoSansThai.ttf",
 			"NotoSansArabic.ttf", "NotoSansHebrew.ttf", "NotoSansDevanagari.ttf"};
 		for (const char* name : FALLBACKS)
@@ -102,7 +202,32 @@ namespace bp
 		return true;
 	}
 
+	// Pixelify Sans's "fi" and "fl" ligatures come out as another letter ("file" read "Ale"): its runs are cut between
+	// the two, each piece shaped on its own
+	static std::vector<std::pair<TTF_Font*, std::string>> unligated(std::vector<std::pair<TTF_Font*, std::string>> in, TTF_Font* pixel)
+	{
+		std::vector<std::pair<TTF_Font*, std::string>> out;
+		for (auto& r : in)
+		{
+			if (r.first != pixel) { out.push_back(r); continue; }
+			size_t from = 0;
+			for (size_t i = 0; i + 1 < r.second.size(); i++)
+				if (r.second[i] == 'f' && (r.second[i + 1] == 'i' || r.second[i + 1] == 'l'))
+				{
+					out.push_back({pixel, r.second.substr(from, i + 1 - from)});
+					from = i + 1;
+				}
+			out.push_back({pixel, r.second.substr(from)});
+		}
+		return out;
+	}
+
 	std::vector<std::pair<TTF_Font*, std::string>> Ui::runs(const std::string& s, int size) const
+	{
+		return unligated(shapeRuns(s, size), fonts[size]);
+	}
+
+	std::vector<std::pair<TTF_Font*, std::string>> Ui::shapeRuns(const std::string& s, int size) const
 	{
 		// the characters, each with its bytes
 		std::vector<std::pair<Uint32, std::string>> chars;
@@ -194,7 +319,26 @@ namespace bp
 		if (i < 0 || i >= (int)r.size()) return;
 		if (page == Page::Browse)
 		{
+			// no connections yet: A adds one (as the page's button does)
+			if (emptyAction()) { openForm(nullptr, nullptr, p); return; }
 			if (r[i].id < 0) return;
+			if (browseDir == FORMDIR) { formChoose(r[i].id, p); return; }
+			if (browseDir == FINDNET)
+			{
+				if (r[i].id == R_FOUND && i < (int)found.size()) { FoundHost h = found[i]; openForm(nullptr, &h, p); }
+				else if (r[i].id == R_SEARCH) enterFolder(FINDNET, p);
+				else if (r[i].id == R_TYPE_ADDRESS) openForm(nullptr, nullptr, p);
+				return;
+			}
+			if (r[i].id == 4 || r[i].id == 6)
+			{
+				// a connection (its start folder), or Try again
+				std::string path = browsePaths[i];
+				NetPath np;
+				if (r[i].id == 4 && netStore && parseNetPath(path, np)) netStore->touch(np.server);
+				enterFolder(path, p);
+				return;
+			}
 			if (r[i].id == 3)
 			{
 				if (clearHistory(p)) enterFolder("", p);	// nothing left to list: back to the first page
@@ -211,8 +355,17 @@ namespace bp
 			}
 			else
 			{
-				openRequest = path;
 				if (browseDir != RECENT) p.setLastFolder(browseDir);
+				// a network file whose folder wasn't listed (Recent): listed first, a moment, for the files that play
+				// after it, its subtitles and its cover (netListed opens it)
+				NetPath np;
+				const NetServer* sv = isNetPath(path) && parseNetPath(path, np) && netStore ? netStore->find(np.server) : nullptr;
+				if (sv && netWorker && netNames.find(netParent(path)) == netNames.end())
+				{
+					netOpenPending = path;
+					netWorker->list(++netSerial, *sv, netStore->password(*sv), netParent(path));
+				}
+				else openRequest = path;
 			}
 			return;
 		}
@@ -220,6 +373,7 @@ namespace bp
 		{
 			openMainMenu(p, TAB_SETTINGS);
 			openGroup(GROUP_SUBS);
+			styleFromSubs = true;
 			return;
 		}
 		if (r[i].id < 0) return;
@@ -250,6 +404,15 @@ namespace bp
 		page = Page::Browse;
 		touchLocked = false;	// the lock is the video's
 		dropTouch();
+		if (isNetPath(lastPlayed))
+		{
+			// its network folder, listed again (the cursor goes to it once the listing comes)
+			if (browseTab != TAB_NETWORK) tabDir[browseTab] = browseDir;
+			browseTab = TAB_NETWORK;
+			netSelect = lastPlayed;
+			enterFolder(netParent(lastPlayed), p);
+			return;
+		}
 		// listed again either way: positions changed, a file may have come or gone
 		enterFolder(lastPlayed.empty() ? browseDir : parentFolder(lastPlayed), p);
 		for (size_t i = 0; i < browsePaths.size(); i++)
@@ -278,6 +441,8 @@ namespace bp
 	void Ui::enterFolder(std::string dir, Player& p)
 	{
 		placeIn[browseDir] = {cursor, scroll};
+		netOpenPending.clear();	// gone elsewhere first: not opened
+		if (browseDir == FINDNET && dir != FINDNET && discovery) discovery->stop();
 		browseDir = dir;
 		browseRows.clear();
 		browsePaths.clear();
@@ -290,12 +455,59 @@ namespace bp
 			// a song's (kept by an earlier version) left out: songs start from their start
 			return e && e->position >= 0 && !isAudioFile(path) ? "at " + formatTime(e->position) : std::string();
 		};
-		if (dir.empty())
+		netLoading = false;
+		// what Recent lists: a file still there (on a card taken out: not), or a network one whose connection is
+		// still saved (whether the file is there is only known by asking its server: when it's opened)
+		auto inRecent = [&](const std::string& path) {
+			if (isNetPath(path))
+			{
+				NetPath np;
+				return parseNetPath(path, np) && netStore && netStore->find(np.server);
+			}
+			return exists(path) && (p.settings.showHiddenFolders || !insideHiddenFolder(path));
+		};
+		if (dir == FORMDIR) formRows();
+		else if (dir == FINDNET)
+		{
+			// a search from scratch each time it's opened (Search again too)
+			found.clear();
+			if (discovery && !discovery->running()) discovery->start(onFound, 4);
+			findWasRunning = discovery && discovery->running();
+			findRows();
+		}
+		else if (dir == NETROOT)
+		{
+			// the saved connections, the most recently used first
+			std::vector<NetServer> list = netStore ? netStore->servers() : std::vector<NetServer>();
+			std::stable_sort(list.begin(), list.end(), [](const NetServer& a, const NetServer& b) { return a.lastUsed > b.lastUsed; });
+			for (auto& sv : list)
+			{
+				std::string start = "/" + sv.share + (sv.share.empty() || sv.folder.empty() ? "" : "/" + sv.folder);
+				add(4, serverName(sv), makeNetPath(sv.id, start), std::string(netTypeLabel(sv.type)) + "  " + sv.host);
+			}
+			if (browseRows.empty()) add(-1, "No connections yet", "", "");
+		}
+		else if (isNetPath(dir))
+		{
+			// asked of the worker; "Loading..." till its answer (netListed)
+			NetPath np;
+			parseNetPath(dir, np);
+			const NetServer* sv = netStore ? netStore->find(np.server) : nullptr;
+			if (!sv) add(-1, "This connection is gone", "", "");
+			else if (!netWorker) add(-1, "No network support in this build", "", "");
+			else
+			{
+				netLoading = true;
+				add(-1, "Loading...", "", "");
+				netWorker->list(++netSerial, *sv, netStore->password(*sv), dir);
+			}
+		}
+		else if (dir.empty())
 		{
 			int recent = 0;
 			for (auto& path : p.history().items())
-				if (exists(path) && (p.settings.showHiddenFolders || !insideHiddenFolder(path))) recent++;
-			if (p.settings.keepHistory && recent) add(1, "Recently watched", RECENT, std::to_string(recent));
+				if (inRecent(path)) recent++;
+			if (p.settings.keepHistory && recent) add(1, "Recent", RECENT, std::to_string(recent) + (recent == 1 ? " item" : " items"));
 			for (auto& r : roots) add(1, r.label, r.path, r.path);
 		}
 		else if (dir == RECENT && !p.settings.keepHistory) add(-1, "Play history is off (Settings)", "", "");
@@ -303,14 +515,14 @@ namespace bp
 		{
 			// the history (a file taken away or on a card taken out left out), and a way to clear it
 			for (auto& path : p.history().items())
-				if (exists(path) && (p.settings.showHiddenFolders || !insideHiddenFolder(path))) add(2, baseName(path), path, at(path));
-			if (!browseRows.empty()) add(3, "Clear play history", "", clearArmed ? "again to clear" : "tap twice");
+				if (inRecent(path)) add(2, baseName(path), path, fileNote(at(path), isNetPath(path) ? -1 : fileSize(path)));
+			if (!browseRows.empty()) add(3, "Clear play history", "", clearArmed ? "Press again to clear" : "Press twice");
 		}
 		else
 		{
 			bool ok;
 			for (auto& e : listFolder(dir, ok, p.settings.showHiddenFolders))
-				add(e.dir ? 1 : 2, e.dir ? e.name + "/" : e.name, e.path, e.dir ? (isHiddenFolder(e.path) ? "hidden" : "") : at(e.path));
+				add(e.dir ? 1 : 2, e.name, e.path, e.dir ? (isHiddenFolder(e.path) ? "hidden" : "") : fileNote(at(e.path), fileSize(e.path)));
 			if (!ok) add(-1, "This folder can't be opened", "", "");
 		}
 		if (browseRows.empty()) add(-1, "Nothing to play here", "", "");
@@ -323,6 +535,89 @@ namespace bp
 		browseVersion++;
 	}
 
+	void Ui::netListed(NetListing* l, Player& p)
+	{
+		std::unique_ptr<NetListing> own(l);
+		if (l->test)
+		{
+			// Test connection's answer (the form's row, a connection's menu); an older test's is nothing
+			if (l->serial != testSerial) return;
+			testText = l->result.ok() ? "It works" : netErrorText(l->result.error, "The server");
+			ctxStatus = testText;
+			if (browseDir == FORMDIR) formRows();
+			browseVersion++;
+			return;
+		}
+		// the folder of a file to open, listed first: opened now, with what the folder has (alone if it failed)
+		if (!l->test && !netOpenPending.empty() && l->serial == netSerial && l->dir == netParent(netOpenPending))
+		{
+			if (l->result.ok()) netNames[l->dir] = l->names;
+			openRequest = netOpenPending;
+			netOpenPending.clear();
+			return;
+		}
+		if (l->test || l->serial != netSerial || l->dir != browseDir || page != Page::Browse) return;
+		netLoading = false;
+		browseRows.clear();
+		browsePaths.clear();
+		auto add = [&](int64_t id, const std::string& label, const std::string& path, const std::string& note) {
+			browseRows.push_back({id, label, false, note});
+			browsePaths.push_back(path);
+		};
+		NetPath np;
+		parseNetPath(l->dir, np);
+		const NetServer* sv = netStore ? netStore->find(np.server) : nullptr;
+		if (!l->result.ok())
+		{
+			add(-1, netErrorText(l->result.error, sv ? sv->host : "the server"), "", "");
+			add(6, "Try again", l->dir, "");
+		}
+		else
+		{
+			// a few folders' worth (Recent, Back to one): opening a file outside them plays it alone
+			if (netNames.size() > 32) netNames.clear();
+			netNames[l->dir] = l->names;
+		}
+		if (l->result.ok())
+			for (auto& e : l->entries)
+			{
+				std::string path = netJoin(l->dir, e.name);
+				const ResumeEntry* r = p.resumeStore().find(path);
+				std::string note = !e.dir && r && r->position >= 0 && !isAudioFile(e.name) ? "at " + formatTime(r->position) : "";
+				add(e.dir ? 1 : 2, e.name, path, e.dir ? note : fileNote(note, e.size));
+			}
+		if (browseRows.empty()) add(-1, "Nothing to play here", "", "");
+		auto it = placeIn.find(l->dir);
+		cursor = it == placeIn.end() ? 0 : it->second.first;
+		scroll = it == placeIn.end() ? 0 : it->second.second;
+		if (!netSelect.empty())
+			for (size_t i = 0; i < browsePaths.size(); i++)
+				if (browsePaths[i] == netSelect) cursor = (int)i;
+		netSelect.clear();
+		fitList();
+		browseVersion++;
+	}
+
+	bool Ui::emptyAction() const
+	{
+		return page == Page::Browse && !inMenu && browseDir == NETROOT && browseRows.size() == 1 && browseRows[0].id < 0;
+	}
+
+	bool Ui::atFirstPage() const
+	{
+		return browseDir.empty() || browseDir == NETROOT;
+	}
+
+	void Ui::switchTab(int tab, Player& p)
+	{
+		if (tab == browseTab) return;
+		tabDir[browseTab] = browseDir;
+		browseTab = tab;
+		std::string dir = tabDir[tab];
+		if (tab == TAB_NETWORK && dir.empty()) dir = NETROOT;
+		enterFolder(dir, p);
+	}
+
 	void Ui::openMainMenu(Player& p, int tab)
 	{
 		if (!inMenu) menuReturnDir = browseDir;
@@ -333,6 +628,7 @@ namespace bp
 	void Ui::showTab(int tab, Player& p)
 	{
 		menuTab = tab;
+		styleFromSubs = false;
 		cursor = scroll = 0;
 		switch (tab)
 		{
@@ -361,21 +657,78 @@ namespace bp
 	bool Ui::folderRow(int row) const
 	{
 		// a folder of the cards' (not the first page's places, nor Recent)
-		return !browseDir.empty() && browseDir != RECENT && row >= 0 && row < (int)browseRows.size() && browseRows[row].id == 1;
+		return !browseDir.empty() && browseDir != RECENT && browseDir != NETROOT && browseDir != FORMDIR && browseDir != FINDNET && !isNetPath(browseDir) && row >= 0 && row < (int)browseRows.size() && browseRows[row].id == 1;
 	}
 
-	void Ui::openFolderMenu(int row)
+	void Ui::openBrowseMenu(int row, MenuHow how)
 	{
-		if (!folderRow(row)) return;
+		if (browseDir == FORMDIR) return;
+		bool folder = folderRow(row);
+		bool server = browseDir == NETROOT && row >= 0 && row < (int)browseRows.size() && browseRows[row].id == 4;
+		std::vector<int> items;
+		std::string id;
+		if (server && how != MENU_X)
+		{
+			// the connection's own: Edit, Test, Delete
+			NetPath np;
+			if (!parseNetPath(browsePaths[row], np)) return;
+			id = np.server;
+			items = {CTX_EDIT, CTX_TEST, CTX_DELETE, CTX_CANCEL};
+		}
+		else if (browseDir == NETROOT && how == MENU_X) items = {CTX_ADD, CTX_FIND, CTX_REFRESH, CTX_CANCEL};
+		else if (folder) items = {CTX_HIDE, CTX_REFRESH, CTX_CANCEL};
+		else if (how == MENU_X) items = {CTX_REFRESH, CTX_CANCEL};
+		else return;	// Y, or a hold, on what has no menu of its own
 		ctxOpen = true;
 		ctxCursor = 0;
-		ctxPath = browsePaths[row];
+		ctxItems = items;
+		ctxServer = id;
+		ctxStatus.clear();
+		ctxArmed = false;
+		ctxPath = folder && id.empty() ? browsePaths[row] : "";
 	}
 
-	void Ui::chooseFolderMenu(int item, Player& p)
+	void Ui::chooseBrowseMenu(int item, Player& p)
 	{
+		int what = item >= 0 && item < (int)ctxItems.size() ? ctxItems[item] : CTX_CANCEL;
+		const NetServer* sv = netStore && !ctxServer.empty() ? netStore->find(ctxServer) : nullptr;
+		if (what == CTX_TEST && sv)
+		{
+			// the menu stays up, the answer under its title
+			startTest(*sv, netStore->password(*sv));
+			ctxStatus = "Testing...";
+			return;
+		}
+		if (what == CTX_DELETE && sv)
+		{
+			// twice: a saved password isn't typed again in a moment
+			if (!ctxArmed) { ctxArmed = true; return; }
+			std::string id = sv->id;
+			netStore->remove(id);
+			if (netWorker) netWorker->forget(id);
+			ctxOpen = false;
+			enterFolder(NETROOT, p);
+			return;
+		}
 		ctxOpen = false;
-		if (item != 0) return;	// Cancel
+		if (what == CTX_EDIT && sv) { openForm(sv, nullptr, p); return; }
+		if (what == CTX_ADD) { openForm(nullptr, nullptr, p); return; }
+		if (what == CTX_FIND) { enterFolder(FINDNET, p); return; }
+		if (what == CTX_REFRESH)
+		{
+			// read again where it stands, the cursor kept (on the same file, if it's still there)
+			std::string at = cursor >= 0 && cursor < (int)browsePaths.size() ? browsePaths[cursor] : "";
+			int c = cursor, s = scroll;
+			if (isNetPath(browseDir)) netSelect = at;	// (the listing comes later: netListed puts it there)
+			enterFolder(browseDir, p);
+			cursor = c;
+			scroll = s;
+			for (size_t i = 0; i < browsePaths.size(); i++)
+				if (!at.empty() && browsePaths[i] == at) cursor = (int)i;
+			fitList();
+			return;
+		}
+		if (what != CTX_HIDE) return;	// Cancel
 		std::string marker = ctxPath + "/.hidden";
 		bool ok;
 		if (isHiddenFolder(ctxPath)) ok = unlink(marker.c_str()) == 0;
@@ -394,7 +747,21 @@ namespace bp
 
 	void Ui::browseUp(Player& p)
 	{
-		if (browseDir.empty()) return;
+		if (atFirstPage()) return;
+		// the form, the found servers: back to the connections (a form left unsaved)
+		if (browseDir == FORMDIR || browseDir == FINDNET)
+		{
+			enterFolder(NETROOT, p);
+			return;
+		}
+		if (isNetPath(browseDir))
+		{
+			// up a folder; from a server's top, its list of connections
+			NetPath np;
+			parseNetPath(browseDir, np);
+			enterFolder(np.path == "/" ? std::string(NETROOT) : netParent(browseDir), p);
+			return;
+		}
 		bool atRoot = browseDir == RECENT;
 		for (auto& r : roots)
 			if (r.path == browseDir) atRoot = true;
@@ -428,7 +795,7 @@ namespace bp
 		case GROUP_MUSIC: return {MUSIC_ROW, VIS_ROW};
 		case GROUP_PHOTOS: return {T + 8, PAN_ROW, DRAG_ROW};
 		case GROUP_REMEMBER: return {T + 0, T + 1, T + 2};
-		case GROUP_FILES: return {T + 3, T + 6, T + 4, CLEAR_ROW};
+		case GROUP_FILES: return {T + 3, T + 6, T + 4, T + 11, CLEAR_ROW};
 		case GROUP_CONTROLS:
 		{
 			// the brightness rows where there are backlights (the handheld)
@@ -454,6 +821,43 @@ namespace bp
 		}
 		default: return {};
 		}
+	}
+
+	std::string Ui::settingHelp(int row) const
+	{
+		const int T = TOGGLE_ROW;
+		if (row >= STYLE_ROW0 && row < STYLE_ROW0 + STYLE_KEYS) return "How plain subtitles (SRT, VTT...) look. Styled ones (ASS) keep theirs.";
+		if (row == MUSIC_ROW) return "What the top screen shows while a song plays (SELECT changes it while playing).";
+		if (row == VIS_ROW) return "How the music is drawn: Bars, Waves, Spectrum or Circle (Y while playing).";
+		if (row == PAN_ROW) return "Which side the pan area (the small photo) is on.";
+		if (row == DRAG_ROW) return "The box: a drag moves the frame over the small photo. The photo: a drag moves the photo, as on a phone.";
+		if (row == CLEAR_ROW) return "Empties Recent. Press A twice. The places you stopped at are kept.";
+		if (row == TOP_LIGHT_ROW || row == BOTTOM_LIGHT_ROW) return "The backlight, 10% to 100%: the same levels as BananaOS's own settings.";
+		if (row == CHECK_ROW) return "Looks for a new version now.";
+		if (row == INSTALL_ROW) return "Downloads the new version, then Restart now.";
+		switch (row - T)
+		{
+		case 0: return "A video opens where you stopped. Songs always start at the beginning.";
+		case 1: return "Keeps each file's audio track. A new file starts in the language you chose last.";
+		case 2: return "Keeps each file's subtitles. A new file starts in the language you chose last.";
+		case 3: return "The file list opens where you last were.";
+		case 4: return "Keeps Recent. Turning it off also deletes the history.";
+		case 5: return "Off: the buttons can't pause, skip or close while something plays (touch still can).";
+		case 6: return "Shows the folders you've hidden (X on a folder), so you can unhide them.";
+		case 7: return "Shows the battery's percent beside its icon.";
+		case 8: return "The next photo opens at the same zoom and place. Off: each opens whole.";
+		case 9: return "Looks for a new version a few seconds after the start (Wi-Fi needed).";
+		case 10: return "One brightness for both screens. Off: each its own.";
+		case 11: return "Files played from a network folder go in Recent too. Off: they're left out, and the ones there now go.";
+		default: return "";
+		}
+	}
+
+	void Ui::stepGroup(int dir)
+	{
+		setGroup = (setGroup + dir + GROUPS) % GROUPS;
+		cursor = scroll = 0;
+		styleFromSubs = false;
 	}
 
 	void Ui::openGroup(int g)
@@ -614,33 +1018,39 @@ namespace bp
 
 	void Ui::drawQuick(const Player& p)
 	{
-		fill({0, 0, W, H}, {0, 0, 0, 170});
 		Rect pr = quickPanel();
-		fill(pr, TEAL);
-		fill({pr.x + 4, pr.y + 4, pr.w - 8, pr.h - 8}, BG);
-		drawText("Quick settings", 2, YELLOW, pr.x + 20, pr.y + 12);
+		drawDialog(pr, "");
+		drawTextMid("Quick settings", 1, YELLOW, pr.x + 24, pr.y + 28);
 		auto rows = quickRows();
 		for (int i = 0; i < (int)rows.size(); i++)
 		{
 			Rect r = quickRowRect(i);
 			bool at = i == quickCursor;
-			int row = rows[i];
-			if (at) fill(r, {0x23, 0x43, 0x46, 120});
+			int row = rows[i], mid = r.y + r.h / 2;
 			if (row == Q_QUIT)
 			{
 				fill(r, pressedBtn == 302 + i * 4 ? PRESSED : RED);
-				drawText("Quit Banana Player", 1, CREAM, r.x + r.w / 2, r.y + 12, r.w - 10, 2);
-				if (at) { fill({r.x, r.y, r.w, 3}, YELLOW); fill({r.x, r.y + r.h - 3, r.w, 3}, YELLOW); }
+				int tw = (int)std::lround(textWidth("Quit Banana Player", 1) / sx), gw = glyphW(G_POWER), x = r.x + r.w / 2 - (tw + gw + 12) / 2;
+				drawGlyphMid(G_POWER, x + gw / 2, mid, CREAM);
+				drawTextMid("Quit Banana Player", 1, CREAM, x + gw + 12, mid);
+				if (at)
+				{
+					fill({r.x, r.y, r.w, 3}, YELLOW);
+					fill({r.x, r.y + r.h - 3, r.w, 3}, YELLOW);
+					fill({r.x, r.y, 3, r.h}, YELLOW);
+					fill({r.x + r.w - 3, r.y, 3, r.h}, YELLOW);
+				}
 				continue;
 			}
+			if (at) drawFocus(r);
 			if (row == Q_SAME)
 			{
 				// a tick box
-				Rect box{r.x + 12, r.y + 13, 28, 28};
-				fill(box, CREAM);
-				fill({box.x + 3, box.y + 3, box.w - 6, box.h - 6}, BG);
-				if (p.settings.sameBrightness) fill({box.x + 7, box.y + 7, box.w - 14, box.h - 14}, YELLOW);
-				drawText("Same brightness for both screens", 1, at ? YELLOW : CREAM, r.x + 54, r.y + 14, r.w - 64);
+				Rect box{r.x + 16, mid - 13, 26, 26};
+				fill(box, at ? YELLOW : CREAM);
+				fill({box.x + 2, box.y + 2, box.w - 4, box.h - 4}, at ? TEAL : SURFACE);
+				if (p.settings.sameBrightness) drawGlyphMid(G_CHECK, box.x + box.w / 2, box.y + box.h / 2, YELLOW);
+				drawTextMid("Same brightness for both screens", 1, at ? YELLOW : CREAM, r.x + 56, mid, r.w - 66);
 				continue;
 			}
 			int pct;
@@ -656,20 +1066,22 @@ namespace bp
 				pct = pm < 0 ? -1 : (pm + 5) / 10;
 				label = row == Q_BOTTOM ? "Bottom" : p.settings.sameBrightness ? "Brightness" : "Top";
 			}
-			drawText(label, 1, at ? YELLOW : CREAM, r.x + 12, r.y + 6, 220);
-			drawText(pct < 0 ? "-" : std::to_string(pct) + "%", 0, DIM, r.x + 12, r.y + 32, 220);
+			SDL_Color ink = at ? YELLOW : CREAM;
+			drawGlyphMid(row == Q_VOLUME ? G_SPEAKER : G_SUN, r.x + 25, mid, ink);
+			drawTextMid(label, 1, ink, r.x + 46, mid, 146);
+			drawTextMid(pct < 0 ? "-" : std::to_string(pct) + "%", 0, at ? DIM_TEAL : DIM, quickMinus(i).x - 6, mid, 0, 1);
 			for (int k = 0; k < 2; k++)
 			{
 				Rect bt = k ? quickPlus(i) : quickMinus(i);
-				fill(bt, pressedBtn == 300 + i * 4 + k ? PRESSED : TEAL);
-				drawText(k ? "+" : "-", 2, CREAM, bt.x + bt.w / 2, bt.y + 6, 0, 2);
+				fill(bt, pressedBtn == 300 + i * 4 + k ? PRESSED : at ? BG : TEAL);
+				drawGlyphMid(k ? G_PLUS : G_MINUS, bt.x + bt.w / 2, bt.y + bt.h / 2, CREAM);
 			}
 			Rect bar = quickBar(i);
-			fill(bar, TEAL);
+			fill(bar, at ? BG : TEAL);
 			if (pct > 0) fill({bar.x, bar.y, bar.w * std::min(pct, 100) / 100, bar.h}, YELLOW);
 		}
-		drawText(p.settings.buttonHotkeys ? "UP/DOWN Choose   LEFT/RIGHT Change   F or B Close" : "Tap outside to close", 0, DIM,
-			W / 2, pr.y + pr.h - 26, 0, 2);
+		if (p.settings.buttonHotkeys) drawHints({{"UP/DOWN", "Choose"}, {"LEFT/RIGHT", "Change"}, {"F/B", "Close"}});
+		else drawFooterText("Tap outside to close", DIM);
 	}
 
 	void Ui::setBrightness(Backlight::Panel panel, int pm, Player& p)
@@ -717,7 +1129,7 @@ namespace bp
 		if (page == Page::Main && !inMenu && p.playingPhoto())
 			return b == Button::Left || b == Button::Right || b == Button::L || b == Button::R || b == Button::Up || b == Button::Down;
 		if (b == Button::Left || b == Button::Right) return page != Page::Audio && page != Page::Subs;
-		if (b == Button::L || b == Button::R) return page == Page::Browse && !inMenu;	// the browser's page jumps
+		if (b == Button::L || b == Button::R) return false;	// (the browser's tabs)
 		return page != Page::Main && (b == Button::Up || b == Button::Down);
 	}
 
@@ -761,6 +1173,7 @@ namespace bp
 	{
 		sameBrightness = p.settings.sameBrightness;
 		if (quickOpen) return quickKey(b, p);
+		if (kbOpen) { kbPress(b); return false; }
 		// Button hotkeys off: the buttons do nothing over a playing video (touch does it all); the pages opened from
 		// there by touch still take them
 		if (page == Page::Main && !p.settings.buttonHotkeys) return false;
@@ -770,6 +1183,16 @@ namespace bp
 		if (inMenu)
 		{
 			if (b == Button::L || b == Button::R) { showTab((menuTab + (b == Button::R ? 1 : TABS - 1)) % TABS, p); return false; }
+			// B in the subtitle style opened from the Subtitles list: back to that list
+			if (b == Button::B && page == Page::Settings && setGroup == GROUP_SUBS && styleFromSubs)
+			{
+				styleFromSubs = false;
+				inMenu = false;
+				openMenu(Page::Subs, p);
+				cursor = (int)rows(p).size() - 1;	// on Subtitle style, where it was
+				scroll = std::max(0, cursor - ROWS_SHOWN + 1);
+				return false;
+			}
 			// B in a settings group: back to the groups
 			if (b == Button::B && page == Page::Settings && setGroup >= 0)
 			{
@@ -790,6 +1213,21 @@ namespace bp
 			auto rows = settingRows();
 			int n = setGroup < 0 ? GROUPS : (int)rows.size();
 			cursor = std::min(cursor, n - 1);	// a group's rows can change (the updater's)
+			// in a group: Y (the west button) to the one before, X to the one after (L/R are the menu's tabs)
+			if (setGroup >= 0 && (b == Button::X || b == Button::Y))
+			{
+				stepGroup(b == Button::X ? 1 : -1);
+				return false;
+			}
+			// the groups: tiles two to a row, the cursor moved as on a grid
+			if (setGroup < 0 && (b == Button::Up || b == Button::Down || b == Button::Left || b == Button::Right))
+			{
+				if (b == Button::Up && cursor >= 2) cursor -= 2;
+				else if (b == Button::Down) cursor = cursor + 2 < n ? cursor + 2 : cursor / 2 < (n - 1) / 2 ? n - 1 : cursor;
+				else if (b == Button::Left && cursor % 2 == 1) cursor--;
+				else if (b == Button::Right && cursor % 2 == 0 && cursor + 1 < n) cursor++;
+				return false;
+			}
 			switch (b)
 			{
 			case Button::Up: cursor = (cursor + n - 1) % n; break;
@@ -847,19 +1285,37 @@ namespace bp
 		{
 			switch (b)
 			{
-			case Button::Up: case Button::Down: ctxCursor = 1 - ctxCursor; break;
-			case Button::A: chooseFolderMenu(ctxCursor, p); break;
-			case Button::B: case Button::X: ctxOpen = false; break;
+			case Button::Up: ctxCursor = (ctxCursor + (int)ctxItems.size() - 1) % (int)ctxItems.size(); ctxArmed = false; break;
+			case Button::Down: ctxCursor = (ctxCursor + 1) % (int)ctxItems.size(); ctxArmed = false; break;
+			case Button::A: chooseBrowseMenu(ctxCursor, p); break;
+			case Button::B: case Button::X: case Button::Y: ctxOpen = false; break;
 			default: break;
 			}
 			return false;
 		}
-		if (page == Page::Browse && !inMenu && b == Button::X) { openFolderMenu(cursor); return false; }
+		if (page == Page::Browse && !inMenu && b == Button::X) { openBrowseMenu(cursor, MENU_X); return false; }
+		if (page == Page::Browse && !inMenu && b == Button::Y) { openBrowseMenu(cursor, MENU_Y); return false; }
+		// the form: LEFT/RIGHT step a choice (Type, Sign in, FTPS); L/R don't leave it for the other tab
+		if (page == Page::Browse && !inMenu && browseDir == FORMDIR)
+		{
+			if (b == Button::L || b == Button::R) return false;
+			if ((b == Button::Left || b == Button::Right) && cursor >= 0 && cursor < (int)browseRows.size())
+			{
+				formChange(browseRows[cursor].id, b == Button::Left ? -1 : 1);
+				return false;
+			}
+		}
+		if (page == Page::Browse && !inMenu && browseDir == FINDNET && (b == Button::L || b == Button::R)) return false;
+		if (page == Page::Browse && !inMenu && (b == Button::L || b == Button::R))
+		{
+			switchTab(b == Button::R ? TAB_NETWORK : TAB_LOCAL, p);
+			return false;
+		}
 		if (page == Page::Browse && b == Button::B)
 		{
 			// opened over a video: back to it from the first page
-			if (p.playing() && browseDir.empty()) { page = Page::Main; return false; }
-			if (!browseDir.empty()) { browseUp(p); return false; }
+			if (p.playing() && atFirstPage()) { page = Page::Main; return false; }
+			if (!atFirstPage()) { browseUp(p); return false; }
 			// the first page: B twice leaves
 			if (quitArmed && SDL_GetTicks() - quitArmed < QUIT_WINDOW_MS) return true;
 			quitArmed = SDL_GetTicks();
@@ -874,8 +1330,8 @@ namespace bp
 			case Button::Up: cursor = (cursor + n - 1) % n; break;
 			case Button::Down: cursor = (cursor + 1) % n; break;
 			// a page at a time (the browser): LEFT/RIGHT, and L/R as BananaOS's lists jump
-			case Button::Left: case Button::L: cursor = std::max(0, cursor - ROWS_SHOWN); break;
-			case Button::Right: case Button::R: cursor = std::min(n - 1, cursor + ROWS_SHOWN); break;
+			case Button::Left: cursor = std::max(0, cursor - ROWS_SHOWN); break;
+			case Button::Right: cursor = std::min(n - 1, cursor + ROWS_SHOWN); break;
 			case Button::A: choose(cursor, p); break;
 			case Button::B: page = home(p); break;
 			default: break;
@@ -885,6 +1341,9 @@ namespace bp
 			return false;
 		}
 		if (p.playingPhoto() && photoKey(b, p)) return false;
+		// a file that didn't open: nothing to pause, choose or speed up (Prev, Next, the menu and leaving still go)
+		if (!p.error.empty() && (b == Button::A || b == Button::X || b == Button::Y || b == Button::Select || b == Button::Up || b == Button::Down))
+			return false;
 		switch (b)
 		{
 		case Button::A: p.togglePause(); break;
@@ -1039,13 +1498,15 @@ namespace bp
 	Ui::Rect Ui::buttonRect(int id) const
 	{
 		if (id >= PHOTO_BTN) return {0, 0, 0, 0};	// photoBtn's: they move with the pan area
-		if (id == QUIT_BTN) return {508, 434, 108, 38};
-		if (id == BACK_BTN) return {508, 10, 108, 40};
-		if (id == SCREEN_BTN) return {388, 434, 108, 38};
-		if (id == INFO_BTN) return {268, 434, 108, 38};
-		if (id == LOCK_BTN) return {148, 434, 108, 38};
+		if (id == QUIT_BTN) return {468, 428, 148, 44};
+		if (id == EMPTY_BTN) return {200, 300, 240, 52};
+		if (id == GROUP_PREV) return {16, 58, 172, 30};
+		if (id == GROUP_NEXT) return {452, 58, 172, 30};
+		if (id == SCREEN_BTN) return {320, 428, 140, 44};
+		if (id == INFO_BTN) return {172, 428, 140, 44};
+		if (id == LOCK_BTN) return {24, 428, 140, 44};
 		if (id == EXIT_BTN) return {170, 200, 300, 80};
-		if (id == BACK_ICON) return {8, 12, 48, 48};
+		if (id == BACK_ICON) return {8, 8, 48, 48};
 		return {24 + id % 5 * BTN_STEP, id / 5 ? ROW2_Y : ROW1_Y, BTN_W, BTN_H};
 	}
 
@@ -1053,8 +1514,11 @@ namespace bp
 	{
 		// "<" over what plays closes it at once (the place kept); B and Close ask twice, a pocket's press being one
 		if (id == BACK_ICON && page == Page::Main && p.playing()) return true;
+		// elsewhere (a page over what plays, START's menu): B, back a step
+		if (id == BACK_ICON && (inMenu || (page != Page::Browse && page != Page::Main))) return pressAnyway(Button::B, p);
 		if (id == QUIT_BTN || id == BACK_ICON) return pressAnyway(Button::B, p);
-		if (id == BACK_BTN) return press(Button::B, p);	// up a folder, out of a page, or (the first page) leave
+		if (id == EMPTY_BTN) { openForm(nullptr, nullptr, p); return false; }
+		if (id == GROUP_PREV || id == GROUP_NEXT) { stepGroup(id == GROUP_NEXT ? 1 : -1); return false; }
 		if (id == SCREEN_BTN) { panel.set(false); return false; }
 		if (id == EXIT_BTN) { quitRequested = true; return false; }
 		if (id == LOCK_BTN)
@@ -1080,6 +1544,7 @@ namespace bp
 		}
 		Button b = GRID[id / 5][id % 5].button;
 		if (b != Button::Up) return pressAnyway(b, p);
+		if (!p.error.empty()) return false;
 		// a tap on the speed goes round its choices
 		double s = stepSpeed(p.speed, 1, true);
 		p.setSpeed(s);
@@ -1090,6 +1555,7 @@ namespace bp
 	bool Ui::pointer(const Pointer& pt, Player& p)
 	{
 		int x = (int)(pt.x * W), y = (int)(pt.y * H);
+		if (kbOpen && panel.on()) { kbPointer(pt, x, y); return false; }
 		// dark: a touch anywhere brings the panel back, and does nothing else (the finger can't see what's there)
 		if (!panel.on())
 		{
@@ -1146,7 +1612,7 @@ namespace bp
 			if (pt.kind == Pointer::Down)
 			{
 				pressedBtn = -1;
-				for (int i = 0; i < 2; i++)
+				for (int i = 0; i < (int)ctxItems.size(); i++)
 					if (ctxRow(i).hit(x, y)) pressedBtn = 100 + i;
 				if (pressedBtn < 0) ctxOpen = false;
 			}
@@ -1154,7 +1620,9 @@ namespace bp
 			{
 				int item = pressedBtn - 100;
 				pressedBtn = -1;
-				if (ctxRow(item).hit(x, y)) chooseFolderMenu(item, p);
+				if (item != ctxCursor) ctxArmed = false;
+				ctxCursor = item;
+				if (ctxRow(item).hit(x, y)) chooseBrowseMenu(item, p);
 			}
 			return false;
 		}
@@ -1182,7 +1650,7 @@ namespace bp
 			// a list (the tracks, the browser, the settings): a drag scrolls it, a tap acts as the finger lifts
 			bool set = page == Page::Settings, info = page == Page::Info || page == Page::About;
 			int n = set ? (setGroup < 0 ? GROUPS : (int)settingRows().size()) : info ? (int)infoLines.size() : (int)rows(p).size();
-			int rowH = set ? (setGroup < 0 ? GROUP_H : SET_H) : info ? INFO_H : ROW_H, shown = set ? SET_SHOWN : info ? INFO_SHOWN : ROWS_SHOWN;
+			int rowH = set ? (setGroup < 0 ? 84 : SET_H) : info ? INFO_H : ROW_H, shown = set ? SET_SHOWN : info ? INFO_SHOWN : ROWS_SHOWN;
 			if (pt.kind == Pointer::Move && (listScrolled || std::abs(y - touchStartY) > 12))
 			{
 				listScrolled = true;
@@ -1213,10 +1681,10 @@ namespace bp
 			return r.hit(x, y) && act(id, p);
 		}
 		if (pt.kind != Pointer::Down) return false;
-		if (inMenu && y < 52)
+		if (inMenu && y < 60)
 		{
-			// the tab bar: a tab, or Back (it closes the menu as the finger lifts)
-			if (buttonRect(BACK_BTN).hit(x, y)) { pressedBtn = BACK_BTN; return false; }
+			// the tab bar: a tab, or "<" (it closes the menu as the finger lifts)
+			if (buttonRect(BACK_ICON).hit(x, y)) { pressedBtn = BACK_ICON; return false; }
 			for (int t = 0; t < TABS; t++)
 				if (tabRect(t).hit(x, y)) showTab(t, p);
 			return false;
@@ -1232,8 +1700,7 @@ namespace bp
 		if (!quitTap) quitArmed = 0;
 		// "<": B (up a folder; twice, out of what plays or, from the first page, out of the player)
 		if (backIconShown(p) && buttonRect(BACK_ICON).hit(x, y)) { pressedBtn = BACK_ICON; return false; }
-		// the pages' own Back (the browser has "<" instead)
-		if (page != Page::Main && !(page == Page::Browse && !inMenu) && buttonRect(BACK_BTN).hit(x, y)) { pressedBtn = BACK_BTN; return false; }
+		if (emptyAction() && buttonRect(EMPTY_BTN).hit(x, y)) { pressedBtn = EMPTY_BTN; return false; }
 		if (page == Page::Info || page == Page::About)
 		{
 			if (y < INFO_Y) return false;
@@ -1243,18 +1710,35 @@ namespace bp
 			scrollStart = scroll;
 			return false;
 		}
+		if (page == Page::Settings && setGroup >= 0)
+			for (int id : {GROUP_PREV, GROUP_NEXT})
+				if (buttonRect(id).hit(x, y)) { pressedBtn = id; return false; }
 		if (page == Page::Settings)
 		{
-			int top = setGroup < 0 ? GROUP_Y : SET_Y, h = setGroup < 0 ? GROUP_H : SET_H;
+			int top = SET_Y, h = SET_H;
 			int n = setGroup < 0 ? GROUPS : (int)settingRows().size();
 			int row = scroll + (y - top) / h;
-			if (y < top || y >= top + SET_SHOWN * h || row >= n) return false;
+			if (setGroup < 0)
+			{
+				// a tile
+				row = -1;
+				for (int g = 0; g < GROUPS; g++)
+					if (groupRect(g).hit(x, y)) row = g;
+				if (row < 0) return false;
+			}
+			else if (y < top || y >= top + SET_SHOWN * h || row >= n) return false;
 			cursor = row;
 			listTouch = true;
 			listScrolled = false;
 			touchStartY = y;
 			touchX = x;
 			scrollStart = scroll;
+			return false;
+		}
+		if (page == Page::Browse && !inMenu && y < 60)
+		{
+			for (int t = 0; t < 2; t++)
+				if (browseTabRect(t).hit(x, y)) switchTab(t, p);
 			return false;
 		}
 		if (page != Page::Main)
@@ -1315,7 +1799,8 @@ namespace bp
 			p.paused + setGroup * 2 + 2, (long)std::floor(p.position), (long)p.duration, (int)p.aspect, p.loaded, a ? (long long)a->id : 0LL,
 			s ? (long long)s->id : 0LL, p.tracks.size(), dragging, (int)(dragFraction * 1000), quitArmed != 0, p.speed,
 			p.index(), p.count(), pressedBtn + touchLocked * 100 + (lockHoldAt != 0) * 1000, listTouch * 1000 + browseVersion + (clearArmed != 0) * 100000 + (int)p.history().items().size() * 1000000);
-		std::string photo;
+		std::string photo = "|tab" + std::to_string(browseTab) + (netLoading ? "L" : "");
+		if (touchLocked && lockHoldAt) photo += "|hold" + std::to_string((SDL_GetTicks() - lockHoldAt) / 100);
 		if (p.playingPhoto())
 		{
 			const Player::PhotoView& v = p.photo();
@@ -1333,7 +1818,8 @@ namespace bp
 				" " + std::to_string(popupShown(p)) + std::to_string(popupCursor) + std::to_string(pressedBtn);
 		// the dots of "Loading..." go round
 		if (p.loading() || p.thumbPending()) photo += "|loading" + std::to_string(SDL_GetTicks() / 400 % 4);
-		return buf + photo + p.title + "|" + p.error + "|" + serializeSettings(p.settings) + "|bat" + std::to_string(battery.percent) + (battery.charging ? "c" : "") + (inMenu ? "|menu" + std::to_string(menuTab) : "") + (ctxOpen ? "|ctx" + std::to_string(ctxCursor) + std::to_string(pressedBtn) : "") + upd;
+		return buf + photo + p.title + "|" + p.error + "|" + serializeSettings(p.settings) + "|bat" + std::to_string(battery.percent) + (battery.charging ? "c" : "") + (inMenu ? "|menu" + std::to_string(menuTab) : "") + (ctxOpen ? "|ctx" + std::to_string(ctxCursor) + std::to_string(pressedBtn) + ctxStatus + (ctxArmed ? "!" : "") : "") + upd
+			+ (kbOpen ? "|kb" + std::to_string(kbCursor) + "," + std::to_string(kbPressed) + "," + std::to_string((int)kbShift) + (kbSymbols ? "s" : "") + std::to_string(kbEdit.caret) + kbEdit.text + (kbCaretShown() ? "|" : "") : "");
 	}
 
 	SDL_Texture* Ui::text(const std::string& s, int size, SDL_Color c)
@@ -1388,6 +1874,16 @@ namespace bp
 	// align: 0 left of x, 1 right of x, 2 centred on x; text wider than maxW (logical) is cut with "..."
 	void Ui::drawText(const std::string& s, int size, SDL_Color c, int x, int y, int maxW, int align)
 	{
+		drawTextAt(s, size, c, x, y, maxW, align, false);
+	}
+
+	void Ui::drawTextMid(const std::string& s, int size, SDL_Color c, int x, int cy, int maxW, int align)
+	{
+		drawTextAt(s, size, c, x, cy, maxW, align, true);
+	}
+
+	void Ui::drawTextAt(const std::string& s, int size, SDL_Color c, int x, int y, int maxW, int align, bool middle)
+	{
 		std::string str = s;
 		if (maxW > 0)
 		{
@@ -1407,7 +1903,15 @@ namespace bp
 		if (!t) return;
 		int w, h;
 		SDL_QueryTexture(t, nullptr, nullptr, &w, &h);
-		int px = (int)(x * sx), py = (int)(y * sy);
+		int px = (int)std::lround(x * sx), py = (int)std::lround(y * sy);
+		// middle: the capitals' middle on y (the same for every line in the font, descenders or not)
+		if (middle)
+		{
+			// in another font (Arabic, Thai, CJK...): its box's middle (their capitals aren't Pixelify's)
+			bool own = true;
+			for (auto& r : runs(str, size)) own = own && r.first == fonts[size];
+			py -= own ? TTF_FontAscent(fonts[size]) - capHeight[size] / 2 : h / 2;
+		}
 		if (align == 1) px -= w;
 		else if (align == 2) px -= w / 2;
 		SDL_Rect dst{px, py, w, h};
@@ -1418,7 +1922,12 @@ namespace bp
 	{
 		SDL_SetRenderDrawBlendMode(ren, c.a < 255 ? SDL_BLENDMODE_BLEND : SDL_BLENDMODE_NONE);
 		SDL_SetRenderDrawColor(ren, c.r, c.g, c.b, c.a);
-		SDL_Rect d{(int)(r.x * sx), (int)(r.y * sy), (int)std::ceil(r.w * sx), (int)std::ceil(r.h * sy)};
+		// by its edges on the panel's pixels: rects side by side meet, and the same width comes out the same everywhere
+		int x0 = (int)std::lround(r.x * sx), y0 = (int)std::lround(r.y * sy);
+		int x1 = (int)std::lround((r.x + r.w) * sx), y1 = (int)std::lround((r.y + r.h) * sy);
+		if (r.w > 0 && x1 <= x0) x1 = x0 + 1;
+		if (r.h > 0 && y1 <= y0) y1 = y0 + 1;
+		SDL_Rect d{x0, y0, x1 - x0, y1 - y0};
 		SDL_RenderFillRect(ren, &d);
 	}
 
@@ -1454,13 +1963,19 @@ namespace bp
 			readInfo(p);
 			scroll = std::min(scroll, std::max(0, (int)infoLines.size() - INFO_SHOWN));
 		}
+		// the search for servers over: its rows say so (Search again)
+		if (browseDir == FINDNET && page == Page::Browse && discovery && findWasRunning && !discovery->running())
+		{
+			findWasRunning = false;
+			findRows();
+		}
 		// a finger held on a folder: its menu (the lift that follows chooses nothing)
 		if (holdAt && listTouch && !listScrolled && SDL_GetTicks() - holdAt >= 600)
 		{
 			holdAt = 0;
 			listTouch = false;
 			swallowTouch = true;
-			openFolderMenu(cursor);
+			openBrowseMenu(cursor, MENU_HOLD);
 		}
 		std::string sig = signature(p);
 		if (page == Page::Info || page == Page::About)
@@ -1476,16 +1991,17 @@ namespace bp
 	{
 		SDL_SetRenderDrawColor(ren, BG.r, BG.g, BG.b, 255);
 		SDL_RenderClear(ren);
-		if (page == Page::Info || page == Page::About) drawInfo();
+		if (page == Page::Info || page == Page::About) drawInfo(p);
 		else if (page == Page::Exit) drawExit(p);
 		else if (page == Page::Settings) drawSettings(p);
 		else if (page == Page::Browse) drawTracks(p);
 		else if (page != Page::Main) drawTracks(p);
 		else drawMain(p);
 		if (inMenu) drawTabs();
-		if (ctxOpen && page == Page::Browse) drawFolderMenu();
+		if (ctxOpen && page == Page::Browse) drawBrowseMenu();
 		if (popupShown(p)) drawUpdatePopup();
 		if (quickOpen) drawQuick(p);
+		if (kbOpen) drawKeyboard();
 	}
 
 	void Ui::readPower()
@@ -1589,11 +2105,9 @@ namespace bp
 
 	void Ui::drawUpdatePopup()
 	{
-		fill({0, 0, W, H}, {0, 0, 0, 170});
 		auto items = popupItems();
 		int top = 150, bottom = popupRow((int)items.size() - 1).y + 60;
-		fill({112, top, 416, bottom - top}, TEAL);
-		fill({116, top + 4, 408, bottom - top - 8}, BG);
+		drawDialog({112, top, 416, bottom - top}, "");
 		std::string title, sub;
 		switch (updater->state())
 		{
@@ -1617,39 +2131,53 @@ namespace bp
 			sub = updater->message();
 			break;
 		}
-		drawText(title, 1, YELLOW, W / 2, top + 18, 392, 2);
-		drawText(sub, 0, CREAM, W / 2, top + 56, 392, 2);
+		drawTextMid(title, 1, YELLOW, W / 2, top + 30, 392, 2);
+		drawTextMid(sub, 0, CREAM, W / 2, top + 62, 392, 2);
 		if (updater->state() == Updater::State::Downloading)
 		{
 			// the bar
 			int pct = std::max(0, updater->progress());
-			fill({156, top + 84, 328, 10}, TEAL);
-			fill({156, top + 84, 328 * pct / 100, 10}, YELLOW);
+			fill({156, top + 84, 328, 8}, TEAL);
+			fill({156, top + 84, 328 * pct / 100, 8}, YELLOW);
 		}
 		for (int i = 0; i < (int)items.size(); i++)
 		{
 			Rect r = popupRow(i);
 			bool at = i == popupCursor;
-			fill(r, pressedBtn == 200 + i ? PRESSED : at ? TEAL : BG);
-			drawText(items[i], 1, at ? YELLOW : CREAM, W / 2, r.y + 9, r.w - 10, 2);
+			if (pressedBtn == 200 + i) fill(r, PRESSED);
+			else if (at) drawFocus(r);
+			drawTextMid(items[i], 1, at ? YELLOW : CREAM, W / 2, r.y + r.h / 2, r.w - 10, 2);
 		}
+		drawHints({{"A", "Choose"}, {"B", items.size() > 1 ? "Later" : "Close"}});
 	}
 
-	void Ui::drawFolderMenu()
+	void Ui::drawBrowseMenu()
 	{
-		fill({0, 0, W, H}, {0, 0, 0, 160});
-		fill({120, 150, 400, 236}, TEAL);
-		fill({124, 154, 392, 228}, BG);
-		std::string name = baseName(ctxPath);
-		drawText(name, 1, YELLOW, W / 2, 168, 368, 2);
-		const char* items[2] = {isHiddenFolder(ctxPath) ? "Unhide folder" : "Hide folder", "Cancel"};
-		for (int i = 0; i < 2; i++)
+		Rect box = ctxBox();
+		// its title: the connection, the folder Hide is for, else the place it's over
+		const NetServer* sv = netStore && !ctxServer.empty() ? netStore->find(ctxServer) : nullptr;
+		std::string name = sv ? serverName(*sv) : !ctxPath.empty() ? baseName(ctxPath)
+			: browseDir.empty() ? std::string("Your cards") : browseDir == NETROOT ? std::string("Your connections")
+			: browseDir == RECENT ? std::string("Recent")
+			: isNetPath(browseDir) && netBaseName(browseDir).empty() ? std::string("Shares")
+			: isNetPath(browseDir) ? netBaseName(browseDir) : baseName(browseDir);
+		drawDialog(box, name);
+		if (ctxExtra())
+			drawTextMid(ctxStatus.empty() ? std::string(sv ? std::string(netTypeLabel(sv->type)) + "  " + sv->host : "") : ctxStatus, 0,
+				ctxStatus == "It works" ? YELLOW : DIM, W / 2, box.y + 60, 368, 2);
+		for (int i = 0; i < (int)ctxItems.size(); i++)
 		{
-			Rect r = ctxRow(i);
-			bool at = i == ctxCursor;
-			fill(r, pressedBtn == 100 + i ? PRESSED : at ? TEAL : BG);
-			drawText(items[i], 1, at ? YELLOW : CREAM, W / 2, r.y + 10, r.w - 10, 2);
+			int it = ctxItems[i];
+			bool armed = it == CTX_DELETE && ctxArmed && i == ctxCursor;
+			const char* label = it == CTX_HIDE ? (isHiddenFolder(ctxPath) ? "Unhide folder" : "Hide folder")
+				: it == CTX_REFRESH ? "Refresh" : it == CTX_ADD ? "Add connection" : it == CTX_FIND ? "Find on the network"
+				: it == CTX_EDIT ? "Edit connection" : it == CTX_TEST ? "Test connection"
+				: it == CTX_DELETE ? (armed ? "Press again to delete" : "Delete connection") : "Cancel";
+			const Glyph* g = it == CTX_HIDE ? &G_EYE : it == CTX_REFRESH ? &G_REFRESH : it == CTX_ADD ? &G_PLUS : it == CTX_FIND ? &G_SEARCH
+				: it == CTX_EDIT ? &G_PENCIL : it == CTX_TEST ? &G_PLUG : it == CTX_DELETE ? &G_TRASH : &G_CROSS;
+			drawDialogRow(ctxRow(i), g, label, i == ctxCursor, pressedBtn == 100 + i, it == CTX_DELETE ? (armed ? YELLOW : RED) : it == CTX_CANCEL ? DIM : CREAM);
 		}
+		drawHints({{"A", "Choose"}, {"B", "Close"}});
 	}
 
 	SDL_Surface* Ui::capture(const Player& p)
@@ -1669,101 +2197,364 @@ namespace bp
 		return s;
 	}
 
-	void Ui::drawTabs()
-	{
-		static const char* names[TABS] = {"Recent", "Settings", "About", "Exit"};
-		fill({0, 0, W, 52}, BG);	// over whatever the page drew there
-		for (int t = 0; t < TABS; t++)
-		{
-			Rect r = tabRect(t);
-			fill(r, t == menuTab ? YELLOW : TEAL);
-			drawText(names[t], 1, t == menuTab ? BG : CREAM, r.x + r.w / 2, r.y + 7, r.w - 6, 2);
-		}
-		drawBack();
-	}
 
-	void Ui::drawExit(const Player& p)
+	void Ui::drawExit(const Player&)
 	{
-		drawText("Leave Banana Player?", 2, CREAM, W / 2, 110, 0, 2);
-		if (p.playing()) drawText("Your place in what's playing is kept.", 0, DIM, W / 2, 156, 0, 2);
+		drawTextMid("Quit Banana Player?", 2, CREAM, W / 2, 132, 0, 2);
+		drawTextMid("Your place in what you were playing is kept.", 0, DIM, W / 2, 170, 0, 2);
 		Rect b = buttonRect(EXIT_BTN);
 		fill(b, pressedBtn == EXIT_BTN ? PRESSED : RED);
-		drawText("Quit Banana Player", 1, CREAM, b.x + b.w / 2, b.y + 26, b.w - 10, 2);
-		drawText("A Quit   L/R Tabs   B Back", 0, DIM, W / 2, 444, 0, 2);
+		// it's the page's one choice: always the one A takes
+		fill({b.x - 4, b.y - 4, b.w + 8, 2}, YELLOW);
+		fill({b.x - 4, b.y + b.h + 2, b.w + 8, 2}, YELLOW);
+		fill({b.x - 4, b.y - 4, 2, b.h + 8}, YELLOW);
+		fill({b.x + b.w + 2, b.y - 4, 2, b.h + 8}, YELLOW);
+		int tw = (int)std::lround(textWidth("Quit Banana Player", 1) / sx), gw = glyphW(G_POWER);
+		int x = b.x + b.w / 2 - (tw + gw + 12) / 2;
+		drawGlyphMid(G_POWER, x + gw / 2, b.y + b.h / 2, CREAM);
+		drawTextMid("Quit Banana Player", 1, CREAM, x + gw + 12, b.y + b.h / 2);
+		drawHints({{"A", "Quit"}, {"B", "Close"}, {"L/R", "Tabs"}});
 	}
+
+	// ---- the pieces every page is made of ----
 
 	void Ui::drawBackIcon()
 	{
 		Rect b = buttonRect(BACK_ICON);
 		// armed (the browser's first page: once more quits) in yellow
-		bool armed = quitArmed && page == Page::Browse;
+		bool armed = quitArmed && page == Page::Browse && !inMenu;
 		fill(b, pressedBtn == BACK_ICON ? PRESSED : armed ? YELLOW : TEAL);
-		drawText("<", 2, armed ? BG : CREAM, b.x + b.w / 2, b.y + 6, 0, 2);
+		drawGlyphMid(G_BACK, b.x + b.w / 2 - 1, b.y + b.h / 2, armed ? BG : CREAM, 3);
 	}
 
-	void Ui::drawBack(const char* label)
+	void Ui::drawHeader(const std::string& title, const Player& p)
 	{
-		Rect b = buttonRect(BACK_BTN);
-		fill(b, pressedBtn == BACK_BTN ? PRESSED : TEAL);
-		drawText(label, 1, CREAM, b.x + b.w / 2 - 8, b.y + 7, 0, 2);
-		drawText("B", 0, YELLOW, b.x + b.w - 14, b.y + 11, 0, 1);
+		drawBackIcon();
+		int room = 616 - 72 - (battery.percent >= 0 ? BATTERY_W : 0);
+		drawTextMid(title, 2, CREAM, 72, 32, room);
+		drawBattery(616, 24, p);
+	}
+
+	void Ui::drawTab(Rect r, const char* name, bool active)
+	{
+		fill(r, active ? YELLOW : TEAL);
+		drawTextMid(name, 1, active ? BG : CREAM, r.x + r.w / 2, r.y + r.h / 2, r.w - 8, 2);
+	}
+
+	void Ui::drawHints(const std::vector<Hint>& hints)
+	{
+		// the button's name in yellow (as on the buttons), what it does in grey; centred along the bottom
+		auto w = [&](const std::string& t) { return t.empty() ? 0 : (int)std::lround(textWidth(t, 0) / sx); };
+		int gap = 24, total = 0;
+		for (auto& h : hints) total += w(h.key) + (h.key.empty() ? 0 : 7) + w(h.verb);
+		if (total + gap * ((int)hints.size() - 1) > 612) gap = 14;
+		total += gap * ((int)hints.size() - 1);
+		int x = W / 2 - total / 2;
+		for (auto& h : hints)
+		{
+			if (!h.key.empty())
+			{
+				drawTextMid(h.key, 0, YELLOW, x, FOOT_Y);
+				x += w(h.key) + 7;
+			}
+			drawTextMid(h.verb, 0, DIM, x, FOOT_Y);
+			x += w(h.verb) + gap;
+		}
+	}
+
+	void Ui::drawFooterText(const std::string& text, SDL_Color c)
+	{
+		drawTextMid(text, 0, c, W / 2, FOOT_Y, 612, 2);
+	}
+
+	void Ui::drawFocus(Rect r)
+	{
+		// the cursor: the row lit, a yellow edge on its left
+		fill(r, TEAL);
+		fill({r.x, r.y, 4, r.h}, YELLOW);
+	}
+
+	void Ui::drawScrollBar(int top, int height, int first, int shown, int total)
+	{
+		// along the right edge: where the window is in the list (nothing when it all shows)
+		if (total <= shown) return;
+		fill({630, top, 4, height}, SURFACE);
+		int h = std::max(16, height * shown / total);
+		int y = top + (height - h) * first / std::max(1, total - shown);
+		fill({630, y, 4, h}, DIM);
+	}
+
+	void Ui::drawEmpty(const Glyph& g, const std::string& title, const std::string& sub, const char* action)
+	{
+		// in the middle of the page: a big mark, what it is, what to do
+		int cy = action ? 196 : 216;
+		drawGlyphMid(g, W / 2, cy - 36, DIM, 4);
+		drawTextMid(title, 1, CREAM, W / 2, cy + 16, 560, 2);
+		if (!sub.empty()) drawTextMid(sub, 0, DIM, W / 2, cy + 46, 560, 2);
+		if (action)
+		{
+			Rect b = buttonRect(EMPTY_BTN);
+			bool at = cursor == 0;
+			fill(b, pressedBtn == EMPTY_BTN ? PRESSED : TEAL);
+			if (at) { fill({b.x, b.y, b.w, 2}, YELLOW); fill({b.x, b.y + b.h - 2, b.w, 2}, YELLOW); fill({b.x, b.y, 2, b.h}, YELLOW); fill({b.x + b.w - 2, b.y, 2, b.h}, YELLOW); }
+			int tw = (int)std::lround(textWidth(action, 1) / sx), gw = glyphW(G_PLUS);
+			int x = b.x + b.w / 2 - (tw + gw + 10) / 2;
+			drawGlyphMid(G_PLUS, x + gw / 2, b.y + b.h / 2, at ? YELLOW : CREAM);
+			drawTextMid(action, 1, at ? YELLOW : CREAM, x + gw + 10, b.y + b.h / 2);
+		}
+	}
+
+	std::string Ui::elideLeft(const std::string& s, int size, int maxW) const
+	{
+		// the end kept (a path's last folders): "...Movies/Season 1"
+		int limit = (int)(maxW * sx);
+		if (textWidth(s, size) <= limit) return s;
+		std::string t = s;
+		while (!t.empty() && textWidth("..." + t, size) > limit)
+		{
+			size_t n = 1;
+			while (n < t.size() && ((unsigned char)t[n] & 0xC0) == 0x80) n++;
+			t.erase(0, n);
+		}
+		return "..." + t;
+	}
+
+	void Ui::drawDialog(Rect box, const std::string& title)
+	{
+		// over the page, dimmed: a panel, its title on top; the footer is the dialog's (its hints drawn after)
+		fill({0, 0, W, H}, {0, 0, 0, 170});
+		fill({0, 436, W, 44}, {0x08, 0x07, 0x09, 255});	// the page's hints gone (as dark as the rest): the dialog's go there
+		fill(box, TEAL);
+		fill({box.x + 2, box.y + 2, box.w - 4, box.h - 4}, SURFACE);
+		if (!title.empty()) drawTextMid(title, 1, YELLOW, box.x + box.w / 2, box.y + 30, box.w - 40, 2);
+	}
+
+	void Ui::drawDialogRow(Rect r, const Glyph* g, const std::string& label, bool at, bool pressed, SDL_Color ink)
+	{
+		if (pressed) fill(r, PRESSED);
+		else if (at) drawFocus(r);
+		SDL_Color c = at && ink.r == CREAM.r && ink.g == CREAM.g ? YELLOW : ink;
+		int x = r.x + 20;
+		if (g)
+		{
+			drawGlyphMid(*g, x + 11, r.y + r.h / 2, c);
+			x += 36;
+		}
+		drawTextMid(label, 1, c, x, r.y + r.h / 2, r.x + r.w - x - 12);
+	}
+
+	void Ui::drawTabs()
+	{
+		static const char* names[TABS] = {"Recent", "Settings", "About", "Quit"};
+		fill({0, 0, W, 62}, BG);	// over whatever the page drew there
+		drawBackIcon();
+		for (int t = 0; t < TABS; t++) drawTab(tabRect(t), names[t], t == menuTab);
+	}
+
+	Ui::RowIcon Ui::rowIcon(int i) const
+	{
+		if (i < 0 || i >= (int)browseRows.size() || i >= (int)browsePaths.size()) return ICON_NONE;
+		const std::string& path = browsePaths[i];
+		// the form's actions (its ids are its own: they meet the found servers')
+		if (browseDir == FORMDIR) return browseRows[i].id == FORM_TEST ? ICON_TEST : browseRows[i].id == FORM_SAVE ? ICON_SAVE : ICON_NONE;
+		if (browseDir == FINDNET)
+			return browseRows[i].id == R_FOUND ? ICON_NETWORK : browseRows[i].id == R_SEARCH ? ICON_REFRESH
+				: browseRows[i].id == R_TYPE_ADDRESS ? ICON_TYPE : ICON_NONE;
+		switch (browseRows[i].id)
+		{
+		case 4: return ICON_NETWORK;
+		case 6: return ICON_REFRESH;
+		case 1:
+			if (path == RECENT) return ICON_RECENT;
+			return browseDir.empty() ? ICON_PLACE : ICON_FOLDER;	// the first page's: the places (this card...)
+		case 2: return isPhotoFile(path) ? ICON_PHOTO : isAudioFile(path) ? ICON_SONG : ICON_VIDEO;
+		default: return ICON_NONE;	// messages, Clear, Try again
+		}
+	}
+
+
+	int Ui::glyphW(const Glyph& g, int cell) const
+	{
+		int w = 0;
+		for (int r = 0; r < g.h; r++) w = std::max(w, (int)strlen(g.rows[r]));
+		return w * cell;
+	}
+
+	void Ui::drawGlyph(const Glyph& g, int x, int y, SDL_Color c, int cell)
+	{
+		// on the panel's own pixels: every cell the same size (at 1.6x a cell of 2 is 3 pixels, never 3 and 4 in turn)
+		int cs = std::max(1, (int)std::lround(cell * sx)), cy = std::max(1, (int)std::lround(cell * sy));
+		int px = (int)std::lround(x * sx), py = (int)std::lround(y * sy);
+		// the picture centred where its logical box would be (its pixel size can be a little smaller)
+		int gw = glyphW(g, 1);
+		px += (int)std::lround((gw * cell * sx - gw * cs) / 2);
+		py += (int)std::lround((g.h * cell * sy - g.h * cy) / 2);
+		SDL_SetRenderDrawBlendMode(ren, c.a < 255 ? SDL_BLENDMODE_BLEND : SDL_BLENDMODE_NONE);
+		SDL_SetRenderDrawColor(ren, c.r, c.g, c.b, c.a);
+		for (int r = 0; r < g.h; r++)
+		{
+			const char* row = g.rows[r];
+			// runs of cells as one rect
+			for (int i = 0; row[i];)
+			{
+				if (row[i] != '#') { i++; continue; }
+				int j = i;
+				while (row[j] == '#') j++;
+				SDL_Rect d{px + i * cs, py + r * cy, (j - i) * cs, cy};
+				SDL_RenderFillRect(ren, &d);
+				i = j;
+			}
+		}
+	}
+
+	void Ui::drawGlyphMid(const Glyph& g, int cx, int cy, SDL_Color c, int cell)
+	{
+		drawGlyph(g, cx - glyphW(g, cell) / 2, cy - g.h * cell / 2, c, cell);
+	}
+
+	void Ui::drawRowIcon(RowIcon icon, int x, int y, SDL_Color c)
+	{
+		// each in a 22 x 20 box (logical units)
+		const Glyph* g = icon == ICON_RECENT ? &G_CLOCK : icon == ICON_PLACE ? &G_CARD : icon == ICON_FOLDER ? &G_FOLDER
+			: icon == ICON_VIDEO ? &G_FILM : icon == ICON_SONG ? &G_NOTE : icon == ICON_PHOTO ? &G_PICTURE
+			: icon == ICON_NETWORK ? &G_NETWORK : icon == ICON_REFRESH ? &G_REFRESH : icon == ICON_TYPE ? &G_PENCIL
+			: icon == ICON_TEST ? &G_PLUG : icon == ICON_SAVE ? &G_CHECK : nullptr;
+		if (g) drawGlyphMid(*g, x + 11, y + 10, c);
+	}
+
+
+	std::string Ui::browseWhere() const
+	{
+		// where it is: "Videos / Show / Season 1" (from the first page's place it's in), "MY-PC / Media / Movies"
+		std::string where = browseDir.empty() ? "Your cards" : browseDir == RECENT ? "Recent"
+			: browseDir == NETROOT ? "Your connections" : browseDir == FORMDIR ? (formId.empty() ? "Add connection" : "Edit connection")
+			: browseDir == FINDNET ? "On your network" : browseDir;
+		if (isNetPath(browseDir))
+		{
+			NetPath np;
+			parseNetPath(browseDir, np);
+			const NetServer* sv = netStore ? netStore->find(np.server) : nullptr;
+			where = (sv ? serverName(*sv) : std::string("?")) + (np.path == "/" ? "" : np.path);
+		}
+		else if (!browseDir.empty() && browseDir != RECENT && browseDir != NETROOT && browseDir != FORMDIR && browseDir != FINDNET)
+		{
+			size_t best = 0;
+			for (auto& r : roots)
+				if (r.path.size() > best && (browseDir == r.path || browseDir.rfind(r.path + "/", 0) == 0))
+				{
+					best = r.path.size();
+					where = r.label + browseDir.substr(r.path.size());
+				}
+		}
+		// the folders apart: "share / Movies"
+		std::string out;
+		for (char c : where) out += c == '/' ? std::string(" / ") : std::string(1, c);
+		return out;
 	}
 
 	void Ui::drawTracks(const Player& p)
 	{
-		if (page == Page::Browse)
+		bool browse = page == Page::Browse;
+		if (browse && !inMenu)
 		{
-			if (!inMenu)
+			drawBackIcon();
+			// the tabs, as START's menu has them
+			static const char* TABS_NAMES[2] = {"Local", "Network"};
+			for (int t = 0; t < 2; t++) drawTab(browseTabRect(t), TABS_NAMES[t], t == browseTab);
+			drawBattery(616, 24, p);
+			// where it is, its end kept; the folder it's in brighter
+			std::string where = elideLeft(browseWhere(), 0, 592);
+			size_t cut = where.rfind(" / ");
+			if (cut == std::string::npos) drawTextMid(where, 0, CREAM, 24, SUB_Y);
+			else
 			{
-				std::string title = browseDir.empty() ? "Banana Player" : browseDir == RECENT ? "Recently watched" : baseName(browseDir);
-				drawBackIcon();
-				drawText(title.empty() ? browseDir : title, 2, YELLOW, 68, 24, battery.percent >= 0 ? 548 - BATTERY_W : 548);
-				drawBattery(616, 26, p);
-				if (!browseDir.empty() && browseDir != RECENT)
-				{
-					// where it is, from the first page's place it's in: "Videos/Show/Season 1"
-					std::string where = browseDir;
-					size_t best = 0;
-					for (auto& r : roots)
-						if (r.path.size() > best && (browseDir == r.path || browseDir.rfind(r.path + "/", 0) == 0))
-						{
-							best = r.path.size();
-							where = r.label + browseDir.substr(r.path.size());
-						}
-					drawText(where, 0, DIM, 24, 60, 470);
-				}
+				std::string head = where.substr(0, cut + 3);
+				drawTextMid(head, 0, DIM, 24, SUB_Y);
+				drawTextMid(where.substr(cut + 3), 0, CREAM, 24 + (int)std::lround(textWidth(head, 0) / sx), SUB_Y);
 			}
+		}
+		else if (!browse) drawHeader(page == Page::Audio ? "Audio" : "Subtitles", p);
+		auto r = rows(p);
+		bool form = browse && browseDir == FORMDIR;
+		// a message alone (nothing here, loading, no connections): in the middle of the page, not as a row to choose
+		if (browse && !form && r.size() == 1 && r[0].id < 0)
+		{
+			const std::string& m = r[0].label;
+			bool net = browseDir == NETROOT || isNetPath(browseDir);
+			const Glyph& g = net ? G_NETWORK : browseDir == RECENT ? G_CLOCK : G_FOLDER;
+			std::string sub = m == "No connections yet" ? "A computer or NAS that shares its files"
+				: m == "Nothing to play here" ? "No videos, music or photos in this folder"
+				: m == "This folder can't be opened" ? "Is the card still in?"
+				: m == "Play history is off (Settings)" ? "Turn it on in Settings, Files" : "";
+			std::string title = m == "Play history is off (Settings)" ? "Play history is off" : m;
+			drawEmpty(g, title, sub, emptyAction() ? "Add connection" : nullptr);
 		}
 		else
-		{
-			drawText(page == Page::Audio ? "Audio" : "Subtitles", 2, YELLOW, 24, 24);
-			drawBack();
-		}
-		auto r = rows(p);
-		for (int i = scroll; i < (int)r.size() && i < scroll + ROWS_SHOWN; i++)
-		{
-			int y = ROW_Y + (i - scroll) * ROW_H;
-			if (i == cursor) fill({16, y, 608, ROW_H - 4}, TEAL);
-			if (r[i].selected) drawText("*", 1, YELLOW, 32, y + 8);
-			int noteW = 0;
-			// Recent's Clear row says how it stands now (the list was made before the first tap expired)
-			std::string note = page == Page::Browse && r[i].id == 3 ? (clearArmed ? "again to clear" : "tap twice") : r[i].note;
-			if (!note.empty())
+			for (int i = scroll; i < (int)r.size() && i < scroll + ROWS_SHOWN; i++)
 			{
-				// a resume time, a count, a root's path: right-aligned and short
-				drawText(note, 0, clearArmed && r[i].id == 3 ? YELLOW : DIM, 608, y + 12, 200, 1);
-				noteW = 210;
+				int y = ROW_Y + (i - scroll) * ROW_H, mid = y + (ROW_H - 4) / 2;
+				bool at = i == cursor;
+				bool style = r[i].id == STYLE_ROW;
+				// the subtitle style: apart from the tracks, a line above it
+				if (style || (form && r[i].id == FORM_TEST)) fill({32, y - 3, 576, 1}, {0x3A, 0x38, 0x44, 255});
+				if (at) drawFocus({16, y, 608, ROW_H - 4});
+				int noteW = 0;
+				// Recent's Clear row says how it stands now (the list was made before the first press expired)
+				std::string note = browse && r[i].id == 3 ? (clearArmed ? "Press again to clear" : "Press twice") : r[i].note;
+				bool placeholder = !note.empty() && note[0] == DIM_NOTE;
+				if (placeholder) note.erase(0, 1);
+				SDL_Color soft = at ? DIM_TEAL : DIM;
+				if (!note.empty())
+				{
+					// a resume time and a size, a count, a root's path: right-aligned and short; a form's value, longer
+					int w = form ? 380 : 260;
+					SDL_Color c = clearArmed && r[i].id == 3 ? YELLOW : form && !placeholder ? (r[i].id == FORM_TEST && note == "It works" ? YELLOW : CREAM) : soft;
+					// a path keeps its end
+					std::string shown = !form && note[0] == '/' ? elideLeft(note, 0, w) : note;
+					drawTextMid(shown, form ? 1 : 0, c, 608, mid, w, 1);
+					noteW = form ? std::min(w, (int)std::lround(textWidth(shown, 1) / sx)) + 20 : std::min(w, (int)std::lround(textWidth(shown, 0) / sx)) + 16;
+				}
+				int textX = 32;
+				if (browse)
+				{
+					// what the row is, as a mark before its name
+					RowIcon icon = rowIcon(i);
+					if (icon != ICON_NONE)
+					{
+						drawRowIcon(icon, 32, mid - 10, at ? YELLOW : CREAM);
+						textX = 66;
+					}
+				}
+				else if (style)
+				{
+					drawGlyphMid(G_GEAR, 43, mid, at ? YELLOW : CREAM);
+					drawGlyphMid(G_RIGHT, 604, mid, at ? YELLOW : DIM);
+					textX = 66;
+				}
+				else if (r[i].id >= 0)
+				{
+					// the track in use: a filled ring (the cursor is only where it is)
+					drawGlyphMid(r[i].selected ? G_RADIO_ON : G_RADIO, 41, mid, r[i].selected ? YELLOW : at ? CREAM : DIM);
+					textX = 66;
+				}
+				SDL_Color ink = r[i].id < 0 && !style ? soft : at ? YELLOW : CREAM;
+				drawTextMid(r[i].label, 1, ink, textX, mid, 600 - textX - noteW);
 			}
-			drawText(r[i].label, 1, r[i].id == STYLE_ROW ? YELLOW : r[i].id < 0 ? DIM : CREAM, page == Page::Browse ? 32 : 60, y + 8,
-				(page == Page::Browse ? 580 : 552) - noteW);
-		}
-		if (scroll > 0) drawText("^", 1, DIM, 320, ROW_Y - 28, 0, 2);
-		if (scroll + ROWS_SHOWN < (int)r.size()) drawText("v", 1, DIM, 320, ROW_Y + ROWS_SHOWN * ROW_H, 0, 2);
-		if (page == Page::Browse)
-			drawText(browseDir.empty() ? (quitArmed ? "Press B again to quit" : "A Open   START Settings   B twice Quit")
-									   : "A Open   B Up   X Folder   L/R Page   START Menu",
-				0, quitArmed ? YELLOW : DIM, 320, 444, 600, 2);
-		else drawText("Tap to choose, drag to scroll   A Choose   B Back", 0, DIM, 320, 444, 0, 2);
+		int n = (int)r.size();
+		drawScrollBar(ROW_Y, ROWS_SHOWN * ROW_H - 4, scroll, ROWS_SHOWN, n);
+		if (!browse) { drawHints({{"A", "Choose"}, {"B", "Back"}}); return; }
+		if (quitArmed) { drawFooterText("Press B again to quit", YELLOW); return; }
+		const char* other = browseTab == TAB_LOCAL ? "Network" : "Local";
+		const char* tabKey = browseTab == TAB_LOCAL ? "R" : "L";
+		if (inMenu) drawHints({{"A", "Play"}, {"B", "Close"}, {"L/R", "Tabs"}});
+		else if (form) drawHints({{"A", "Change"}, {"LEFT/RIGHT", "Choose"}, {"B", "Cancel"}});
+		else if (browseDir == FINDNET) drawHints({{"A", "Add this one"}, {"B", "Back"}});
+		else if (emptyAction()) drawHints({{"A", "Add connection"}, {"X", "Options"}, {tabKey, other}, {"START", "Menu"}});
+		else if (browseDir == NETROOT) drawHints({{"A", "Open"}, {"X", "Options"}, {"Y", "Connection"}, {tabKey, other}, {"START", "Menu"}});
+		else if (r.size() == 1 && r[0].id < 0 && !form)
+			drawHints({{"B", "Back"}, {"X", "Options"}, {tabKey, other}, {"START", "Menu"}});
+		else if (browseDir.empty()) drawHints({{"A", "Open"}, {"X", "Options"}, {tabKey, other}, {"START", "Menu"}, {"B\xC3\x97" "2", "Quit"}});
+		else drawHints({{"A", browseDir == RECENT ? "Play" : "Open"}, {"B", "Back"}, {"X", "Options"}, {tabKey, other}, {"START", "Menu"}});
 	}
 
 	void Ui::readInfo(const Player& p)
@@ -1838,53 +2629,81 @@ namespace bp
 		infoAt = SDL_GetTicks();
 	}
 
-	void Ui::drawInfo()
+	void Ui::drawInfo(const Player& p)
 	{
-		if (!inMenu)
-		{
-			drawText("Media info", 2, YELLOW, 24, 12);
-			drawBack();
-		}
+		if (!inMenu) drawHeader("Info", p);
 		for (int i = scroll; i < (int)infoLines.size() && i < scroll + INFO_SHOWN; i++)
 		{
-			int y = INFO_Y + (i - scroll) * INFO_H;
+			int y = INFO_Y + (i - scroll) * INFO_H, mid = y + INFO_H / 2;
 			const InfoLine& l = infoLines[i];
-			if (l.header) drawText(l.label, 1, YELLOW, 24, y - 2);
+			if (l.header) drawTextMid(l.label, 1, YELLOW, 24, mid);
 			else
 			{
-				drawText(l.label, 0, DIM, 32, y + 2, INFO_VALUE_X - 40);
-				drawText(l.text, 0, CREAM, INFO_VALUE_X, y + 2);
+				drawTextMid(l.label, 0, DIM, 32, mid, INFO_VALUE_X - 40);
+				drawTextMid(l.text, 0, CREAM, INFO_VALUE_X, mid);
 			}
 		}
-		if (scroll > 0) drawText("^", 1, DIM, 320, 16, 0, 2);
-		if (scroll + INFO_SHOWN < (int)infoLines.size()) drawText("v more: drag or UP/DOWN", 0, DIM, 320, 446, 0, 2);
+		drawScrollBar(INFO_Y, INFO_SHOWN * INFO_H, scroll, INFO_SHOWN, (int)infoLines.size());
+		if (inMenu) drawHints({{"UP/DOWN", "Scroll"}, {"B", "Close"}, {"L/R", "Tabs"}});
+		else drawHints({{"UP/DOWN", "Scroll"}, {"A/B", "Back"}});
 	}
 
 	void Ui::drawSettings(const Player& p)
 	{
 		if (setGroup < 0)
 		{
-			// the groups: a name, what's in it
+			// the groups as tiles, two to a row: a mark, a name, what's in it
+			static const Glyph* MARKS[GROUPS] = {&G_CC, &G_NOTE, &G_PICTURE, &G_BOOKMARK, &G_FOLDER, &G_SUN, &G_DOWNLOAD};
 			for (int g = 0; g < GROUPS; g++)
 			{
-				int y = GROUP_Y + g * GROUP_H;
+				Rect t = groupRect(g);
 				bool at = g == cursor;
-				if (at) fill({16, y, 608, GROUP_H - 4}, TEAL);
-				drawText(GROUP_NAMES[g].name, 1, at ? YELLOW : CREAM, 32, y + 4, 540);
-				drawText(GROUP_NAMES[g].about, 0, DIM, 32, y + 31, 540);
-				drawText(">", 1, at ? YELLOW : DIM, 608, y + 14, 0, 1);
+				fill(t, pressedBtn == 400 + g ? PRESSED : at ? TEAL : SURFACE);
+				if (at)
+				{
+					fill({t.x, t.y, t.w, 2}, YELLOW);
+					fill({t.x, t.y + t.h - 2, t.w, 2}, YELLOW);
+					fill({t.x, t.y, 2, t.h}, YELLOW);
+					fill({t.x + t.w - 2, t.y, 2, t.h}, YELLOW);
+				}
+				drawGlyphMid(*MARKS[g], t.x + 34, t.y + t.h / 2, at ? YELLOW : CREAM, 3);
+				drawTextMid(GROUP_NAMES[g].name, 1, at ? YELLOW : CREAM, t.x + 66, t.y + 27, t.w - 76);
+				drawTextMid(GROUP_NAMES[g].about, 0, at ? DIM_TEAL : DIM, t.x + 66, t.y + 52, t.w - 76);
 			}
-			drawText("A or tap to open   L/R Tabs   B Back", 0, DIM, 320, 444, 0, 2);
+			drawHints({{"D-PAD", "Move"}, {"A", "Open"}, {"B", "Close"}, {"L/R", "Tabs"}});
 			return;
 		}
-		drawText(GROUP_NAMES[setGroup].name, 1, YELLOW, 24, 58, 420);
+		// the group in the middle, the ones before and after it either side: a tap (or X / Y) away
+		static const char* SHORT[GROUPS] = {"Subtitles", "Music", "Photos", "Remember", "Files", "Controls", "Updates"};
+		drawTextMid(GROUP_NAMES[setGroup].name, 1, YELLOW, W / 2, 73, 248, 2);
+		for (int k = 0; k < 2; k++)
+		{
+			Rect c = buttonRect(k ? GROUP_NEXT : GROUP_PREV);
+			int g = (setGroup + (k ? 1 : GROUPS - 1)) % GROUPS;
+			fill(c, pressedBtn == (k ? GROUP_NEXT : GROUP_PREV) ? PRESSED : SURFACE);
+			const char* key = k ? "X" : "Y";	// Y is on the left of the buttons, as its chip is
+			int kw = (int)std::lround(textWidth(key, 0) / sx);
+			if (k)
+			{
+				drawTextMid(key, 0, YELLOW, c.x + c.w - 10 - kw, c.y + c.h / 2);
+				drawGlyphMid(G_RIGHT, c.x + c.w - 24 - kw, c.y + c.h / 2, CREAM);
+				drawTextMid(SHORT[g], 0, CREAM, c.x + 12, c.y + c.h / 2, c.w - 44 - kw);
+			}
+			else
+			{
+				drawTextMid(key, 0, YELLOW, c.x + 10, c.y + c.h / 2);
+				drawGlyphMid(G_LEFT, c.x + 24 + kw, c.y + c.h / 2, CREAM);
+				drawTextMid(SHORT[g], 0, CREAM, c.x + c.w - 12, c.y + c.h / 2, c.w - 44 - kw, 1);
+			}
+		}
 		auto rows = settingRows();
 		for (int i = scroll; i < (int)rows.size() && i < scroll + SET_SHOWN; i++)
 		{
 			int row = rows[i];
 			int y = SET_Y + (i - scroll) * SET_H;
 			bool at = i == cursor;
-			if (at) fill({16, y, 608, SET_H - 4}, TEAL);
+			int mid = y + (SET_H - 4) / 2;
+			if (at) drawFocus({16, y, 608, SET_H - 4});
 			std::string label, value;
 			int k = row - STYLE_ROW0;	// a style row's key
 			if (row == CHECK_ROW || row == INSTALL_ROW)
@@ -1899,17 +2718,17 @@ namespace bp
 						: updater->state() == Updater::State::Downloading ? (pct >= 0 ? std::to_string(pct) + "%" : "Downloading")
 						: updater->state() == Updater::State::Failed ? "Try again" : "Download";
 				}
-				drawText(label, 1, CREAM, 32, y + 9, 320);
-				drawText(value, 1, at ? YELLOW : DIM, 608, y + 9, 260, 1);
+				drawTextMid(label, 1, at ? YELLOW : CREAM, 32, mid, 320);
+				drawTextMid(value, 1, at ? YELLOW : DIM_TEAL, 608, mid, 260, 1);
 				continue;
 			}
 			if (row == CLEAR_ROW)
 			{
 				// an action, not a value: no arrows
 				size_t n = p.history().items().size();
-				drawText("Clear play history", 1, CREAM, 32, y + 9, 320);
-				drawText(clearArmed ? "Again to clear" : n ? std::to_string(n) + (n == 1 ? " file" : " files") : "Empty", 1,
-					clearArmed ? YELLOW : at ? YELLOW : DIM, 608, y + 9, 0, 1);
+				drawTextMid("Clear play history", 1, at ? YELLOW : CREAM, 32, mid, 320);
+				drawTextMid(clearArmed ? "Press again to clear" : n ? std::to_string(n) + (n == 1 ? " file" : " files") : "Empty", 1,
+					clearArmed ? YELLOW : at ? DIM_TEAL : DIM, 608, mid, 0, 1);
 				continue;
 			}
 			if (k >= 0 && k < STYLE_KEYS)
@@ -1948,14 +2767,15 @@ namespace bp
 				label = REMEMBER_LABELS[row - TOGGLE_ROW];
 				value = p.settings.*REMEMBER[row - TOGGLE_ROW] ? "On" : "Off";
 			}
-			drawText(label, 1, CREAM, 32, y + 9, 330);
+			drawTextMid(label, 1, at ? YELLOW : CREAM, 32, mid, 330);
 			// arrows on every row: they are where a finger steps back and on
-			drawText("<", 1, at ? YELLOW : DIM, SET_ARROW_X, y + 9);
-			drawText(value, 1, at ? YELLOW : CREAM, 490, y + 9, 196, 2);
-			drawText(">", 1, at ? YELLOW : DIM, 608, y + 9, 0, 1);
+			drawTextMid("<", 1, at ? YELLOW : DIM, SET_ARROW_X, mid);
+			drawTextMid(value, 1, at ? YELLOW : CREAM, 490, mid, 196, 2);
+			drawTextMid(">", 1, at ? YELLOW : DIM, 608, mid, 0, 1);
 		}
-		std::string hint = "Tap < > or LEFT/RIGHT to change   B Back";
-		SDL_Color hintInk = DIM;
+		// what the row under the cursor does, in a line or two above the footer
+		std::string help = cursor >= 0 && cursor < (int)rows.size() ? settingHelp(rows[cursor]) : "";
+		SDL_Color helpInk = DIM;
 		if (setGroup == GROUP_SUBS)
 		{
 			Rect box{24, SET_Y + (int)rows.size() * SET_H + 8, 592, 56};
@@ -1963,20 +2783,24 @@ namespace bp
 			const Track* s = p.selected(TrackType::Sub);
 			if (s && (s->codec == "ass" || s->codec == "ssa"))
 			{
-				hint = "This video's subtitles are styled (ASS): they keep their own look";
-				hintInk = YELLOW;
+				help = "This video's subtitles are styled (ASS): they keep their own look";
+				helpInk = YELLOW;
 			}
 		}
-		if (setGroup == GROUP_UPDATES && updater)
+		if (setGroup == GROUP_UPDATES && updater && cursor < (int)rows.size() && (rows[cursor] == CHECK_ROW || rows[cursor] == INSTALL_ROW))
 		{
-			hint = updater->fromStore() ? "Installed from the BananaOS Store: the Store updates it"
+			help = updater->fromStore() ? "Installed from the BananaOS Store: the Store updates it"
 				: updater->state() == Updater::State::Off ? "Updates are for the handheld's Ports install"
 				: updater->state() == Updater::State::Failed ? updater->message()
 				: updater->state() == Updater::State::Ready ? "Restart now, or it's put in place at the next start"
 				: "Downloads from GitHub, checked before anything changes";
-			hintInk = updater->state() == Updater::State::Failed ? YELLOW : DIM;
+			helpInk = updater->state() == Updater::State::Failed ? YELLOW : DIM;
 		}
-		drawText(hint, 0, hintInk, 320, 444, 600, 2);
+		auto lines = wrapText(help, 0, 592, 2);
+		for (size_t i = 0; i < lines.size(); i++) drawTextMid(lines[i], 0, helpInk, 24, HELP_Y + (int)i * 22, 592);
+		bool action = cursor < (int)rows.size() && (rows[cursor] == CHECK_ROW || rows[cursor] == INSTALL_ROW || rows[cursor] == CLEAR_ROW);
+		if (action) drawHints({{"A", rows[cursor] == CLEAR_ROW ? "Clear" : rows[cursor] == CHECK_ROW ? "Check" : "Update"}, {"UP/DOWN", "Choose"}, {"Y/X", "Group"}, {"B", "Back"}});
+		else drawHints({{"UP/DOWN", "Choose"}, {"LEFT/RIGHT", "Change"}, {"Y/X", "Group"}, {"B", "Back"}});
 	}
 
 	// a line in the chosen font, colour and border over a stand-in for the picture, at the size it has on the top
@@ -2019,9 +2843,7 @@ namespace bp
 	void Ui::drawPhoto(const Player& p)
 	{
 		std::string name = p.currentPath().substr(p.currentPath().rfind('/') + 1);
-		drawBackIcon();
-		drawText(!p.title.empty() ? p.title : !p.error.empty() ? name : "Opening...", 2, CREAM, 68, 24, battery.percent >= 0 ? 548 - BATTERY_W : 548);
-		drawBattery(616, 26, p);
+		drawHeader(!p.title.empty() ? p.title : !p.error.empty() ? name : "Opening...", p);
 		Rect pan = panRect(p);
 		fill(pan, SCREEN);
 		PhotoScale sc = p.photoScaleNow();
@@ -2096,36 +2918,86 @@ namespace bp
 			drawText(std::to_string(p.index() + 1) + " / " + std::to_string(p.count()), 0, DIM, last.x + last.w, last.y + last.h + 12, 0, 1);
 		}
 
-		Rect q = buttonRect(QUIT_BTN);
-		fill(q, pressedBtn == QUIT_BTN ? PRESSED : TEAL);
-		drawText(quitArmed ? "Again?" : browserMode ? "Close" : "Quit", 1, quitArmed ? YELLOW : CREAM, q.x + q.w / 2, q.y + 6, q.w - 6, 2);
+		drawLeave(p);
+		// along the bottom, beside it: what A does here, or what a second B would do
 		const char* leave = browserMode ? "close" : "quit";
-		std::string hint = quitArmed ? std::string("Again to ") + leave
-			: hints ? std::string("A Fit/2x   Double tap B to ") + leave
-					: std::string("Tap ") + (browserMode ? "Close" : "Quit") + " twice";
-		drawText(hint, 0, quitArmed ? YELLOW : DIM, 24, 444, 470);
+		if (quitArmed) drawTextMid(std::string(hints ? "Press B again to " : "Tap again to ") + leave, 0, YELLOW, 24, 450, 430);
+		else if (hints) drawTextMid("A", 0, YELLOW, 24, 450), drawTextMid("Zoom to 2x, or the whole photo", 0, DIM, 24 + (int)std::lround(textWidth("A", 0) / sx) + 7, 450, 400);
+	}
+
+	std::vector<std::string> Ui::wrapText(const std::string& text, int size, int maxW, int maxLines) const
+	{
+		// at spaces where it can, the last line cut with "..." when there's more
+		std::vector<std::string> lines;
+		std::string rest = text;
+		int limit = (int)(maxW * sx);
+		while (!rest.empty() && (int)lines.size() < maxLines)
+		{
+			if (textWidth(rest, size) <= limit || (int)lines.size() == maxLines - 1) { lines.push_back(rest); break; }
+			size_t fit = 0;
+			for (size_t i = 1; i <= rest.size(); i++)
+			{
+				if (i < rest.size() && ((unsigned char)rest[i] & 0xC0) == 0x80) continue;
+				if (textWidth(rest.substr(0, i), size) > limit) break;
+				fit = i;
+			}
+			if (fit == 0) fit = 1;
+			size_t brk = rest.find_last_of(' ', fit);
+			if (brk != std::string::npos && brk > fit / 2) fit = brk + 1;
+			std::string line = rest.substr(0, fit);
+			while (!line.empty() && line.back() == ' ') line.pop_back();
+			lines.push_back(line);
+			rest = rest.substr(fit);
+		}
+		return lines;
+	}
+
+	void Ui::drawButton(Rect b, const Glyph* g, const std::string& label, const char* key, bool off, int size)
+	{
+		// a label (a glyph before it), the button that does the same under it in yellow (Button hotkeys on)
+		bool hint = key && *key;
+		int mid = hint ? b.y + b.h * 2 / 5 : b.y + b.h / 2;
+		SDL_Color ink = off ? DIM : CREAM;
+		int tw = label.empty() ? 0 : std::min(b.w - 12, (int)std::lround(textWidth(label, size) / sx));
+		int gw = g ? glyphW(*g) : 0, gap = g && tw ? 8 : 0;
+		int x = b.x + b.w / 2 - (gw + gap + tw) / 2;
+		if (g) drawGlyphMid(*g, x + gw / 2, mid, ink);
+		if (tw) drawTextMid(label, size, ink, x + gw + gap, mid, b.w - 12 - gw - gap);
+		if (hint) drawTextMid(key, 0, off ? DIM : YELLOW, b.x + b.w / 2, b.y + b.h * 4 / 5 - 2, b.w - 6, 2);
 	}
 
 	void Ui::drawMain(const Player& p)
 	{
 		if (p.playingPhoto()) { drawPhoto(p); return; }
 		std::string name = p.currentPath().substr(p.currentPath().rfind('/') + 1);
-		drawBackIcon();
-		drawText(!p.title.empty() ? p.title : !p.error.empty() ? name : "Opening...", 2, CREAM, 68, 24, battery.percent >= 0 ? 548 - BATTERY_W : 548);
-		drawBattery(616, 26, p);
-		if (p.count() > 1)
-			drawText(std::to_string(p.index() + 1) + " / " + std::to_string(p.count()), 0, DIM, 616, 90, 0, 1);
-		if (!p.error.empty())
+		bool err = !p.error.empty();
+		drawHeader(!p.title.empty() ? p.title : err ? name : "Opening...", p);
+		const char* leave = browserMode ? "close" : "quit";
+		bool hotkeys = p.settings.buttonHotkeys;
+		// the status line: how it plays (or what went wrong), and on its right the count or what a press does now
+		std::string right = p.count() > 1 ? std::to_string(p.index() + 1) + " / " + std::to_string(p.count()) : "";
+		SDL_Color rightInk = DIM;
+		if (quitArmed) { right = std::string(hotkeys ? "Press B again to " : "Tap again to ") + leave; rightInk = YELLOW; }
+		else if (touchLocked) { right = "Hold the lock 1 s to unlock"; rightInk = YELLOW; }
+		if (err)
 		{
-			drawText("This file can't be played:", 1, RED, 24, 84);
-			drawText(p.error, 1, RED, 24, 116, 592);
+			drawGlyphMid(G_ALERT, 35, STATUS_Y, RED);
+			drawTextMid("Can't play this file", 1, RED, 56, STATUS_Y, 300);
+			auto lines = wrapText(p.error, 0, 592, 2);
+			for (size_t i = 0; i < lines.size(); i++) drawTextMid(lines[i], 0, CREAM, 24, STATUS_Y + 32 + (int)i * 24, 592);
 		}
 		else
 		{
 			std::string status = p.loading() ? "Loading" + std::string(SDL_GetTicks() / 400 % 4, '.') : p.paused ? "Paused" : "Playing";
-			if (std::fabs(p.speed - 1) > 1e-6) status += "  " + speedLabel(p.speed);
-			if (!p.settings.buttonHotkeys) status += "  (buttons off)";
-			drawText(status, 1, YELLOW, 24, 84);
+			if (std::fabs(p.speed - 1) > 1e-6) status += " \xC2\xB7 " + speedLabel(p.speed);
+			if (!hotkeys) status += " \xC2\xB7 buttons off";
+			int x = 24;
+			if (!p.loading())
+			{
+				drawGlyphMid(p.paused ? G_PAUSE : G_PLAY, 32, STATUS_Y, YELLOW);
+				x = 52;
+			}
+			drawTextMid(status, 1, YELLOW, x, STATUS_Y, 330);
 
 			double frac = dragging ? dragFraction : p.duration > 0 && p.position >= 0 ? std::clamp(p.position / p.duration, 0.0, 1.0) : 0;
 			fill(BAR, TEAL);
@@ -2137,6 +3009,7 @@ namespace bp
 			double left = timeLeft(dragging ? dragFraction * p.duration : p.position, p.duration, p.speed);
 			if (left >= 0) drawText(formatTime(left) + " left", 0, DIM, BAR.x + BAR.w / 2, BAR.y + 36, 0, 2);
 		}
+		if (!right.empty()) drawTextMid(right, 0, rightInk, 616, STATUS_Y, 250, 1);
 
 		for (int r = 0; r < 2; r++)
 			for (int c = 0; c < 5; c++)
@@ -2144,14 +3017,15 @@ namespace bp
 				Rect b{24 + c * BTN_STEP, r ? ROW2_Y : ROW1_Y, BTN_W, BTN_H};
 				Button which = GRID[r][c].button;
 				std::string label;
+				const Glyph* g = nullptr;
 				bool off = false;
 				switch (which)
 				{
-				case Button::L: label = "Prev"; off = p.index() == 0; break;
+				case Button::L: label = "Prev"; g = &G_PREV; off = p.index() == 0; break;
 				case Button::Left: label = "-5s"; break;
-				case Button::A: label = p.paused ? "Play" : "Pause"; break;
+				case Button::A: label = p.paused || err ? "Play" : "Pause"; g = p.paused || err ? &G_PLAY : &G_PAUSE; break;
 				case Button::Right: label = "+10s"; break;
-				case Button::R: label = "Next"; off = p.index() + 1 >= p.count(); break;
+				case Button::R: label = "Next"; g = &G_NEXT; off = p.index() + 1 >= p.count(); break;
 				// music: loop, visualizer, what's shown; a video: audio, subtitles, picture size
 				case Button::X: label = p.playingAudio() ? loopLabel(p.settings.loop) : "Audio"; break;
 				case Button::Y: label = p.playingAudio() ? visualizerLabel(p.settings.visualizer) : "Subs"; break;
@@ -2159,11 +3033,11 @@ namespace bp
 				case Button::Up: label = speedLabel(p.speed); break;
 				default: label = "Menu"; break;
 				}
-				fill(b, pressedBtn == r * 5 + c ? PRESSED : TEAL);
+				// a file that didn't open: only what leads elsewhere (the next file, the menu)
+				if (err && which != Button::L && which != Button::R && which != Button::Start) off = true;
+				fill(b, pressedBtn == r * 5 + c && !off ? PRESSED : TEAL);
 				// the button it stands for, while the buttons work here (Button hotkeys); else the name alone, centred
-				bool hint = p.settings.buttonHotkeys && *GRID[r][c].hint;
-				drawText(label, 1, off ? DIM : CREAM, b.x + b.w / 2, b.y + (hint ? 6 : 16), b.w - 6, 2);
-				if (hint) drawText(GRID[r][c].hint, 0, off ? DIM : YELLOW, b.x + b.w / 2, b.y + 36, b.w - 6, 2);
+				drawButton(b, g, label, hotkeys ? GRID[r][c].hint : nullptr, off, 1);
 			}
 
 		const Track* a = p.selected(TrackType::Audio);
@@ -2176,31 +3050,452 @@ namespace bp
 				if (list[i].id == t->id) n = (int)i + 1;
 			return trackLabel(*t, n);
 		};
-		drawText("Audio: " + label(a, TrackType::Audio), 0, CREAM, 24, 374, 592);
-		if (p.playingAudio())
-			drawText(std::string(loopLabel(p.settings.loop)) + "   " + musicShowLabel(p.settings.musicShow) + " · " +
-				visualizerLabel(p.settings.visualizer), 0, CREAM, 24, 402, 592);
-		else drawText("Subtitles: " + label(s, TrackType::Sub), 0, CREAM, 24, 402, 592);
-		Rect lk = buttonRect(LOCK_BTN);
+		// what's chosen, each after its mark: the sound, then the subtitles (a song: its artist and album)
+		if (!err)
+		{
+			drawGlyphMid(G_SPEAKER, 33, LINE1_Y, DIM);
+			drawTextMid(label(a, TrackType::Audio), 0, CREAM, 52, LINE1_Y, 564);
+		}
+		if (err) {}
+		else if (p.playingAudio())
+		{
+			std::string by = p.artist();
+			if (!p.album().empty()) by += (by.empty() ? "" : " \xC2\xB7 ") + p.album();
+			if (!by.empty())
+			{
+				drawGlyphMid(G_NOTE, 33, LINE2_Y, DIM);
+				drawTextMid(by, 0, CREAM, 52, LINE2_Y, 564);
+			}
+		}
+		else
+		{
+			drawGlyphMid(G_CC, 33, LINE2_Y, DIM);
+			drawTextMid(label(s, TrackType::Sub), 0, CREAM, 52, LINE2_Y, 564);
+		}
+
+		// the row along the bottom: Lock, Info, Screen off, and leaving
+		Rect lk = buttonRect(LOCK_BTN), inf = buttonRect(INFO_BTN), so = buttonRect(SCREEN_BTN), q = buttonRect(QUIT_BTN);
 		bool holding = touchLocked && lockHoldAt;
 		fill(lk, holding ? PRESSED : touchLocked ? YELLOW : pressedBtn == LOCK_BTN ? PRESSED : TEAL);
-		drawText(touchLocked ? (holding ? "Hold..." : "Locked") : "Lock", 0, touchLocked && !holding ? BG : CREAM, lk.x + lk.w / 2, lk.y + 9,
-			lk.w - 6, 2);
-		Rect inf = buttonRect(INFO_BTN);
+		if (holding)
+		{
+			// the hold, filling as it goes
+			double f = std::min(1.0, (SDL_GetTicks() - lockHoldAt) / (double)UNLOCK_HOLD_MS);
+			fill({lk.x, lk.y + lk.h - 4, (int)(lk.w * f), 4}, YELLOW);
+		}
+		SDL_Color lkInk = touchLocked && !holding ? BG : CREAM;
+		{
+			const char* t = touchLocked ? (holding ? "Hold..." : "Locked") : "Lock";
+			int tw = (int)std::lround(textWidth(t, 0) / sx), gw = glyphW(G_LOCK), x = lk.x + lk.w / 2 - (gw + 8 + tw) / 2;
+			drawGlyphMid(G_LOCK, x + gw / 2, lk.y + lk.h / 2, lkInk);
+			drawTextMid(t, 0, lkInk, x + gw + 8, lk.y + lk.h / 2);
+		}
 		fill(inf, pressedBtn == INFO_BTN ? PRESSED : TEAL);
-		drawText("Info", 0, CREAM, inf.x + inf.w / 2, inf.y + 9, inf.w - 6, 2);
-		Rect so = buttonRect(SCREEN_BTN);
+		drawButton(inf, &G_INFO, "Info", nullptr, false, 0);
 		fill(so, pressedBtn == SCREEN_BTN ? PRESSED : TEAL);
-		drawText("Screen off", 0, CREAM, so.x + so.w / 2, so.y + 9, so.w - 6, 2);
+		drawButton(so, &G_MOON, "Screen off", nullptr, false, 0);
+		drawLeave(p);
+		if (touchLocked)
+		{
+			// locked: everything but the lock and Screen off dimmed (they're all that a finger does now)
+			SDL_Color veil{0x17, 0x16, 0x1C, 170};
+			fill({0, 64, W, lk.y - 64}, veil);
+			fill(inf, veil);
+			fill(q, veil);
+		}
+	}
+
+	void Ui::drawLeave(const Player& p)
+	{
 		Rect q = buttonRect(QUIT_BTN);
+		bool hotkeys = p.settings.buttonHotkeys;
 		fill(q, pressedBtn == QUIT_BTN ? PRESSED : TEAL);
-		drawText(quitArmed ? "Again?" : browserMode ? "Close" : "Quit", 1, quitArmed ? YELLOW : CREAM, q.x + q.w / 2, q.y + 6, q.w - 6, 2);
-		const char* leave = browserMode ? "close" : "quit";
-		// B, or (Button hotkeys off: B does nothing here) the button beside
-		std::string hint = quitArmed ? std::string("Again to ") + leave
-			: p.settings.buttonHotkeys ? std::string("Double tap B to ") + leave
-									   : std::string("Tap ") + (browserMode ? "Close" : "Quit") + " twice";
-		if (touchLocked) hint = "Touch locked: hold Locked 1 s to unlock";
-		drawText(hint, 0, quitArmed ? YELLOW : DIM, 24, 118, 470);
+		{
+			// leaving: B twice (a press in a pocket isn't one), or this twice
+			std::string t = quitArmed ? "Again?" : browserMode ? "Close" : "Quit";
+			const Glyph& g = browserMode ? G_CROSS : G_POWER;
+			std::string key = hotkeys && !quitArmed ? "B\xC3\x97" "2" : "";
+			int tw = (int)std::lround(textWidth(t, 0) / sx), gw = glyphW(g), kw = key.empty() ? 0 : (int)std::lround(textWidth(key, 0) / sx) + 10;
+			int x = q.x + q.w / 2 - (gw + 8 + tw + kw) / 2;
+			SDL_Color ink = quitArmed ? YELLOW : CREAM;
+			drawGlyphMid(g, x + gw / 2, q.y + q.h / 2, ink);
+			drawTextMid(t, 0, ink, x + gw + 8, q.y + q.h / 2);
+			if (!key.empty()) drawTextMid(key, 0, YELLOW, x + gw + 8 + tw + 10, q.y + q.h / 2);
+		}
+	}
+
+	// ---- a connection's form ----
+
+	static const char* fieldName(int f)
+	{
+		switch (f)
+		{
+		case FORM_NAME: return "Name";
+		case FORM_HOST: return "Server";
+		case FORM_PORT: return "Port";
+		case FORM_SHARE: return "Share";
+		case FORM_FOLDER: return "Folder";
+		case FORM_USER: return "User";
+		case FORM_PASS: return "Password";
+		default: return "";
+		}
+	}
+
+	static std::string trimmed(const std::string& s)
+	{
+		size_t a = s.find_first_not_of(" \t"), b = s.find_last_not_of(" \t");
+		return a == std::string::npos ? "" : s.substr(a, b - a + 1);
+	}
+
+	void Ui::openForm(const NetServer* existing, const FoundHost* host, Player& p)
+	{
+		form = existing ? *existing : NetServer();
+		formId = existing ? existing->id : "";
+		if (!existing)
+		{
+			form.type = NetType::Smb;
+			form.port = defaultPort(form.type);
+			form.guest = false;	// most shares (a Windows PC's) want an account
+		}
+		// one found on the network: by its name (an address that changes with DHCP would lose it); asked for at
+		// each connection (resolveHost)
+		if (host) form.host = !host->name.empty() ? host->name : host->ip;
+		formPassword.clear();
+		formPasswordTyped = false;
+		formNote.clear();
+		testText.clear();
+		testSerial++;	// an answer still coming is for another form
+		enterFolder(FORMDIR, p);
+		// on the first thing to fill in
+		int want = host ? FORM_USER : existing ? FORM_NAME : FORM_HOST;
+		for (size_t i = 0; i < browseRows.size(); i++)
+			if (browseRows[i].id == want) cursor = (int)i;
+		fitList();
+	}
+
+	NetServer Ui::formServer() const
+	{
+		NetServer s = form;
+		s.host = trimmed(s.host);
+		if (s.port <= 0) s.port = defaultPort(s.type);
+		return s;
+	}
+
+	void Ui::formRows()
+	{
+		browseRows.clear();
+		browsePaths.clear();
+		auto add = [&](int64_t id, const std::string& label, const std::string& note) {
+			browseRows.push_back({id, label, false, note});
+			browsePaths.push_back("");
+		};
+		auto value = [](const std::string& v, const std::string& placeholder) { return v.empty() ? std::string(1, DIM_NOTE) + placeholder : v; };
+		bool ftp = form.type == NetType::Ftp;
+		NetServer s = formServer();
+		add(FORM_TYPE, "Type", ftp ? "< FTP >" : "< SMB (Windows, NAS) >");
+		add(FORM_NAME, "Name", value(form.name, automaticServerName(s)));
+		add(FORM_HOST, "Server", value(form.host, "Address or name"));
+		add(FORM_PORT, "Port", form.port > 0 && form.port != defaultPort(form.type) ? std::to_string(form.port) : std::string(1, DIM_NOTE) + std::to_string(defaultPort(form.type)));
+		if (ftp) add(FORM_FOLDER, "Folder", value(form.folder, "/"));
+		else add(FORM_SHARE, "Share", value(form.share, "Any (choose after)"));
+		add(FORM_SIGNIN, "Sign in", form.guest ? (ftp ? "< Anonymous >" : "< As a guest >") : "< With an account >");
+		if (!form.guest)
+		{
+			add(FORM_USER, "User", value(form.user, "User name"));
+			std::string pw = formPasswordTyped ? (formPassword.empty() ? std::string(1, DIM_NOTE) + "None" : std::string(std::min<size_t>(formPassword.size(), 12), '*'))
+				: !formId.empty() && !form.secret.empty() ? std::string(1, DIM_NOTE) + "Saved" : std::string(1, DIM_NOTE) + "None";
+			add(FORM_PASS, "Password", pw);
+		}
+		if (ftp) add(FORM_FTPS, "Encryption (FTPS)", form.ftps ? "< On >" : "< Off >");
+		add(FORM_TEST, "Test connection", testText);
+		add(FORM_SAVE, "Save", formNote);
+		fitList();
+		browseVersion++;
+	}
+
+	void Ui::formChange(int64_t id, int)
+	{
+		if (id == FORM_TYPE)
+		{
+			// the port follows the type, unless one was typed
+			bool usual = form.port <= 0 || form.port == defaultPort(form.type);
+			form.type = form.type == NetType::Smb ? NetType::Ftp : NetType::Smb;
+			if (usual) form.port = defaultPort(form.type);
+		}
+		else if (id == FORM_SIGNIN) form.guest = !form.guest;
+		else if (id == FORM_FTPS) form.ftps = !form.ftps;
+		else return;
+		testText.clear();
+		formRows();
+	}
+
+	void Ui::formChoose(int64_t id, Player& p)
+	{
+		switch (id)
+		{
+		case FORM_TYPE: case FORM_SIGNIN: case FORM_FTPS: formChange(id, 1); break;
+		case FORM_NAME: openKeyboard(FORM_NAME, form.name); break;
+		case FORM_HOST: openKeyboard(FORM_HOST, form.host); break;
+		case FORM_PORT: openKeyboard(FORM_PORT, form.port > 0 && form.port != defaultPort(form.type) ? std::to_string(form.port) : ""); break;
+		case FORM_SHARE: openKeyboard(FORM_SHARE, form.share); break;
+		case FORM_FOLDER: openKeyboard(FORM_FOLDER, form.folder); break;
+		case FORM_USER: openKeyboard(FORM_USER, form.user); break;
+		case FORM_PASS: openKeyboard(FORM_PASS, formPasswordTyped ? formPassword : ""); break;
+		case FORM_TEST:
+		{
+			NetServer s = formServer();
+			if (s.host.empty()) { testText = "Type the server first"; formRows(); break; }
+			const NetServer* saved = netStore && !formId.empty() ? netStore->find(formId) : nullptr;
+			startTest(s, formPasswordTyped ? formPassword : saved ? netStore->password(*saved) : "");
+			formRows();
+			break;
+		}
+		case FORM_SAVE: formSave(p); break;
+		default: break;
+		}
+	}
+
+	void Ui::formSave(Player& p)
+	{
+		NetServer s = formServer();
+		if (s.host.empty())
+		{
+			formNote = "Type the server first";
+			formRows();
+			for (size_t i = 0; i < browseRows.size(); i++)
+				if (browseRows[i].id == FORM_HOST) cursor = (int)i;
+			fitList();
+			return;
+		}
+		if (!netStore) return;
+		s.lastUsed = (long long)time(nullptr);	// the top of the list: the one just made
+		std::string id = netStore->put(s, formPassword, !formId.empty() && !formPasswordTyped);
+		if (netWorker) netWorker->forget(id);	// its kept connection was for what it was
+		enterFolder(NETROOT, p);
+		for (size_t i = 0; i < browsePaths.size(); i++)
+		{
+			NetPath np;
+			if (parseNetPath(browsePaths[i], np) && np.server == id) cursor = (int)i;
+		}
+		fitList();
+	}
+
+	void Ui::startTest(const NetServer& s, const std::string& password)
+	{
+		if (!netWorker) { testText = "No network support in this build"; return; }
+		testText = "Testing...";
+		netWorker->test(++testSerial, s, password);
+	}
+
+	// ---- the servers found on the network ----
+
+	void Ui::hostFound(const FoundHost& h, Player&)
+	{
+		// one per address (a better name comes later for some)
+		bool known = false;
+		for (auto& f : found)
+			if (f.ip == h.ip) { f = h; known = true; }
+		if (!known) found.push_back(h);
+		if (browseDir == FINDNET && page == Page::Browse) findRows();
+	}
+
+	void Ui::findRows()
+	{
+		// the cursor stays on its host as others come in above it
+		std::string at = cursor >= 0 && cursor < (int)found.size() ? found[cursor].ip : "";
+		std::sort(found.begin(), found.end(), [](const FoundHost& a, const FoundHost& b) {
+			return naturalLess(a.name.empty() ? a.ip : a.name, b.name.empty() ? b.ip : b.name);
+		});
+		browseRows.clear();
+		browsePaths.clear();
+		auto add = [&](int64_t id, const std::string& label, const std::string& note) {
+			browseRows.push_back({id, label, false, note});
+			browsePaths.push_back("");
+		};
+		for (size_t i = 0; i < found.size(); i++)
+		{
+			add(R_FOUND, found[i].name.empty() ? found[i].ip : found[i].name, found[i].ip);
+			if (found[i].ip == at) cursor = (int)i;
+		}
+		bool running = discovery && discovery->running();
+		if (running) add(-1, "Searching...", "");
+		else
+		{
+			if (found.empty()) add(-1, discovery ? "No servers found" : "No network support in this build", "");
+			add(R_SEARCH, "Search again", "");
+		}
+		add(R_TYPE_ADDRESS, "Type the address instead", "");
+		fitList();
+		browseVersion++;
+	}
+
+	// ---- the on-screen keyboard ----
+
+	std::vector<KeyDef> Ui::kbKeys() const
+	{
+		return keyboardLayout(kbSymbols, kbShift, 8, 192, 624, 240);
+	}
+
+	void Ui::openKeyboard(int field, const std::string& text)
+	{
+		kbActiveAt = SDL_GetTicks();
+		kbOpen = true;
+		kbField = field;
+		kbEdit.set(text);
+		kbSymbols = false;
+		kbShift = ShiftState::Off;
+		kbCursor = keyboardHome(kbKeys());
+		kbPressed = -1;
+		pressedBtn = -1;
+	}
+
+	void Ui::kbClose(bool keep)
+	{
+		kbOpen = false;
+		kbPressed = -1;
+		if (!keep) { browseVersion++; return; }
+		std::string t = kbEdit.text;
+		switch (kbField)
+		{
+		case FORM_NAME: form.name = trimmed(t); break;
+		case FORM_HOST: form.host = trimmed(t); break;
+		case FORM_PORT: form.port = atoi(t.c_str()); if (form.port <= 0 || form.port > 65535) form.port = defaultPort(form.type); break;
+		case FORM_SHARE:
+			// "Media", "/Media/", "\\Media": the share's name (a path after it is the start folder)
+			for (char& c : t) if (c == '\\') c = '/';
+			t = trimmed(t);
+			while (!t.empty() && t[0] == '/') t.erase(0, 1);
+			while (!t.empty() && t.back() == '/') t.pop_back();
+			if (size_t slash = t.find('/'); slash != std::string::npos) { form.folder = t.substr(slash + 1); t = t.substr(0, slash); }
+			form.share = t;
+			break;
+		case FORM_FOLDER: form.folder = trimmed(t); break;
+		case FORM_USER: form.user = trimmed(t); break;
+		case FORM_PASS: formPassword = t; formPasswordTyped = true; break;	// (spaces kept: they can be a password's)
+		default: break;
+		}
+		formNote.clear();
+		testText.clear();
+		formRows();
+	}
+
+	bool Ui::kbCaretShown() const
+	{
+		// on for 530 ms, off for 530, from the last key (a caret that's mid-blink as you type looks lost)
+		return (SDL_GetTicks() - kbActiveAt) % 1060 < 530;
+	}
+
+	void Ui::kbKey(int i)
+	{
+		auto keys = kbKeys();
+		if (i < 0 || i >= (int)keys.size()) return;
+		const KeyDef& k = keys[i];
+		switch (k.action)
+		{
+		case KeyAction::Text:
+			// a port: digits only
+			if (kbField == FORM_PORT && !(k.text.size() == 1 && isdigit((unsigned char)k.text[0]))) break;
+			kbEdit.insert(k.text);
+			if (kbShift == ShiftState::Once) kbShift = ShiftState::Off;
+			break;
+		case KeyAction::Shift:
+			kbShift = kbShift == ShiftState::Off ? ShiftState::Once : kbShift == ShiftState::Once ? ShiftState::Locked : ShiftState::Off;
+			break;
+		case KeyAction::Back: kbEdit.backspace(); break;
+		case KeyAction::Space: if (kbField != FORM_PORT) kbEdit.insert(" "); break;
+		case KeyAction::Page:
+			kbSymbols = !kbSymbols;
+			kbCursor = std::min(kbCursor, (int)kbKeys().size() - 1);
+			break;
+		case KeyAction::Done: kbClose(true); break;
+		case KeyAction::Left: kbEdit.left(); break;
+		case KeyAction::Right: kbEdit.right(); break;
+		}
+	}
+
+	void Ui::kbPress(Button b)
+	{
+		kbActiveAt = SDL_GetTicks();
+		auto keys = kbKeys();
+		switch (b)
+		{
+		case Button::Up: kbCursor = keyboardMove(keys, kbCursor, 0, -1); break;
+		case Button::Down: kbCursor = keyboardMove(keys, kbCursor, 0, 1); break;
+		case Button::Left: kbCursor = keyboardMove(keys, kbCursor, -1, 0); break;
+		case Button::Right: kbCursor = keyboardMove(keys, kbCursor, 1, 0); break;
+		case Button::A: kbKey(kbCursor); break;
+		// B deletes; with nothing left to delete, it closes (what was there before is kept)
+		case Button::B:
+			if (kbEdit.text.empty()) kbClose(false);
+			else kbEdit.backspace();
+			break;
+		case Button::X: if (kbField != FORM_PORT) kbEdit.insert(" "); break;
+		case Button::Y: kbShift = kbShift == ShiftState::Off ? ShiftState::Once : ShiftState::Off; break;
+		case Button::L: kbEdit.left(); break;
+		case Button::R: kbEdit.right(); break;
+		case Button::Select:
+			kbSymbols = !kbSymbols;
+			kbCursor = std::min(kbCursor, (int)kbKeys().size() - 1);
+			break;
+		case Button::Start: kbClose(true); break;
+		default: break;
+		}
+	}
+
+	void Ui::kbPointer(const Pointer& pt, int x, int y)
+	{
+		if (pt.kind == Pointer::Down) kbActiveAt = SDL_GetTicks();
+		auto keys = kbKeys();
+		Rect back = buttonRect(BACK_ICON);
+		if (pt.kind == Pointer::Down)
+		{
+			kbPressed = back.hit(x, y) ? -2 : keyboardHit(keys, x, y);
+			if (kbPressed >= 0) kbCursor = kbPressed;
+		}
+		else if (pt.kind == Pointer::Up)
+		{
+			int was = kbPressed;
+			kbPressed = -1;
+			// "<": what was typed is let go, the field as it was
+			if (was == -2 && back.hit(x, y)) kbClose(false);
+			else if (was >= 0 && keyboardHit(keys, x, y) == was) kbKey(was);
+		}
+	}
+
+	void Ui::drawKeyboard()
+	{
+		fill({0, 0, W, H}, BG);
+		Rect back = buttonRect(BACK_ICON);
+		fill(back, kbPressed == -2 ? PRESSED : TEAL);
+		drawGlyphMid(G_BACK, back.x + back.w / 2 - 1, back.y + back.h / 2, CREAM, 3);
+		drawTextMid(fieldName(kbField), 2, CREAM, 72, 32, 540);
+		// the field: the text and its caret, its end in view when it's longer than the box
+		fill({16, 92, 608, 64}, YELLOW);
+		fill({18, 94, 604, 60}, SURFACE);
+		// the caret is a bar of its own between the two halves (a '|' in the text would move it as it blinks), with
+		// room kept for it whether it shows or not
+		std::string before = kbEdit.text.substr(0, kbEdit.caret), after = kbEdit.text.substr(kbEdit.caret);
+		auto logical = [&](const std::string& t) { return t.empty() ? 0 : (int)std::lround(textWidth(t, 1) / sx); };
+		while (logical(before) + 6 + logical(after) > 580 && !before.empty())
+		{
+			size_t n = 1;
+			while (n < before.size() && ((unsigned char)before[n] & 0xC0) == 0x80) n++;
+			before.erase(0, n);
+		}
+		int caretX = 32 + logical(before) + 1;
+		if (!before.empty()) drawTextMid(before, 1, CREAM, 32, 124, 580);
+		if (kbCaretShown()) fill({caretX, 108, 3, 32}, YELLOW);
+		if (!after.empty()) drawTextMid(after, 1, CREAM, caretX + 5, 124, std::max(0, 580 - (caretX + 5 - 32)));
+		drawHints({{"A", "Type"}, {"B", "Delete"}, {"X", "Space"}, {"Y", "Shift"}, {"L/R", "Move"}, {"START", "Done"}});
+		auto keys = kbKeys();
+		for (int i = 0; i < (int)keys.size(); i++)
+		{
+			const KeyDef& k = keys[i];
+			Rect r{k.x + 3, k.y + 3, k.w - 6, k.h - 6};
+			bool at = i == kbCursor, on = k.action == KeyAction::Shift && kbShift != ShiftState::Off;
+			bool special = k.action != KeyAction::Text;
+			fill(r, kbPressed == i ? PRESSED : at ? YELLOW : special ? SDL_Color{0x1E, 0x33, 0x37, 255} : TEAL);
+			drawTextMid(k.label, 1, at ? BG : on ? YELLOW : CREAM, r.x + r.w / 2, r.y + r.h / 2, r.w - 4, 2);
+		}
 	}
 }

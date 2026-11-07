@@ -21,4 +21,7 @@ namespace bp
 	// the videos and audio files in the file's folder (for a photo: the photos), in natural order, as full paths, and
 	// where the file is among them; a file that can't be listed (or isn't one by its name) is a playlist of its own
 	std::vector<std::string> siblingVideos(const std::string& path, int& index);
+	// the same from a folder's names (a network folder's listing): the names that play with name, in order; empty when
+	// name isn't among them
+	std::vector<std::string> siblingNames(const std::string& name, const std::vector<std::string>& folderNames, int& index);
 }

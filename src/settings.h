@@ -40,6 +40,8 @@ namespace bp
 		bool rememberFolder = false;
 		// the videos played, for Recently watched; off: none kept (and those kept so far gone)
 		bool keepHistory = true;
+		// network files in Recently watched too; off: they're left out (and those kept so far go)
+		bool keepNetHistory = true;
 		// the handheld's buttons while a video plays; off: only touch acts there (no press by accident in a pocket
 		// or a hand), the menus' and the browser's buttons still work
 		bool buttonHotkeys = true;

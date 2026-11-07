@@ -30,12 +30,17 @@ frames. **Info** shows how it's keeping up.
 
 Open Banana Player and pick something on the bottom screen:
 
-- **Recently watched:** the last 30 things you played.
+- **Recent:** the last 30 things you played.
 - **Videos:** the `videos` folder in `roms` on your card.
 - **This card** and **Second card:** anything on your SD cards.
 
-Folders come first, then files in natural order (episode 2 before episode 10). Anything you stopped part-way through
-shows where you left off.
+Folders come first, then files in natural order (episode 2 before episode 10). Each row has an icon (folder, video,
+song, photo), and each file shows its size. Anything you stopped part-way through shows where you left off. The line
+under the tabs shows where you are (`share / Movies`), and the bottom line shows what each button does there: the
+button's name in yellow, then what it does.
+
+The **Local** and **Network** tabs at the top switch between your cards and your network folders (**L/R**, or tap a
+tab).
 
 Everything in a folder plays as one playlist: **L/R** go to the previous or next file, and the next one starts when
 the current one ends. Folders can mix videos and music. Photos are a list of their own: from a photo you step through
@@ -55,7 +60,7 @@ its folder on that file.
 | **X** | Video: choose the audio track · Music: No loop → Loop all → Loop one |
 | **Y** | Video: choose subtitles · Music: Bars → Waves → Spectrum → Circle |
 | **SELECT** | Video: Fit → Fill → Stretch · Music: Album art → Art + visualizer → Visualizer → None |
-| **START** | Menu: Recent, Settings, About, Exit |
+| **START** | Menu: Recent, Settings, About, Quit |
 | **B** (or **Back**) **twice** | Close the video (back to the list) |
 | **F + L2** | Screenshot of both screens (saved in the card's `screenshots` folder) |
 | **F + START** | Quit Banana Player at once (anywhere; your place is kept) |
@@ -65,8 +70,10 @@ its folder on that file.
 - **Progress bar:** touch it to jump there. Hold and drag to scrub, and the picture follows your finger.
 - **Buttons:** they act when you lift your finger, so slide off one to cancel.
 - **Lists:** tap to choose, drag to scroll.
-- **Close:** tap **<** (top left) once, or Close twice.
-- **<** in the file list goes up a folder (at the top: tap twice to quit).
+- **Close:** tap **<** (top left) once, or Close (bottom right, marked **B×2**) twice.
+- **Lock**, **Info** and **Screen off** are along the bottom, beside Close.
+- **<** is at the top left of every page and does what **B** does: in the file list it goes up a folder (at the top:
+  tap twice to quit), on a page or in the menu it goes back.
 
 Under the progress bar you'll see the time played, the time left (at the current speed) and the total length.
 
@@ -91,18 +98,40 @@ See [Photos](#photos) for the touch screen.
 | **A** (or tap it) | Open the folder or play the file |
 | **B** or **Back** | Up one folder (twice at the top to quit) |
 | **UP / DOWN** | Move |
-| **LEFT / RIGHT** or **L / R** | Page up / down |
-| **X** | On a folder: Hide folder / Unhide folder (or hold the folder on the touch screen) |
+| **LEFT / RIGHT** | Page up / down |
+| **L / R** | Local / Network tab |
+| **X** | Options: **Refresh** (read the folder again), and on a folder **Hide folder** / **Unhide folder** (or hold the folder on the touch screen). On the Network tab: **Add connection**, **Find on the network**, **Refresh** |
+| **Y** | On a network connection: **Edit connection**, **Test connection**, **Delete connection** (press twice) (or hold it on the touch screen) |
 | **START** | Menu |
 
 ### The menu (START)
 
-Four tabs. Switch with **L/R** or a tap; **B** or **START** closes it.
+Four tabs. Switch with **L/R** or a tap; **B**, **START** or **<** closes it.
 
 - **Recent:** what you played last. Pick one to play it.
 - **Settings:** see [Settings](#settings).
 - **About:** version, licence and the libraries it uses.
-- **Exit:** quits Banana Player, keeping your place.
+- **Quit:** quits Banana Player, keeping your place.
+
+## Network folders
+
+Play videos, music and photos straight from a computer or a NAS on your Wi-Fi, over **SMB** (Windows file sharing,
+most NAS boxes, Samba) or **FTP** (and FTPS). Nothing is copied to the card.
+
+- With no connections yet, the Network tab offers **Add connection** (tap it, or **A**).
+- **Find on the network** (X on the Network tab) lists the computers sharing files nearby (Windows, Mac, Linux, NAS):
+  pick one, type your user name and password, and Save. No address to type: a computer found by its name is found
+  again by that name, even when its address changes.
+- **Add connection** (X) for one it can't find, or for FTP: the type, the server's address or name, and optionally the
+  port, the share or folder to start in, and how to sign in (an account, or as a guest / anonymous for FTP). **Name**
+  is optional: left empty, it's named after the server ("Media on MY-PC"). **Test connection** tries it before you save.
+- Passwords are saved encrypted with a key that only this handheld has.
+- **Y** on a connection: edit it, test it, or delete it.
+
+Network files play like the ones on your card: the folder plays as a playlist, subtitles next to a video (`movie.srt`,
+`movie.en.srt`...) and a folder's `cover.jpg` are found, Recent lists them, and they resume where you left
+off. The player reads ahead (up to 64 MB), so a short Wi-Fi drop doesn't stop it; while it waits for more, the top
+screen says **Buffering**. If the connection is lost for good (20 seconds), it stops and says so.
 
 ## Photos
 
@@ -145,7 +174,11 @@ All three are remembered.
 
 ## Settings
 
-Settings opens on seven groups; pick one with **A** or a tap, and **B** goes back to them.
+Settings opens on seven groups, as tiles two to a row: move with the D-pad (**UP/DOWN** a row, **LEFT/RIGHT** a tile),
+open one with **A** or a tap, and **B** goes back to them. In a group, **Y** goes to the group before it and **X** to
+the one after (or tap the names either side of its title), and the line above the bottom says what the setting under the
+cursor does. **Subtitle style...** at the end of the Subtitles list opens the Subtitles group; **B** there
+goes back to the list.
 
 | Group | Setting | Default | |
 |---|---|---|---|
@@ -160,7 +193,8 @@ Settings opens on seven groups; pick one with **A** or a tap, and **B** goes bac
 | **Files** | Remember last folder | Off | The file list opens where you last were |
 | | Show hidden folders | Off | Shows folders you've hidden (they contain a `.hidden` file), so you can unhide them |
 | | Keep play history | On | Keeps Recent. Turning it off also deletes the history |
-| | Clear play history | | Tap twice. Positions you stopped at are kept |
+| | Network files in Recent | On | Files played from a network folder go in Recent too. Off: they're left out, and the ones already there are removed |
+| | Clear play history | | Press **A** (or tap) twice. Positions you stopped at are kept |
 | **Controls & screen** | Brightness (or Top and Bottom brightness) | as BananaOS has them | The screens' backlight, 10% to 100%: the same levels as BananaOS's own Settings and the brightness keys, kept after a restart |
 | | Same for both screens | On | One brightness for both screens; off, each its own |
 | | Button hotkeys | On | Off: buttons can't pause, skip or close while something plays (touch still can) |

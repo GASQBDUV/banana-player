@@ -8,15 +8,17 @@
 # dist/BananaPlayer-<version>-aarch64.zip with both.
 #
 # Bundled, built from source with only what playing needs: FFmpeg (decoders and demuxers), libplacebo, libass and
-# libmpv, and the few libraries they pull in. Taken from BananaOS instead (not bundled): glibc, libstdc++, SDL2,
-# SDL2_ttf, Mesa (EGL/GLES), libdrm, ALSA, FreeType, zlib, libpng: its SDL carries BananaOS's own patches
-# (SDL_KMSDRM_FIRST picks the top panel), and its Mesa drives the Mali GPU.
+# libmpv, and the few libraries they pull in; libsmb2 (network folders over SMB). Taken from BananaOS instead (not
+# bundled): glibc, libstdc++, SDL2, SDL2_ttf, Mesa (EGL/GLES), libdrm, ALSA, FreeType, zlib, libpng, OpenSSL's
+# libcrypto (saved passwords) and libcurl (FTP): its SDL carries BananaOS's own patches (SDL_KMSDRM_FIRST picks the
+# top panel), its Mesa drives the Mali GPU, and its libcurl and OpenSSL get its security updates.
 set -euo pipefail
 
 FFMPEG_VERSION=7.1.1
 LIBPLACEBO_VERSION=v7.349.0
 LIBASS_VERSION=0.17.3
 MPV_VERSION=v0.40.0
+LIBSMB2_VERSION=6.2
 
 HERE="$(cd "$(dirname "$0")/.." && pwd)"
 
@@ -34,7 +36,7 @@ apt-get install -y -qq --no-install-recommends \
 	build-essential pkg-config cmake meson ninja-build nasm git ca-certificates curl xz-utils zip patchelf file \
 	python3 python3-jinja2 python3-pip \
 	libdav1d-dev libfreetype-dev libfribidi-dev libharfbuzz-dev libfontconfig-dev zlib1g-dev libasound2-dev \
-	libsdl2-dev libsdl2-ttf-dev libegl-dev libgles-dev libdrm-dev >/dev/null
+	libsdl2-dev libsdl2-ttf-dev libegl-dev libgles-dev libdrm-dev libssl-dev libcurl4-openssl-dev >/dev/null
 
 # mpv wants Meson 1.3 or newer; Debian 12 has 1.0
 pip3 install -q --break-system-packages 'meson>=1.3' 2>&1 | grep -v "^WARNING" || true
@@ -98,9 +100,20 @@ if [ ! -f $PREFIX/lib/libmpv.so ]; then
 	ninja -C build >/dev/null && ninja -C build install >/dev/null
 fi
 
+echo "== libsmb2 $LIBSMB2_VERSION"
+fetch https://github.com/sahlberg/libsmb2/archive/refs/tags/libsmb2-$LIBSMB2_VERSION.tar.gz libsmb2-$LIBSMB2_VERSION -z
+if [ ! -f $PREFIX/lib/libsmb2.so ]; then
+	cd $SRC/libsmb2-$LIBSMB2_VERSION
+	rm -rf build
+	# its examples don't build with -Werror on this compiler; no Kerberos (NTLM is what home servers use)
+	cmake -S . -B build -DCMAKE_INSTALL_PREFIX=$PREFIX -DCMAKE_INSTALL_LIBDIR=lib -DCMAKE_BUILD_TYPE=Release \
+		-DBUILD_SHARED_LIBS=ON -DENABLE_EXAMPLES=OFF -DENABLE_LIBKRB5=OFF -DENABLE_GSSAPI=OFF >/dev/null
+	cmake --build build -j$JOBS >/dev/null && cmake --install build >/dev/null
+fi
+
 echo "== banana-player"
 rm -rf /tmp/bp-build
-cmake -S /src -B /tmp/bp-build -DCMAKE_BUILD_TYPE=Release -DBP_GLES=ON \
+cmake -S /src -B /tmp/bp-build -DCMAKE_BUILD_TYPE=Release -DBP_GLES=ON -DBP_NET=ON -DBP_TOOLS=OFF \
 	-DCMAKE_INSTALL_RPATH='$ORIGIN/../lib' -DCMAKE_BUILD_WITH_INSTALL_RPATH=ON >/dev/null
 cmake --build /tmp/bp-build -j$JOBS 2>&1 | grep -E "error|warning" || true
 /tmp/bp-build/core-test
@@ -130,7 +143,7 @@ echo "$VERSION" > "$B/VERSION"
 python3 /src/packaging/icon/make-icon.py "$B/share/banana-player/icon.png" 16
 
 # what the player loads that BananaOS doesn't have: libmpv and everything it needs, minus the system's own
-SYSTEM='^(linux-vdso|ld-linux|libc\.|libm\.|libdl\.|libpthread\.|librt\.|libresolv\.|libstdc\+\+|libgcc_s|libSDL2|libasound|libfreetype|libz\.|libpng|libdrm|libEGL|libGLES|libGL\.|libgbm|libGLdispatch|libGLX|libX|libxcb|libwayland|libbz2|libbrotli)'
+SYSTEM='^(linux-vdso|ld-linux|libc\.|libm\.|libdl\.|libpthread\.|librt\.|libresolv\.|libstdc\+\+|libgcc_s|libSDL2|libasound|libfreetype|libz\.|libpng|libdrm|libEGL|libGLES|libGL\.|libgbm|libGLdispatch|libGLX|libX|libxcb|libwayland|libbz2|libbrotli|libcrypto|libssl|libcurl)'
 # a file's own NEEDED entries (not ldd's whole tree: a system library's needs are the system's), with where each is
 needed() {
 	local f=$1

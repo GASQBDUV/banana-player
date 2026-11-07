@@ -12,12 +12,15 @@
 
 namespace bp
 {
+	class NetStreams;
+
 	struct PlayerOptions
 	{
 		std::string stateDir;	// settings.conf and resume.tsv; empty: nothing kept
 		std::string lang;		// preferred audio and subtitle languages, mpv's alang/slang ("eng,en")
 		std::string fontsDir;	// the subtitle fonts (assets/fonts)
 		bool verbose = false;
+		NetStreams* net = nullptr;	// bpnet:// files (none: they don't open)
 	};
 
 	// libmpv: demuxing, decoding, A/V sync, tracks and subtitles; the playlist and what is remembered of each file.
@@ -33,8 +36,9 @@ namespace bp
 		bool initRender(void* (*getProc)(void*, const char*), void* procCtx, void (*update)(void*), void* ctx);
 		void shutdown();
 
-		// plays list[index], then the others in order with next() and prev()
-		void open(const std::vector<std::string>& list, int index);
+		// plays list[index], then the others in order with next() and prev(). folderNames: a network folder's file
+		// names (all of them), where its subtitles and cover are found (mpv can't look in it itself)
+		void open(const std::vector<std::string>& list, int index, const std::vector<std::string>& folderNames = {});
 		bool next();	// false on the last one
 		bool prev();	// false on the first one
 		// at a file's end: the next one, or (Loop all, music) the first again; false when that's all
@@ -52,8 +56,14 @@ namespace bp
 		// never ends, so mpv never ends the file: the clock runs on past the song. Ended here instead (or, Loop one,
 		// started again)
 		void checkSongEnd();
+		// called now and then: a network file whose connection gave up while mpv waits for more of it (a seek, an
+		// empty cache) waits for ever (to mpv the stream just ended, mid-seek): stopped, with why
+		void checkNet();
 		// a file opened and nothing of it shown yet (its first picture still decoding, a slow card); not an error
 		bool loading() const;
+		// waiting for more of the file: mpv paused it till its cache fills, or a seek that takes a while (to a part
+		// not read yet, on a slow network)
+		bool buffering() const;
 		// called each turn of the loop: the top panel's spinner while loading() lasts (from 0.3 s: a quick file
 		// shows none)
 		void checkLoading();
@@ -107,6 +117,9 @@ namespace bp
 		Settings settings;
 		std::string title, error;
 		std::vector<Track> tracks;
+		// a song's artist and album from its tags ("" none)
+		const std::string& artist() const { return tagArtist; }
+		const std::string& album() const { return tagAlbum; }
 
 		// the Media info page: sections (header rows) of label/value rows, read from mpv as it plays
 		struct InfoRow
@@ -151,6 +164,7 @@ namespace bp
 
 	private:
 		void load();
+		std::string netFileOptions(const std::string& path) const;	// loadfile's options for a network file
 		void refreshTracks(mpv_node* trackList);
 		// the file opened and its track list known: the art's choice, the title, tracks gone missing
 		void fileReady();
@@ -192,6 +206,10 @@ namespace bp
 		PlayerOptions opts;
 		std::vector<std::string> playlist;
 		int current = 0;
+		std::vector<std::string> netNames;	// the network folder's names (open's folderNames)
+		bool isNet = false;
+		bool pausedForCache = false;
+		uint64_t seekingSince = 0;	// mpv's seeking since then, 0 when it isn't
 		ResumeStore resume;
 		PlayHistory played;
 		int64_t wantAid = 0, wantSid = 0;

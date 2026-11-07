@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(banana-player VERSION 0.2.4 LANGUAGES CXX)
+project(banana-player VERSION 0.3.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -21,18 +21,58 @@ pkg_check_modules(SDL2 REQUIRED IMPORTED_TARGET sdl2)
 pkg_check_modules(SDL2_TTF REQUIRED IMPORTED_TARGET SDL2_ttf)
 pkg_check_modules(ZLIB REQUIRED IMPORTED_TARGET zlib)
 
-# what doesn't need a window: unit-tested on its own
-add_library(bpcore STATIC src/aspect.cpp src/tracks.cpp src/format.cpp src/substyle.cpp src/settings.cpp src/resume.cpp src/playlist.cpp src/browser.cpp src/history.cpp src/png.cpp src/battery.cpp src/photo.cpp src/update.cpp src/backlight.cpp)
-target_include_directories(bpcore PUBLIC src)
-target_link_libraries(bpcore PUBLIC PkgConfig::MPV PkgConfig::ZLIB)
+# libcrypto seals the saved passwords; Homebrew's openssl is keg-only, so look where it keeps it
+if(APPLE AND NOT OPENSSL_ROOT_DIR)
+	foreach(d /opt/homebrew/opt/openssl@3 /usr/local/opt/openssl@3)
+		if(EXISTS ${d})
+			set(OPENSSL_ROOT_DIR ${d})
+			break()
+		endif()
+	endforeach()
+endif()
+find_package(OpenSSL REQUIRED)
 
-add_executable(banana-player src/main.cpp src/player.cpp src/ui.cpp src/input.cpp src/sleepwatch.cpp src/touch.cpp src/panel.cpp src/levelwatch.cpp src/updater.cpp src/volume.cpp)
+# what doesn't need a window: unit-tested on its own
+add_library(bpcore STATIC src/aspect.cpp src/tracks.cpp src/format.cpp src/substyle.cpp src/settings.cpp src/resume.cpp src/playlist.cpp src/browser.cpp src/history.cpp src/png.cpp src/battery.cpp src/photo.cpp src/update.cpp src/backlight.cpp src/netstore.cpp src/netpath.cpp src/servers.cpp src/secret.cpp src/sidecar.cpp src/ftplist.cpp src/keyboard.cpp)
+target_include_directories(bpcore PUBLIC src)
+target_link_libraries(bpcore PUBLIC PkgConfig::MPV PkgConfig::ZLIB OpenSSL::Crypto)
+
+add_executable(banana-player src/main.cpp src/player.cpp src/ui.cpp src/input.cpp src/sleepwatch.cpp src/touch.cpp src/panel.cpp src/levelwatch.cpp src/updater.cpp src/volume.cpp src/networker.cpp src/netstream.cpp src/netresolve.cpp src/discovery.cpp)
 target_link_libraries(banana-player PRIVATE bpcore PkgConfig::SDL2 PkgConfig::SDL2_TTF)
+# SMB through libsmb2 (bundled on the handheld; on a Mac, built into .cache/mac/libsmb2). Without it the browser's
+# Network tab says no server can be reached
+if(APPLE AND EXISTS "${CMAKE_SOURCE_DIR}/.cache/mac/libsmb2/lib/pkgconfig")
+	set(ENV{PKG_CONFIG_PATH} "${CMAKE_SOURCE_DIR}/.cache/mac/libsmb2/lib/pkgconfig:$ENV{PKG_CONFIG_PATH}")
+endif()
+pkg_check_modules(SMB2 IMPORTED_TARGET libsmb2)
+option(BP_NET "SMB/FTP network folders (libsmb2)" ${SMB2_FOUND})
+if(BP_NET)
+	pkg_check_modules(SMB2 REQUIRED IMPORTED_TARGET libsmb2)
+	# FTP through libcurl (BananaOS's own, with OpenSSL: not bundled)
+	pkg_check_modules(CURL REQUIRED IMPORTED_TARGET libcurl)
+	target_sources(banana-player PRIVATE src/net.cpp src/net_smb.cpp src/net_ftp.cpp)
+	target_link_libraries(banana-player PRIVATE PkgConfig::SMB2 PkgConfig::CURL)
+else()
+	target_sources(banana-player PRIVATE src/net_none.cpp)
+endif()
 target_compile_definitions(banana-player PRIVATE
 	BP_VERSION="${PROJECT_VERSION}"
 	BP_ASSETS_DIR="${CMAKE_SOURCE_DIR}/assets")
 if(BP_GLES)
 	target_compile_definitions(banana-player PRIVATE BP_GLES=1)
+endif()
+
+option(BP_TOOLS "Build the command-line tools (bp-discover)" ON)
+if(BP_TOOLS)
+	find_package(Threads REQUIRED)
+	add_executable(bp-discover tools/bp-discover.cpp src/discovery.cpp)
+	target_link_libraries(bp-discover PRIVATE Threads::Threads)
+	add_executable(bp-servers tools/bp-servers.cpp)
+	target_link_libraries(bp-servers PRIVATE bpcore)
+	if(BP_NET)
+		add_executable(bp-net tools/bp-net.cpp src/net.cpp src/net_smb.cpp src/net_ftp.cpp)
+		target_link_libraries(bp-net PRIVATE bpcore Threads::Threads PkgConfig::SMB2 PkgConfig::CURL)
+	endif()
 endif()
 
 enable_testing()

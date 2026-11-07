@@ -3,11 +3,17 @@
 #include "battery.h"
 #include "browser.h"
 #include "format.h"
+#include "ftplist.h"
 #include "history.h"
 #include "photo.h"
 #include "update.h"
 #include "backlight.h"
 #include "playlist.h"
+#include "keyboard.h"
+#include "netpath.h"
+#include "secret.h"
+#include "servers.h"
+#include "sidecar.h"
 #include "resume.h"
 #include "settings.h"
 #include "tracks.h"
@@ -282,6 +288,9 @@ static void testSettings()
 	CHECK_EQ(parseSettings("audio-display = auto\n").musicShow, (int)SHOW_ART);
 	CHECK_EQ(parseSettings(serializeSettings(d)).keepHistory, true);
 	CHECK_EQ(parseSettings("keep-history = no\n").keepHistory, false);
+	CHECK_EQ(d.keepNetHistory, true);	// network files in Recent: on by default
+	CHECK_EQ(parseSettings("keep-network-history = no\n").keepNetHistory, false);
+	CHECK_EQ(parseSettings(serializeSettings(d)).keepNetHistory, true);
 	CHECK_EQ(parseSettings("remember-folder = yes\n").rememberFolder, true);
 }
 
@@ -395,6 +404,17 @@ static void testHistory()
 	CHECK_EQ(h.items()[0], std::string("/v/39"));
 	CHECK_EQ(h.items().back(), std::string("/v/10"));
 
+	{
+		// the network's taken out, the card's kept in their order
+		PlayHistory m;
+		m.add("/card/a.mkv");
+		m.add("bpnet://ab12cd34/Media/b.mkv");
+		m.add("/card/c.mkv");
+		m.removeIf([](const std::string& p) { return isNetPath(p); });
+		CHECK_EQ(m.items().size(), (size_t)2);
+		CHECK_EQ(m.items()[0], std::string("/card/c.mkv"));
+		CHECK_EQ(m.items()[1], std::string("/card/a.mkv"));
+	}
 	PlayHistory back;
 	back.parse(h.serialize() + "/v/39\n");	// a repeat in the file is read once
 	CHECK_EQ(back.items() == h.items(), true);
@@ -657,6 +677,253 @@ static void testBacklight()
 	system(("rm -rf " + d).c_str());
 }
 
+static void testFtpList()
+{
+	auto m = parseMlsd("type=cdir;modify=20261107; .\r\ntype=pdir; ..\r\ntype=dir;modify=20261107100000; Yellow Album\r\n"
+		"type=file;size=1234;modify=20261107100000; Sintel (trailer).mkv\r\ntype=OS.unix=slink:/x;size=3; link\r\nbad line\r\n");
+	CHECK_EQ(m.size(), (size_t)3);
+	CHECK_EQ(m[0].name, std::string("Yellow Album"));
+	CHECK_EQ(m[0].dir, true);
+	CHECK_EQ(m[0].size, (int64_t)-1);
+	CHECK_EQ(m[1].name, std::string("Sintel (trailer).mkv"));
+	CHECK_EQ(m[1].dir, false);
+	CHECK_EQ(m[1].size, (int64_t)1234);
+	CHECK_EQ(m[2].name, std::string("link"));
+	CHECK_EQ(parseMlsd("").size(), (size_t)0);
+	CHECK_EQ(parseMlsd("Type=DIR;Size=5; Up\n")[0].dir, true);
+
+	auto u = parseFtpList("total 12\r\ndrwxr-xr-x    2 1000     1000         4096 Nov  7 10:00 .\r\ndrwxr-xr-x    4 1000     1000         4096 Nov  7 10:00 ..\r\n"
+		"drwxr-xr-x    2 1000     1000         4096 Nov  7 10:00 My Movies\r\n"
+		"-rw-r--r--    1 1000     1000      6049358 Nov  7  2025 Sintel  (trailer).mkv\r\n"
+		"lrwxrwxrwx    1 root     root            9 Jan  1 00:00 latest -> Movies/\r\n"
+		"lrwxrwxrwx    1 root     root            9 Jan  1 00:00 a.mp3 -> b.mp3\r\n"
+		"-rw-r--r--   1 owner 12 Dec 31 23:59 nogroup.txt\r\n");
+	CHECK_EQ(u.size(), (size_t)5);
+	CHECK_EQ(u[0].name, std::string("My Movies"));
+	CHECK_EQ(u[0].dir, true);
+	CHECK_EQ(u[1].name, std::string("Sintel  (trailer).mkv"));
+	CHECK_EQ(u[1].size, (int64_t)6049358);
+	CHECK_EQ(u[2].name, std::string("latest"));
+	CHECK_EQ(u[2].dir, true);
+	CHECK_EQ(u[3].name, std::string("a.mp3"));
+	CHECK_EQ(u[3].dir, false);
+	CHECK_EQ(u[4].name, std::string("nogroup.txt"));
+	CHECK_EQ(u[4].size, (int64_t)12);
+
+	auto d = parseFtpList("11-07-26  10:00AM       <DIR>          Photos 2026\r\n11-07-2026  02:15PM            6049358 trailer one.mkv\r\n");
+	CHECK_EQ(d.size(), (size_t)2);
+	CHECK_EQ(d[0].name, std::string("Photos 2026"));
+	CHECK_EQ(d[0].dir, true);
+	CHECK_EQ(d[1].name, std::string("trailer one.mkv"));
+	CHECK_EQ(d[1].size, (int64_t)6049358);
+	CHECK_EQ(parseFtpList("garbage\r\n").size(), (size_t)0);
+}
+
+static void testNet()
+{
+	{
+		NetServer a;
+		a.host = "TONY-PC";
+		a.port = 445;
+		CHECK_EQ(automaticServerName(a), std::string("TONY-PC"));
+		CHECK_EQ(serverName(a), std::string("TONY-PC"));
+		a.share = "Media";
+		CHECK_EQ(serverName(a), std::string("Media on TONY-PC"));
+		a.port = 1445;
+		CHECK_EQ(serverName(a), std::string("Media on TONY-PC:1445"));
+		a.name = "  ";
+		CHECK_EQ(serverName(a), std::string("Media on TONY-PC:1445"));
+		a.name = "Living room";
+		CHECK_EQ(serverName(a), std::string("Living room"));
+		NetServer f;
+		f.type = NetType::Ftp;
+		f.port = 21;
+		CHECK_EQ(serverName(f), std::string("FTP server"));
+		f.host = "192.168.1.9";
+		CHECK_EQ(serverName(f), std::string("192.168.1.9"));
+	}
+
+	CHECK_EQ(isNetPath("bpnet://ab12/x"), true);
+	CHECK_EQ(isNetPath("/home/x"), false);
+	NetPath n;
+	CHECK_EQ(parseNetPath("bpnet://ab12cd34", n), true);
+	CHECK_EQ(n.server, std::string("ab12cd34"));
+	CHECK_EQ(n.path, std::string("/"));
+	CHECK_EQ(parseNetPath("bpnet:///x", n), false);
+	CHECK_EQ(parseNetPath("file:///x", n), false);
+	CHECK_EQ(makeNetPath("s", "//A/./B/../C//"), std::string("bpnet://s/A/C"));
+	CHECK_EQ(makeNetPath("s", "/../.."), std::string("bpnet://s/"));
+	CHECK_EQ(makeNetPath("s", ""), std::string("bpnet://s/"));
+	CHECK_EQ(netParent("bpnet://s/A/B"), std::string("bpnet://s/A"));
+	CHECK_EQ(netParent("bpnet://s/A"), std::string("bpnet://s/"));
+	CHECK_EQ(netParent("bpnet://s/"), std::string("bpnet://s/"));
+	CHECK_EQ(netBaseName("bpnet://s/A/b.mkv"), std::string("b.mkv"));
+	CHECK_EQ(netBaseName("bpnet://s/"), std::string(""));
+	CHECK_EQ(netJoin("bpnet://s/", "A"), std::string("bpnet://s/A"));
+	CHECK_EQ(netJoin("bpnet://s/A", "b c"), std::string("bpnet://s/A/b c"));
+	const char* names[] = {"Sintel (trailer) #1 ?.mkv", "100%.mp4", "\xed\x95\x9c\xea\xb5\xad\xec\x96\xb4.mkv", "\xe6\x97\xa5\xe6\x9c\xac\xe8\xaa\x9e a.mp4"};
+	for (auto nm : names)
+	{
+		std::string u = netJoin("bpnet://s/Share", nm);
+		CHECK_EQ(u.find('?'), std::string::npos);
+		CHECK_EQ(u.find('#'), std::string::npos);
+		CHECK_EQ(parseNetPath(u, n), true);
+		CHECK_EQ(n.path, std::string("/Share/") + nm);
+		CHECK_EQ(netBaseName(u), std::string(nm));
+		CHECK_EQ(netDecode(netEncode(nm)), std::string(nm));
+	}
+	CHECK_EQ(netEncode("a%b?c#d\n"), std::string("a%25b%3Fc%23d%0A"));
+	CHECK_EQ(netDecode("100%"), std::string("100%"));
+	std::string id = newServerId();
+	CHECK_EQ(id.size(), (size_t)8);
+	CHECK_EQ(id.find_first_not_of("0123456789abcdef"), std::string::npos);
+
+	// servers.conf
+	CHECK_EQ(defaultPort(NetType::Smb), 445);
+	CHECK_EQ(defaultPort(NetType::Ftp), 21);
+	CHECK_EQ(std::string(netTypeLabel(NetType::Ftp)), std::string("FTP"));
+	NetServer a;
+	a.id = "aaaa1111"; a.name = " NAS = [home]\nline2\\ \xed\x95\x9c "; a.host = "nas.local"; a.user = "tab\tuser";
+	a.secret = "v1:abc+/="; a.share = "Media"; a.folder = "/Films"; a.lastUsed = 1700000000123LL;
+	NetServer b;
+	b.id = "bbbb2222"; b.name = "Cam"; b.host = "10.0.0.2"; b.port = 2121; b.type = NetType::Ftp; b.guest = true; b.ftps = true;
+	std::string text = serializeServers({a, b}) + "[other x]\nname = no\n[server cccc3333]\nfuture = 1\nname = C\n";
+	auto got = parseServers(text);
+	CHECK_EQ(got.size(), (size_t)3);
+	if (got.size() == 3)
+	{
+		CHECK_EQ(got[0].name, a.name);
+		CHECK_EQ(got[0].user, a.user);
+		CHECK_EQ(got[0].secret, a.secret);
+		CHECK_EQ(got[0].folder, a.folder);
+		CHECK_EQ(got[0].lastUsed, a.lastUsed);
+		CHECK_EQ(got[0].port, 0);
+		CHECK_EQ(got[1].port, 2121);
+		CHECK_EQ(got[1].type == NetType::Ftp, true);
+		CHECK_EQ(got[1].guest, true);
+		CHECK_EQ(got[1].ftps, true);
+		CHECK_EQ(got[2].name, std::string("C"));
+	}
+	CHECK_EQ(parseServers("").size(), (size_t)0);
+
+	// secret
+	std::string raw;
+	for (int i = 0; i < 256; i++) raw += (char)i;
+	for (size_t len : {0, 1, 2, 3, 255, 256})
+	{
+		std::string e = base64Encode(raw.substr(0, len)), d;
+		CHECK_EQ(base64Decode(e, d), true);
+		CHECK_EQ(d, raw.substr(0, len));
+	}
+	CHECK_EQ(base64Encode("Man"), std::string("TWFu"));
+	CHECK_EQ(base64Encode("Ma"), std::string("TWE="));
+	std::string tmp;
+	CHECK_EQ(base64Decode("TW=u", tmp), false);
+	CHECK_EQ(base64Decode("TWF", tmp), false);
+	std::string k1 = deriveKey("file-key", "serial1"), k2 = deriveKey("file-key", "serial2");
+	CHECK_EQ(k1.size(), (size_t)32);
+	CHECK_EQ(k1 == k2, false);
+	CHECK_EQ(deriveKey("file-key", "serial1") == k1, true);
+	CHECK_EQ(deriveKey("file-key", "").size(), (size_t)32);
+	for (std::string pw : {std::string("hunter2 \xed\x95\x9c"), std::string(""), raw})
+	{
+		std::string s = sealSecret(pw, k1), out = "x";
+		CHECK_EQ(s.compare(0, 3, "v1:"), 0);
+		CHECK_EQ(openSecret(s, k1, out), true);
+		CHECK_EQ(out, pw);
+		CHECK_EQ(openSecret(s, k2, out), false);
+		CHECK_EQ(sealSecret(pw, k1) == s, false);	// a fresh nonce each time
+	}
+	std::string s = sealSecret("pw", k1), out;
+	for (size_t i = 3; i < s.size(); i += 5)
+	{
+		std::string bad = s;
+		bad[i] = bad[i] == 'A' ? 'B' : 'A';
+		CHECK_EQ(openSecret(bad, k1, out), false);
+	}
+	CHECK_EQ(openSecret("v2:" + s.substr(3), k1, out), false);
+	CHECK_EQ(openSecret("v1:AAAA", k1, out), false);
+	CHECK_EQ(openSecret(s, "short", out), false);
+	std::string kf = "/tmp/bp-test-key-" + std::to_string(getpid()), key, again;
+	unlink(kf.c_str());
+	CHECK_EQ(loadOrCreateKey(kf, key), true);
+	CHECK_EQ(key.size(), (size_t)32);
+	CHECK_EQ(loadOrCreateKey(kf, again), true);
+	CHECK_EQ(again == key, true);
+	struct stat st;
+	CHECK_EQ(stat(kf.c_str(), &st), 0);
+	CHECK_EQ((int)(st.st_mode & 0777), 0600);
+	unlink(kf.c_str());
+
+	// sidecar
+	std::vector<std::string> dir = {"movie.mkv", "movie.srt", "Movie.eng.forced.ASS", "movie - English.srt", "other.srt", "movie.nfo", "movie.idx", "movie.sub"};
+	auto subs = subtitleFilesFor("movie.mkv", dir);
+	CHECK_EQ(subs.size(), (size_t)5);
+	CHECK_EQ(subs[0], std::string("movie.srt"));
+	CHECK_EQ(subs[1], std::string("Movie.eng.forced.ASS"));
+	CHECK_EQ(subtitleFilesFor("none.mkv", dir).size(), (size_t)0);
+	CHECK_EQ(subtitleFilesFor("", dir).size(), (size_t)0);
+	CHECK_EQ(coverFileFor({"a.jpg", "Folder.JPG", "cover.png"}), std::string("cover.png"));
+	CHECK_EQ(coverFileFor({"x.mp3", ".folder.jpg"}), std::string(".folder.jpg"));
+	CHECK_EQ(coverFileFor({"cover.txt", "photo.jpg"}), std::string(""));
+}
+
+static void testKeyboard()
+{
+	auto keys = keyboardLayout(false, ShiftState::Off, 0, 200, 640, 260);
+	CHECK_EQ(keys.size(), (size_t)48);
+	// the rows tile the width exactly
+	for (int r = 0; r < 5; r++)
+	{
+		int left = 1 << 30, right = 0;
+		for (auto& k : keys)
+			if (k.row == r) { left = std::min(left, k.x); right = std::max(right, k.x + k.w); }
+		CHECK_EQ(left, 0);
+		CHECK_EQ(right, 640);
+	}
+	int q = keyboardHome(keys);
+	CHECK_EQ(keys[q].label, std::string("q"));
+	// right from q: w; left from q: round to the row's end (-)
+	CHECK_EQ(keys[keyboardMove(keys, q, 1, 0)].label, std::string("w"));
+	CHECK_EQ(keys[keyboardMove(keys, q, -1, 0)].label, std::string("-"));
+	// up from q: 1; up from 1: round to the bottom row's nearest (#+=, under it)
+	int one = keyboardMove(keys, q, 0, -1);
+	CHECK_EQ(keys[one].label, std::string("1"));
+	CHECK_EQ(keys[keyboardMove(keys, one, 0, -1)].label, std::string("#+="));
+	// down from b (row 3): Space
+	int b = -1;
+	for (int i = 0; i < (int)keys.size(); i++)
+		if (keys[i].label == "b") b = i;
+	CHECK_EQ(keys[keyboardMove(keys, b, 0, 1)].action == KeyAction::Space, true);
+	CHECK_EQ(keys[keyboardHit(keys, keys[b].x + 2, keys[b].y + 2)].label, std::string("b"));
+	CHECK_EQ(keyboardHit(keys, 5, 100), -1);
+	// shifted: capitals, typed as drawn
+	auto up = keyboardLayout(false, ShiftState::Once, 0, 200, 640, 260);
+	CHECK_EQ(up[keyboardHome(up)].text, std::string("Q"));
+	auto sym = keyboardLayout(true, ShiftState::Off, 0, 200, 640, 260);
+	CHECK_EQ(sym[11].text, std::string("!"));
+
+	TextEdit t;
+	t.set("ab");
+	t.insert("c");
+	CHECK_EQ(t.text, std::string("abc"));
+	t.left();
+	t.left();
+	t.insert("\xc3\xa9");	// é: two bytes
+	CHECK_EQ(t.text, std::string("a\xc3\xa9" "bc"));
+	t.backspace();	// the whole é
+	CHECK_EQ(t.text, std::string("abc"));
+	t.set("x\xc3\xa9");
+	t.left();	// before é, not inside it
+	CHECK_EQ(t.caret, (size_t)1);
+	t.right();
+	CHECK_EQ(t.caret, (size_t)3);
+	t.backspace();
+	t.backspace();
+	t.backspace();	// nothing left: nothing happens
+	CHECK_EQ(t.text, std::string(""));
+}
+
 int main()
 {
 	testSpeed();
@@ -667,6 +934,9 @@ int main()
 	testPhoto();
 	testUpdate();
 	testBacklight();
+	testKeyboard();
+	testNet();
+	testFtpList();
 	testBrowser();
 	testHistory();
 	testBattery();

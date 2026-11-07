@@ -12,6 +12,10 @@
 #include "touch.h"
 #include "ui.h"
 #include "updater.h"
+#include "netstore.h"
+#include "networker.h"
+#include "netstream.h"
+#include "netpath.h"
 #include <SDL.h>
 #include <SDL_ttf.h>
 #include <algorithm>
@@ -27,7 +31,7 @@
 
 using namespace bp;
 
-static Uint32 evMpv, evRender, evTouch, evLevel;
+static Uint32 evMpv, evRender, evTouch, evLevel, evNet, evFound;
 static std::atomic<bool> mpvPending{false}, renderPending{false};
 
 static void onMpvWakeup(void*)
@@ -170,10 +174,12 @@ int main(int argc, char** argv)
 		fprintf(stderr, "SDL: %s\n", SDL_GetError());
 		return 1;
 	}
-	evMpv = SDL_RegisterEvents(4);
+	evMpv = SDL_RegisterEvents(6);
 	evRender = evMpv + 1;
 	evTouch = evMpv + 2;
 	evLevel = evMpv + 3;
+	evNet = evMpv + 4;
+	evFound = evMpv + 5;
 
 	// On the handheld (SDL's KMSDRM) each panel is a display and each window fills one; elsewhere, two windows
 	if (windowed < 0) windowed = strcmp(SDL_GetCurrentVideoDriver(), "KMSDRM") != 0;
@@ -210,7 +216,12 @@ int main(int argc, char** argv)
 	if (windowed)
 	{
 		top = SDL_CreateWindow("banana-player: top", 80, 60, Ui::W, Ui::H, SDL_WINDOW_OPENGL | SDL_WINDOW_ALLOW_HIGHDPI);
-		bottom = SDL_CreateWindow("banana-player: bottom", 80, 60 + Ui::H + 40, Ui::W, Ui::H, SDL_WINDOW_ALLOW_HIGHDPI);
+		// tests: BP_BOTTOM_SIZE=1024x768 draws the bottom panel at that many pixels (the RG DS Plus's panel), not the
+		// computer's own scale
+		int bw = 0, bh = 0;
+		if (const char* sz = getenv("BP_BOTTOM_SIZE")) sscanf(sz, "%dx%d", &bw, &bh);
+		bottom = bw > 0 && bh > 0 ? SDL_CreateWindow("banana-player: bottom", 80, 60 + Ui::H + 40, bw, bh, 0)
+			: SDL_CreateWindow("banana-player: bottom", 80, 60 + Ui::H + 40, Ui::W, Ui::H, SDL_WINDOW_ALLOW_HIGHDPI);
 	}
 	else
 	{
@@ -239,6 +250,15 @@ int main(int argc, char** argv)
 		return 1;
 	}
 	SDL_GL_SetSwapInterval(1);
+
+	// the saved network connections (before the player: mpv opens their files) and mpv's way to their files, which
+	// outlives the player (mpv calls it till it's gone)
+	NetStore netStore;
+	netStore.load(opts.stateDir);
+	NetStreams netStreams;
+	netStreams.update(netStore);
+	opts.net = &netStreams;
+	int netVersion = netStore.version();
 
 	int rc = 0;
 	{
@@ -271,6 +291,24 @@ int main(int argc, char** argv)
 			updater.init(pkg, BP_VERSION);
 			ui.updater = &updater;
 		}
+		// the thread that lists the network folders (its answers come as evNet)
+		NetWorker netWorker([](NetListing* l) {
+			SDL_Event ev{};
+			ev.type = evNet;
+			ev.user.data1 = l;
+			SDL_PushEvent(&ev);
+		});
+		ui.netStore = &netStore;
+		ui.netWorker = &netWorker;
+		// Find on the network: the servers that answer, on the main thread as evFound
+		Discovery discovery;
+		ui.discovery = &discovery;
+		ui.onFound = [](const FoundHost& h) {
+			SDL_Event ev{};
+			ev.type = evFound;
+			ev.user.data1 = new FoundHost(h);
+			SDL_PushEvent(&ev);
+		};
 		// looked for once, a little after the start, in the background (Settings › Updates › Check automatically)
 		Uint32 updateCheckAt = player.settings.checkUpdates ? SDL_GetTicks() + 4000 : 0;
 		if (bottom && !haveUi) fprintf(stderr, "the controls could not start: %s\n", SDL_GetError());
@@ -397,7 +435,7 @@ int main(int argc, char** argv)
 		while (running)
 		{
 			SDL_Event e;
-			bool got = SDL_WaitEventTimeout(&e, ui.animating() ? 16 : held != Button::None || player.loading() ? 20 : SDL_GetTicks() < freshUntil || levelUntil ? 50 : 250);
+			bool got = SDL_WaitEventTimeout(&e, ui.animating() ? 16 : ui.typing() ? 50 : held != Button::None || player.loading() ? 20 : SDL_GetTicks() < freshUntil || levelUntil ? 50 : 250);
 			while (got)
 			{
 				// every button in the log (home/.config/banana-player/log.txt on the card), mapped or not: what the
@@ -472,6 +510,12 @@ int main(int argc, char** argv)
 					renderPending = true;
 					delete what;
 				}
+				else if (e.type == evNet) ui.netListed((NetListing*)e.user.data1, player);
+				else if (e.type == evFound)
+				{
+					std::unique_ptr<FoundHost> h((FoundHost*)e.user.data1);
+					ui.hostFound(*h, player);
+				}
 				else if (e.type == evTouch)
 				{
 					Pointer* pt = (Pointer*)e.user.data1;
@@ -529,6 +573,7 @@ int main(int argc, char** argv)
 			player.pollEvents();
 			player.checkAudio();
 			player.checkSongEnd();
+			player.checkNet();
 			player.checkPhoto();
 			player.checkLoading();
 			if (haveUi) ui.tick(player);
@@ -558,10 +603,25 @@ int main(int argc, char** argv)
 			// a video picked in the browser: it and the videos beside it
 			if (std::string pick = ui.takeOpenRequest(); !pick.empty())
 			{
-				int index;
-				std::vector<std::string> list = siblingVideos(pick, index);
-				player.open(list, index);
+				int index = 0;
+				std::vector<std::string> list, names;
+				if (isNetPath(pick))
+				{
+					// the folder's listing, as the browser had it: the files after this one, its subtitles, its cover
+					std::string dir = netParent(pick);
+					names = ui.netFolderNames(dir);
+					for (auto& n : siblingNames(netBaseName(pick), names, index)) list.push_back(netJoin(dir, n));
+					if (list.empty()) list = {pick};
+				}
+				else list = siblingVideos(pick, index);
+				player.open(list, index, names);
 				ui.showPlayer();
+			}
+			// a connection added, changed or deleted: mpv's opens see it
+			if (netStore.version() != netVersion)
+			{
+				netVersion = netStore.version();
+				netStreams.update(netStore);
 			}
 			// a test run's steps wait for the file to open, 3 s at most (a file that never does: a loading test)
 			static Uint32 waitFrom = 0;

@@ -89,13 +89,15 @@ docs/make-screenshots.sh <library>                   # the README's docs/img/scr
 - **Loading:** `loading()` is true from `load()` till mpv's `PLAYBACK_RESTART`; the stale `video-params` and
   `video-out-params` of the last file (or the idle window) can't tell.
 - **`Ui`** is the whole bottom panel: pages (Main, Audio, Subs, Settings, Browse, Info, About, Exit), START's tabbed
-  menu (`inMenu`: Recent, Settings, About, Exit), the folder context menu, Lock, Screen off. Main over a photo is
+  menu (`inMenu`: Recent, Settings, About, Quit), the Options menu (X), Lock, Screen off. Main over a photo is
   `drawPhoto` (the pan area and `photoBtn`s, ids from `PHOTO_BTN`; `photoPointer`, a flick's glide in `tick()`; a
-  drag moves the photo or, `dragBox`, the box). `BACK_ICON` ("<", top left of the browser and of Main) is B by touch, except
-  over what plays, where one tap closes it;
-  the browser has no other Back. `dropTouch()` (on `showPlayer`/`showBrowser`) swallows only a finger still down:
+  drag moves the photo or, `dragBox`, the box). `BACK_ICON` ("<", top left of every page) is B by touch, except
+  over what plays, where one tap closes it; no page has another Back. `dropTouch()` (on `showPlayer`/`showBrowser`) swallows only a finger still down:
   swallowing the next touch regardless ate the first tap after opening a file. Settings opens on groups (`setGroup`
-  -1); `settingRows()` lists a group's row ids. Layout is in fixed 640×480 logical units, scaled by `sx`/`sy`; text
+  -1, tiles at `groupRect`); `settingRows()` lists a group's row ids, `settingHelp()` their help lines. Pages are
+  built from shared pieces (`drawHeader`, `drawTab`, `drawHints` for the footer, `drawFocus` for the cursor's row,
+  `drawEmpty`, `drawDialog`, `drawButton`); icons are `G_*` glyphs (rows of `#` cells) drawn by `drawGlyph`, snapped
+  to the panel's pixels. `BP_BOTTOM_SIZE=1024x768` draws the bottom window at the RG DS Plus's size for screenshots. Layout is in fixed 640×480 logical units, scaled by `sx`/`sy`; text
   is rendered at the real panel size. It redraws only when
   `signature()` changes (or when forced), so any new state that affects drawing must be added to `signature()`.
   `press(Button)` and `pointer(Pointer)` return true for "leave", which `main` turns into closing the video (browser
@@ -109,8 +111,23 @@ docs/make-screenshots.sh <library>                   # the README's docs/img/scr
   with `BP_PACKAGE_DIR` (the installed folder) and `BP_UPDATE_URL` (a `file://` answer whose asset URLs are
   `file://` too); the `update` step prints its state. The Updater is never destroyed, so a download doesn't hold up
   quitting.
+- **Network folders** (SMB, FTP; `BP_NET`, on when libsmb2 is found): a place is `bpnet://<server-id>/<path>`
+  (`netpath.*`), never with credentials. `NetStore` keeps `servers.conf` (passwords sealed by `secret.*`: AES-GCM, a
+  key file plus the SoC serial). `net.h` is the backend interface (`net_smb.cpp` libsmb2, async calls only, never the
+  sync wrappers; `net_ftp.cpp` libcurl multi; `netwait.h` their cancel), one backend per thread. The browser lists
+  through `NetWorker` (its thread, answers as `evNet`, a serial per request; Test connection too); mpv reads files
+  through `NetStreams` (`mpv_stream_cb`, a backend per file; a failed read is EOF to mpv, so the failure is kept and
+  `Player` turns it into an error). Per file: `cache=yes` and `sub-files`/`cover-art-files` from the folder's
+  listing (mpv doesn't look beside a URL). Names found by `Discovery` (NetBIOS, mDNS, WS-Discovery) are stored as
+  names and resolved at each connect (`netresolve.*`): BananaOS has no DNS server or mDNS daemon. Never block on a
+  server in a destructor (a polite SMB disconnect held quitting). Test servers: Docker Samba and FTP (DEVELOPMENT.md);
+  `bp-net` and `bp-servers` (tools/) drive them from a shell.
+- **The connection form and keyboard** are browser pages (`browseDir` `FORMDIR`, `FINDNET`), so they reuse the list's
+  drawing and touch; the on-screen keyboard (`keyboard.*` layout and text, `Ui::kb*`) is an overlay that takes input
+  first.
 - **Library code with no window** (`aspect`, `tracks`, `format`, `substyle`, `settings`, `resume`, `history`,
-  `playlist`, `browser`, `png`, `battery`, `photo`, `update`, `backlight`) builds as `bpcore` and is covered by `tests/core_test.cpp` (a hand-rolled `CHECK_EQ`).
+  `playlist`, `browser`, `png`, `battery`, `photo`, `update`, `backlight`, `netpath`, `servers`, `secret`, `netstore`,
+  `sidecar`, `keyboard`, `ftplist`) builds as `bpcore` and is covered by `tests/core_test.cpp` (a hand-rolled `CHECK_EQ`).
   Keep window/mpv-handle code out of these.
 - **Settings** are an INI-ish `key = value` file. New switches go in `Settings` plus the `REMEMBER` table in
   `settings.cpp`. In `ui.cpp`, the `REMEMBER`/`REMEMBER_LABELS` arrays, `TOGGLES` and the row ids (`TOGGLE_ROW`,

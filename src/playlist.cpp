@@ -96,24 +96,31 @@ namespace bp
 		size_t slash = path.rfind('/');
 		std::string dir = slash == std::string::npos ? "." : slash == 0 ? "/" : path.substr(0, slash);
 		std::string name = slash == std::string::npos ? path : path.substr(slash + 1);
-		std::vector<std::string> names;
-		// a photo's are the photos; a video's or a song's, the videos and songs (a slideshow doesn't start a film)
-		bool photos = isPhotoFile(name);
+		std::vector<std::string> all;
 		if (DIR* d = isMediaFile(name) ? opendir(dir.c_str()) : nullptr)
 		{
-			while (dirent* e = readdir(d))
-				if (isMediaFile(e->d_name) && isPhotoFile(e->d_name) == photos) names.push_back(e->d_name);
+			while (dirent* e = readdir(d)) all.push_back(e->d_name);
 			closedir(d);
 		}
-		if (std::find(names.begin(), names.end(), name) == names.end()) return {path};
-		std::sort(names.begin(), names.end(), naturalLess);
-		std::vector<std::string> out;
+		std::vector<std::string> names = siblingNames(name, all, index);
+		if (names.empty()) return {path};
 		std::string prefix = slash == std::string::npos ? "" : dir == "/" ? "/" : dir + "/";
-		for (size_t i = 0; i < names.size(); i++)
-		{
-			if (names[i] == name) index = (int)i;
-			out.push_back(prefix + names[i]);
-		}
-		return out;
+		for (auto& n : names) n = prefix + n;
+		return names;
+	}
+
+	std::vector<std::string> siblingNames(const std::string& name, const std::vector<std::string>& folderNames, int& index)
+	{
+		index = 0;
+		// a photo's are the photos; a video's or a song's, the videos and songs (a slideshow doesn't start a film)
+		bool photos = isPhotoFile(name);
+		std::vector<std::string> names;
+		if (isMediaFile(name))
+			for (auto& n : folderNames)
+				if (isMediaFile(n) && isPhotoFile(n) == photos) names.push_back(n);
+		if (std::find(names.begin(), names.end(), name) == names.end()) return {};
+		std::sort(names.begin(), names.end(), naturalLess);
+		index = (int)(std::find(names.begin(), names.end(), name) - names.begin());
+		return names;
 	}
 }

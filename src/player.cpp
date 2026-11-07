@@ -1,6 +1,10 @@
 #include "player.h"
 #include "format.h"
 #include "logo.h"
+#include "netpath.h"
+#include "netstore.h"
+#include "netstream.h"
+#include "sidecar.h"
 #include "playlist.h"
 #include <algorithm>
 #include <chrono>
@@ -16,7 +20,7 @@
 
 namespace bp
 {
-	enum Observed : uint64_t { TIME_POS = 1, DURATION, PAUSE, TRACK_LIST, MEDIA_TITLE, AID, SID, SPEED, METADATA };
+	enum Observed : uint64_t { TIME_POS = 1, DURATION, PAUSE, TRACK_LIST, MEDIA_TITLE, AID, SID, SPEED, METADATA, PAUSED_FOR_CACHE, SEEKING };
 	// screenshot-raw's answers for the photo's thumbnail: this plus the load they were asked in
 	static const uint64_t THUMB_REPLY = 1000;
 	// the panels' shape (both are 4:3)
@@ -110,6 +114,9 @@ namespace bp
 		mpv_observe_property(mpv, METADATA, "metadata", MPV_FORMAT_NODE);
 		mpv_observe_property(mpv, MEDIA_TITLE, "media-title", MPV_FORMAT_STRING);
 		mpv_observe_property(mpv, SPEED, "speed", MPV_FORMAT_DOUBLE);
+		mpv_observe_property(mpv, PAUSED_FOR_CACHE, "paused-for-cache", MPV_FORMAT_FLAG);
+		mpv_observe_property(mpv, SEEKING, "seeking", MPV_FORMAT_FLAG);
+		if (o.net && !o.net->attach(mpv)) fprintf(stderr, "net: mpv has no stream callbacks: network files won't open\n");
 		mpv_set_wakeup_callback(mpv, wakeup, ctx);
 		setAspect(aspect);
 		for (auto& p : subStyleProperties(settings.style)) prop(p.first.c_str(), p.second);
@@ -152,9 +159,10 @@ namespace bp
 		if (!strcmp(name, "lavfi-complex")) graphSet = value;	// known here, not asked of mpv (a read waits)
 	}
 
-	void Player::open(const std::vector<std::string>& list, int index)
+	void Player::open(const std::vector<std::string>& list, int index, const std::vector<std::string>& folderNames)
 	{
 		playlist = list;
+		netNames = folderNames;
 		current = index;
 		// a video picked plays, whatever the one before was left at
 		prop("pause", "no");
@@ -201,6 +209,11 @@ namespace bp
 		seenAid = seenSid = -1;
 		isAudio = isAudioFile(path);
 		isPhoto = isPhotoFile(path);
+		isNet = isNetPath(path);
+		pausedForCache = false;
+		seekingSince = 0;
+		// the last network file still connecting is given up: mpv waits on its open before it takes this one
+		if (opts.net) opts.net->cancelOpens();
 		loadSerial++;
 		loadAt = ticks();
 		readyPending = false;
@@ -224,7 +237,7 @@ namespace bp
 		{
 			size_t slash = path.rfind('/');
 			std::string dir = slash == std::string::npos ? "." : path.substr(0, slash);
-			bool cover = folderHasCover(path), guessArt = cover || (dir == lastArtDir && lastArt);
+			bool cover = isNet ? !coverFileFor(netNames).empty() : folderHasCover(path), guessArt = cover || (dir == lastArtDir && lastArt);
 			if (settings.musicShow == SHOW_VIS) graph = graphFor(settings.visualizer, false);
 			else if (settings.musicShow == SHOW_NONE) graph = blankGraph();
 			else if (settings.musicShow == SHOW_BOTH) graph = graphFor(settings.visualizer, cover);
@@ -262,6 +275,7 @@ namespace bp
 		else if (settings.rememberSubs && !e && resume.lastSubOff) sid = "no";
 		if (graph.empty()) fileOpts += ",sid=" + sid;
 		else wantSid = 0;
+		if (isNet) fileOpts += netFileOptions(path);
 		std::string slang = opts.lang;
 		if (settings.rememberSubs && !resume.lastSubLang.empty()) slang = resume.lastSubLang + (slang.empty() ? "" : "," + slang);
 		prop("slang", slang);
@@ -272,7 +286,7 @@ namespace bp
 
 		if (isPhoto)
 		{
-			exif = readExif(path);
+			exif = isNet ? ExifInfo() : readExif(path);	// (a network photo: as FFmpeg turns it)
 			view.rotate = 0;
 			if (!settings.keepPhotoZoom)
 			{
@@ -305,7 +319,7 @@ namespace bp
 		applyPhotoView();	// a video's: none
 
 		// photos aren't kept in Recent: fifty of them would push every video out
-		if (settings.keepHistory && !isPhoto)
+		if (settings.keepHistory && !isPhoto && (settings.keepNetHistory || !isNet))
 		{
 			played.add(path);
 			if (!opts.stateDir.empty()) writeFile(opts.stateDir + "/history.tsv", played.serialize());
@@ -314,6 +328,56 @@ namespace bp
 		// (the file's options take loadfile's index argument before them: -1, "replace" has no place)
 		const char* cmd[] = {"loadfile", path.c_str(), "replace", "-1", fileOpts.c_str(), nullptr};
 		mpv_command_async(mpv, 0, cmd);
+	}
+
+	// what the panel says when a network file couldn't be played on
+	static std::string netPlayError(NetError e)
+	{
+		if (e == NetError::NotFound) return "Can't find the file or its server";
+		if (e == NetError::Other) return "This file can't be opened";
+		return netErrorText(e, "The server");
+	}
+
+	void Player::checkNet()
+	{
+		if (!isNet || !opts.net || !playing() || !error.empty() || !buffering()) return;
+		NetResult f = opts.net->failure(currentPath());
+		if (f.ok()) return;
+		opts.net->takeFailure(currentPath());
+		error = netPlayError(f.error);
+		const char* cmd[] = {"stop", nullptr};	// (its END_FILE is a stop: the error stays)
+		mpv_command_async(mpv, 0, cmd);
+	}
+
+	std::string Player::netFileOptions(const std::string& path) const
+	{
+		// read ahead (mpv's cache, which a stream callback has only when asked): a Wi-Fi's hiccup isn't a stall. 64 MiB
+		// ahead, 16 behind for a step back, of the handheld's 1 GB
+		std::string o = ",cache=yes,demuxer-max-bytes=64MiB,demuxer-max-back-bytes=16MiB";
+		// what mpv finds next to a local file by itself (sub-auto, cover-art-auto), from the folder's listing: a URL's
+		// folder isn't looked in. A path list, ':' between, so each ':' of a URL escaped; the whole quoted (%len%)
+		auto list = [](const std::vector<std::string>& urls) {
+			std::string v;
+			for (auto& u : urls)
+			{
+				if (!v.empty()) v += ':';
+				for (char c : u) v += c == ':' ? std::string("\\:") : std::string(1, c);
+			}
+			return "%" + std::to_string(v.size()) + "%" + v;
+		};
+		std::string dir = netParent(path);
+		std::vector<std::string> extra;
+		if (isAudio)
+		{
+			std::string cover = coverFileFor(netNames);
+			if (!cover.empty()) o += ",cover-art-files=" + list({netJoin(dir, cover)});
+		}
+		else if (!isPhoto)
+		{
+			for (auto& n : subtitleFilesFor(netBaseName(path), netNames)) extra.push_back(netJoin(dir, n));
+			if (!extra.empty()) o += ",sub-files=" + list(extra);
+		}
+		return o;
 	}
 
 	void Player::pollEvents()
@@ -333,6 +397,14 @@ namespace bp
 				case DURATION: duration = p->format == MPV_FORMAT_DOUBLE ? *(double*)p->data : -1; break;
 				case PAUSE: paused = p->format == MPV_FORMAT_FLAG && *(int*)p->data; break;
 				case SPEED: if (p->format == MPV_FORMAT_DOUBLE) speed = *(double*)p->data; break;
+				case PAUSED_FOR_CACHE: pausedForCache = p->format == MPV_FORMAT_FLAG && *(int*)p->data; break;
+				case SEEKING:
+				{
+					bool on = p->format == MPV_FORMAT_FLAG && *(int*)p->data;
+					if (!on) seekingSince = 0;
+					else if (!seekingSince) seekingSince = ticks();
+					break;
+				}
 				case MEDIA_TITLE:
 					title = p->format == MPV_FORMAT_STRING ? *(char**)p->data : "";
 					if (isAudio && loaded) updateOverlay();	// it can come after the file's start
@@ -390,7 +462,11 @@ namespace bp
 					break;
 				}
 				auto* e = (mpv_event_end_file*)ev->data;
-				if (e->reason == MPV_END_FILE_REASON_ERROR) error = mpv_error_string(e->error);
+				// a network file: a read that failed is an end of file to mpv; the connection's error, kept by the
+				// stream, says it wasn't
+				NetResult netFail = isNet && opts.net && !playlist.empty() ? opts.net->takeFailure(currentPath()) : NetResult();
+				if (e->reason == MPV_END_FILE_REASON_ERROR || (e->reason == MPV_END_FILE_REASON_EOF && !netFail.ok()))
+					error = netFail.ok() ? mpv_error_string(e->error) : netPlayError(netFail.error);
 				else if (e->reason == MPV_END_FILE_REASON_EOF) finished = true;
 				break;
 			}
@@ -526,9 +602,16 @@ namespace bp
 		return playing() && error.empty() && !started;
 	}
 
+	bool Player::buffering() const
+	{
+		// (a quick seek shows nothing: half a second first)
+		return playing() && error.empty() && started && (pausedForCache || (seekingSince && ticks() - seekingSince >= 500));
+	}
+
 	void Player::checkLoading()
 	{
-		bool show = loading() && ticks() - loadAt >= 300;
+		// (buffering: the network file waits, as a file opening does, but with a word of its own)
+		bool show = (loading() && ticks() - loadAt >= 300) || buffering();
 		if (!show)
 		{
 			if (spinnerStep >= 0)
@@ -539,7 +622,7 @@ namespace bp
 			}
 			return;
 		}
-		int step = (int)(ticks() / 100 % 8);
+		int step = (int)(ticks() / 100 % 8) + (loading() ? 0 : 8);	// the word changes with the next step
 		if (step == spinnerStep) return;
 		spinnerStep = step;
 		// eight dots round the middle of a 960x720 canvas, one lit going round, the word under them, on a dark card
@@ -549,13 +632,14 @@ namespace bp
 		{
 			double a = i * M_PI / 4;
 			int x = 480 + (int)std::lround(std::sin(a) * 36), y = 330 - (int)std::lround(std::cos(a) * 36);
-			int age = (step - i + 8) % 8;	// the lit one, then fading behind it
+			int age = (step % 8 - i + 8) % 8;	// the lit one, then fading behind it
 			const char* alpha = age == 0 ? "00" : age == 1 ? "40" : age == 2 ? "80" : "B0";
 			char d[160];
 			snprintf(d, sizeof d, "{\\an7\\pos(%d,%d)\\bord0\\shad0\\1c&H29B4F0&\\1a&H%s&\\p1}m 0 0 l 12 0 12 12 0 12{\\p0}\n", x - 6, y - 6, alpha);
 			ev += d;
 		}
-		ev += "{\\an8\\pos(480,390)\\bord2\\shad0\\fnInter\\fs30\\1c&HE2EDF1&}Loading";
+		ev += "{\\an8\\pos(480,390)\\bord2\\shad0\\fnInter\\fs30\\1c&HE2EDF1&}";
+		ev += loading() ? "Loading" : "Buffering";
 		const char* cmd[] = {"osd-overlay", "4", "ass-events", ev.c_str(), "960", "720", "20", "no", "no", nullptr};
 		mpv_command_async(mpv, 0, cmd);
 	}
@@ -789,6 +873,14 @@ namespace bp
 		if (loopChanged && isAudio) prop("loop-file", s.loop == LOOP_ONE ? "inf" : "no");
 		// switched off: nothing kept from now, and what was kept goes
 		if (!s.keepHistory) clearHistory();
+		// the network's switched off: its files kept so far go (the card's stay)
+		else if (!s.keepNetHistory)
+		{
+			size_t before = played.items().size();
+			played.removeIf([](const std::string& p) { return isNetPath(p); });
+			if (played.items().size() != before && !opts.stateDir.empty())
+				writeFile(opts.stateDir + "/history.tsv", played.serialize());
+		}
 		// switched off: the folder kept so far goes too
 		if (!s.rememberFolder && !resume.lastFolder.empty()) setLastFolder("");
 		if (!opts.stateDir.empty()) writeFile(opts.stateDir + "/settings.conf", serializeSettings(s));
@@ -897,7 +989,10 @@ namespace bp
 		position = duration = -1;
 		const char* cmd[] = {"stop", nullptr};
 		mpv_command_async(mpv, 0, cmd);
-		isAudio = isPhoto = false;
+		isAudio = isPhoto = isNet = false;
+		pausedForCache = false;
+		seekingSince = 0;
+		if (opts.net) opts.net->cancelOpens();
 		checkLoading();	// the spinner down
 		applyPhotoView();
 		updateOverlay();	// the title off the top panel

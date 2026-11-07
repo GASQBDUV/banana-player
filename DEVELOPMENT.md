@@ -121,6 +121,27 @@ docker run --rm -v "$PWD":/src:ro debian:trixie bash -c "apt-get update -qq && \
   cmake -S /src -B /tmp/b -DCMAKE_CXX_FLAGS='-Wall -Wextra' && cmake --build /tmp/b -j && /tmp/b/core-test"
 ```
 
+### FTP backend and bp-net
+
+`net_ftp.cpp` is FTP/FTPS on libcurl's multi interface, polled in our own loop so a wait can be cancelled (`netwait.h`'s
+Canceller, shared with SMB). Paths are from the folder the login lands in. A listing is MLSD, or LIST once a server
+refuses it (`ftplist.cpp` parses MLSD, Unix `ls -l` and IIS lines); a file's size is SIZE. A file is read by one RETR
+from the offset being read, into a 1 MiB buffer (paused when full); a read elsewhere ends it and starts another with
+REST, a step forward under 1 MiB is read through. A failed transfer is started again from where it stopped (at once,
+then after 1, 2, 4 s) for 20 s, then `Gone`. Sockets are shut down before curl's QUIT so ending a session never waits
+on a dead server. FTPS (`ftps` set) is explicit TLS and doesn't verify the certificate (NAS certificates are their
+own). Not covered: FTPS against a real server, MLSD against a real server (the test one, vsftpd, has none).
+
+`bp-net` (built with `BP_TOOLS` and `BP_NET`) tries a backend from a shell, with `ftp://host:port` for FTP:
+
+```sh
+build/bp-net ls ftp://127.0.0.1:2121 tony banana /Media/Movies
+BP_OUT=/tmp/o build/bp-net cat ftp://127.0.0.1:2121 tony banana "/Media/Movies/a.mkv" 5000000 700000   # cmp with dd
+BP_OUT=/tmp/o build/bp-net reads ftp://... tony banana /f.mkv 14000000:65536,0:65536,7000000:300000       # seeks
+build/bp-net loop ftp://... tony banana /f.mkv 65536 0     # sequential; `docker restart` the server meanwhile
+build/bp-net cancel-ls|cancel-cat ...                      # with the server `docker pause`d: Cancelled in ~0.4 s
+```
+
 ## Roadmap
 
 - [x] Video on the top panel, controls on the bottom, by buttons and touch
@@ -141,6 +162,30 @@ docker run --rm -v "$PWD":/src:ro debian:trixie bash -c "apt-get update -qq && \
 - [x] **Circle visualizer:** `showfreqs` bars, coloured by a `blend` with a gradient, beside a palette for the
       ring, bent round by `remap` with two tables (`circle2-{x,y}.pgm` in the state folder, written once by
       `writeCircleMaps`). Every pixel is one lookup, so it costs what Bars does (about 0.76 ms a frame on an M1).
+- [x] **Network: SMB and FTP streaming, a connection manager** (0.3.0; tested on the desktop against Docker Samba and
+      FTP and a Linux PC's shares, not yet on the handheld):
+  - File list tabs **Local | Network** (L/R switch them; LEFT/RIGHT page). Network lists saved connections; **X** there:
+    Add connection, Find on the network; **Y** on a connection: Edit, Test connection, Delete (confirmed).
+  - Add: SMB (Find on the network, or an address) or FTP; name, host, port, guest/account, user, password (always
+    remembered, sealed with AES-256-GCM, key from a random key file + the SoC serial, as BananaOS's banana-fetch).
+    An on-screen keyboard (touch and D-pad; `keyboard.*`). A server found by its name is saved by name and resolved at
+    each connection (`netresolve.*`), so a new DHCP address doesn't lose it.
+  - Discovery: NetBIOS (node-status sweep of the /24 and broadcast), mDNS (`_smb._tcp`, A for `.local`), WS-Discovery
+    (Windows 10/11); the same code resolves a typed name. BananaOS has no mDNS/NetBIOS daemon nor `.local` resolution.
+  - Transport: libsmb2 6.2 bundled (LGPL-2.1; async calls only: 6.2's sync wrappers use freed memory when a connection
+    fails, as banana-fetch notes); FTP/FTPS through BananaOS's libcurl (multi API). mpv reads them through
+    `mpv_stream_cb_add_ro("bpnet")`, URLs `bpnet://<server-id>/<share>/<path>` (no credentials), per-file
+    `cache=yes` and a 64 MiB buffer; a failed read is EOF to mpv, so the stream reconnects itself (about 20 s) and the
+    player tells a lost connection from a song's end. External subtitles and covers listed and passed as
+    `sub-files`/`cover-art-files` (mpv's own auto-loading skips URLs).
+  - Robustness tested: a server paused (Buffering, then on), stopped for good (an error after 20 s, never a frozen
+    picture), a stalled read while quitting (immediate). FTP paths are relative to the login folder.
+  - [ ] On the handheld: Wi-Fi drop and recovery, discovery on a home LAN with a Windows PC (WS-Discovery untested),
+        FTPS against a real NAS, MLSD (the test server has none).
+- [x] **Redesign** (0.3.0): one header (`<`, title, battery) and one footer (button names) on every page
+      (`drawHeader`, `drawHints`), bitmap icons (`drawGlyph`), Settings as tiles with help lines (Y/X between groups),
+      one dialog style, error and locked states, Pixelify's broken "fi" ligature split. `BP_BOTTOM_SIZE=1024x768`
+      draws the bottom panel at the Plus's size in tests.
 - [x] **Loading spinner** on the top panel (from 0.3 s, till mpv's `playback-restart`), for any file.
 - [ ] **On the handheld (needs the hardware):**
   - [ ] Does SDL2's KMSDRM give both panels as two displays, with a GLES window on one and a renderer on the other?

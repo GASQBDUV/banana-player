@@ -30,4 +30,12 @@ namespace bp
 		paths.insert(paths.begin(), path);
 		if (paths.size() > MAX) paths.resize(MAX);
 	}
+
+	void PlayHistory::removeIf(bool (*drop)(const std::string&))
+	{
+		std::vector<std::string> kept;
+		for (auto& p : paths)
+			if (!drop(p)) kept.push_back(p);
+		paths.swap(kept);
+	}
 }

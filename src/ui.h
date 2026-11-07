@@ -8,10 +8,15 @@
 #include "updater.h"
 #include "backlight.h"
 #include "volume.h"
+#include "netstore.h"
+#include "networker.h"
 #include <SDL.h>
 #include <SDL_ttf.h>
 #include <string>
 #include <array>
+#include "keyboard.h"
+#include "discovery.h"
+#include <functional>
 #include <map>
 #include <unordered_map>
 
@@ -24,6 +29,8 @@ namespace bp
 	{
 	public:
 		static constexpr int W = 640, H = 480;
+		// a small picture: rows of cells, '#' drawn (ui.cpp's G_*)
+		struct Glyph { const char* const* rows; int h; };
 
 		// fontsDir: assets/fonts, the panel's font and the subtitle preview's
 		bool init(SDL_Window* window, const std::string& fontsDir);
@@ -81,6 +88,24 @@ namespace bp
 		// the built-in updater (main's), and "Restart now": out with Updater::RESTART_CODE (launch.sh starts again)
 		Updater* updater = nullptr;
 		bool restartRequested = false;
+		// the saved network connections and the thread that lists their folders (main's)
+		NetStore* netStore = nullptr;
+		NetWorker* netWorker = nullptr;
+		// a network folder's listing, from the worker (forwarded by main); dropped if the browser has moved on
+		void netListed(NetListing* listing, Player& p);
+		// the on-screen keyboard is up: its caret blinks (the loop wakes often enough to draw it)
+		bool typing() const { return kbOpen; }
+		// Find on the network: discovery runs here, its hosts sent to hostFound (on the main thread: main forwards them)
+		Discovery* discovery = nullptr;
+		std::function<void(const FoundHost&)> onFound;
+		void hostFound(const FoundHost& h, Player& p);
+		// a network folder's file names, as last listed (none if it wasn't): where a file picked there finds its
+		// subtitles, its cover and the files that play after it
+		std::vector<std::string> netFolderNames(const std::string& dir) const
+		{
+			auto it = netNames.find(dir);
+			return it == netNames.end() ? std::vector<std::string>() : it->second;
+		}
 		// F alone: quick settings over whatever's on the bottom panel (volume, brightness, Same for both screens, Quit);
 		// F again, B or a tap outside closes them
 		void toggleQuick(Player& p);
@@ -119,19 +144,42 @@ namespace bp
 		void openGroup(int g);
 		Page home(const Player& p) const { return p.playing() ? Page::Main : Page::Browse; }
 		void enterFolder(std::string dir, Player& p);	// "" the first page, RECENT the recent videos
+		// the browser's two tabs: Local (the cards) and Network (the saved connections, then their folders), each
+		// where it was left; L/R or a tap switch them
+		enum BrowseTab { TAB_LOCAL, TAB_NETWORK };
+		int browseTab = TAB_LOCAL;
+		std::string tabDir[2];
+		void switchTab(int tab, Player& p);
+		bool atFirstPage() const;	// the tab's first page: B twice quits from it
+		Rect browseTabRect(int t) const { return {72 + t * 136, 10, 128, 44}; }
+		// a network folder listing: what's asked of the worker now, and what went wrong last
+		int netSerial = 0;
+		bool netLoading = false;
+		std::string netSelect;	// a file to put the cursor on once its folder is listed (back from playing it)
+		std::map<std::string, std::vector<std::string>> netNames;	// netFolderNames'
+		std::string netOpenPending;	// a network file to open once its folder is listed
 		void browseUp(Player& p);
 		// the browser's cursor on a row and its window as full as the list allows (a list that came back shorter:
 		// a scroll from before would show its last rows only)
 		void fitList();
 		void dropTouch();
-		// X on a folder (or a finger held on it): Hide folder / Unhide folder (a ".hidden" file in it), Cancel
+		// the browser's menu: X anywhere (or a finger held on a folder). On a card's folder Hide folder / Unhide
+		// folder (a ".hidden" file in it); everywhere Refresh (the list read again: a file copied in meanwhile); Cancel
+		enum CtxItem { CTX_HIDE, CTX_REFRESH, CTX_CANCEL, CTX_ADD, CTX_FIND, CTX_EDIT, CTX_TEST, CTX_DELETE };
+		// how it was opened: X (the place's menu), Y (the row's), a finger held on a row (the row's, folders and
+		// connections only)
+		enum MenuHow { MENU_X, MENU_Y, MENU_HOLD };
+		std::string ctxServer;		// a connection's menu: its id
+		std::string ctxStatus;		// a connection's menu: Test's answer
+		bool ctxArmed = false;		// Delete pressed once
 		bool ctxOpen = false;
 		int ctxCursor = 0;
-		std::string ctxPath;
+		std::vector<int> ctxItems;	// CtxItem
+		std::string ctxPath;		// the folder Hide is for ("" none)
 		Uint32 holdAt = 0;	// a finger down on a row, for the hold that opens it
-		void openFolderMenu(int row);
-		void chooseFolderMenu(int item, Player& p);
-		void drawFolderMenu();
+		void openBrowseMenu(int row, MenuHow how);
+		void chooseBrowseMenu(int item, Player& p);
+		void drawBrowseMenu();
 		// the updater's pop-up over the file list: a release found (Update now, Later, Not until tomorrow), then the
 		// download's progress (Hide), then Restart now / Later, or what went wrong (OK)
 		bool popupClosed = false, popupFollow = false;
@@ -149,7 +197,48 @@ namespace bp
 		void drawBattery(int right, int y, const Player& p);
 		static constexpr int BATTERY_W = 110;	// what a title leaves for it
 		bool folderRow(int row) const;
-		Rect ctxRow(int item) const { return {136, 214 + item * 52, 368, 46}; }
+		// the menu's box, in the middle of the panel, as tall as its items
+		// (a connection's has a line under its title for Test's answer)
+		int ctxExtra() const { return ctxServer.empty() ? 0 : 34; }
+		Rect ctxBox() const { int h = 80 + ctxExtra() + (int)ctxItems.size() * 52; return {112, (436 - h) / 2, 416, h}; }
+		Rect ctxRow(int item) const { return {128, ctxBox().y + 62 + ctxExtra() + item * 52, 384, 46}; }
+
+		// the Network tab's other pages, as the browser's (browseDir FORMDIR, FINDNET). A connection's form: its
+		// rows (form*), each opening the keyboard or stepping through its choices
+		NetServer form;
+		std::string formId;			// the connection edited, "" a new one
+		std::string formPassword;	// typed this time
+		bool formPasswordTyped = false;
+		std::string formNote;		// Save's complaint (no server yet)
+		void openForm(const NetServer* existing, const FoundHost* found, Player& p);
+		void formRows();			// browseRows from form
+		void formChoose(int64_t id, Player& p);
+		void formChange(int64_t id, int dir);
+		void formSave(Player& p);
+		NetServer formServer() const;	// the form as a server (the port filled in)
+		// Test connection (the form's row, a connection's menu): the answer comes as a NetListing (test)
+		int testSerial = 0;
+		std::string testText;
+		void startTest(const NetServer& s, const std::string& password);
+		// the servers found on the network (Find on the network)
+		std::vector<FoundHost> found;
+		bool findWasRunning = false;
+		void findRows();
+
+		// the on-screen keyboard, over the bottom panel: a form's field typed in
+		bool kbOpen = false, kbSymbols = false;
+		ShiftState kbShift = ShiftState::Off;
+		int kbCursor = 0, kbField = 0, kbPressed = -1;
+		Uint32 kbActiveAt = 0;	// the last key: the caret shows steadily for a moment after it, then blinks
+		bool kbCaretShown() const;
+		TextEdit kbEdit;
+		std::vector<KeyDef> kbKeys() const;
+		void openKeyboard(int field, const std::string& text);
+		void kbPress(Button b);
+		void kbPointer(const Pointer& pt, int x, int y);
+		void kbKey(int i);
+		void kbClose(bool keep);
+		void drawKeyboard();
 		// START's menu, over a video or the browser: tabs Recent (the browser's Recently watched), Settings, About,
 		// Exit; L/R or a tap change tab, B or START close it
 		enum Tab { TAB_RECENT, TAB_SETTINGS, TAB_ABOUT, TAB_EXIT, TABS };
@@ -159,7 +248,7 @@ namespace bp
 		void openMainMenu(Player& p, int tab = TAB_RECENT);
 		void showTab(int tab, Player& p);
 		void closeMenu(Player& p);
-		Rect tabRect(int tab) const { return {24 + tab * 121, 8, 113, 40}; }
+		Rect tabRect(int tab) const { return {72 + tab * 136, 10, 128, 44}; }
 		void drawTabs();
 		void drawExit(const Player& p);
 		bool clearHistory(Player& p);	// true when it cleared (the second time)
@@ -191,10 +280,32 @@ namespace bp
 
 		void renderPage(const Player& p);	// the page into the renderer, not yet shown
 		void drawMain(const Player& p);
+		void drawLeave(const Player& p);	// Close (Quit): B twice, or a tap twice
 		void drawTracks(const Player& p);
-		void drawBack(const char* label = "Back");
+		// the pieces of a page: the header ("<", the title, the battery), a tab, the footer's hints (a button's name in
+		// yellow, what it does), the cursor's row, a list's scroll bar, a page with nothing to list
+		struct Hint { std::string key, verb; };
+		void drawHeader(const std::string& title, const Player& p);
+		void drawTab(Rect r, const char* name, bool active);
+		void drawHints(const std::vector<Hint>& hints);
+		void drawFooterText(const std::string& text, SDL_Color c);
+		void drawFocus(Rect r);
+		void drawScrollBar(int top, int height, int first, int shown, int total);
+		void drawEmpty(const Glyph& g, const std::string& title, const std::string& sub, const char* action);
+		std::string elideLeft(const std::string& s, int size, int maxW) const;
+		std::string browseWhere() const;
+		// a dialog over the page (the Options menu, the update, quick settings), and one of its rows
+		void drawDialog(Rect box, const std::string& title);
+		void drawDialogRow(Rect r, const Glyph* g, const std::string& label, bool at, bool pressed, SDL_Color ink);
+		std::vector<std::string> wrapText(const std::string& text, int size, int maxW, int maxLines) const;
+		// a button's face: a glyph and a label side by side, the hardware button's name under them (key: none)
+		void drawButton(Rect b, const Glyph* g, const std::string& label, const char* key, bool off, int size);
+		static constexpr int STATUS_Y = 100, LINE1_Y = 378, LINE2_Y = 403;	// the player's status line, its two track lines
+		// the Network tab with no connections: its page offers Add connection
+		bool emptyAction() const;
+		static constexpr int FOOT_Y = 458, SUB_Y = 70;	// the footer's line, the browser's "where" line (their middles)
 		void drawSettings(const Player& p);
-		void drawInfo();
+		void drawInfo(const Player& p);
 		// the Media info page's lines: a row's value wrapped to the width, read again each second while it's open
 		struct InfoLine { std::string label, text; bool header; };
 		std::vector<InfoLine> infoLines;
@@ -207,7 +318,15 @@ namespace bp
 
 		SDL_Texture* text(const std::string& s, int size, SDL_Color c);
 		void drawText(const std::string& s, int size, SDL_Color c, int x, int y, int maxW = 0, int align = 0);
+		// the same, the line's middle (its capitals') on cy: labels centred in their boxes at any panel size
+		void drawTextMid(const std::string& s, int size, SDL_Color c, int x, int cy, int maxW = 0, int align = 0);
+		void drawTextAt(const std::string& s, int size, SDL_Color c, int x, int y, int maxW, int align, bool middle);
+		int capHeight[3] = {};	// in pixels
 		void fill(Rect r, SDL_Color c);
+		// a glyph at (x, y), its cells cell units square, snapped to the panel's pixels; Mid: centred on (cx, cy)
+		void drawGlyph(const Glyph& g, int x, int y, SDL_Color c, int cell = 2);
+		void drawGlyphMid(const Glyph& g, int cx, int cy, SDL_Color c, int cell = 2);
+		int glyphW(const Glyph& g, int cell = 2) const;
 
 		SDL_Renderer* ren = nullptr;
 		TTF_Font* fonts[3] = {};	// small, normal, large
@@ -217,6 +336,7 @@ namespace bp
 		// the text in pieces, each with a font that has its characters: one piece in one font when one font has
 		// them all (no mix of looks in a name), else a font a run of characters (an Arabic name's ".mkv")
 		std::vector<std::pair<TTF_Font*, std::string>> runs(const std::string& s, int size) const;
+		std::vector<std::pair<TTF_Font*, std::string>> shapeRuns(const std::string& s, int size) const;
 		int textWidth(const std::string& s, int size) const;
 		std::unordered_map<std::string, SDL_Texture*> cache;
 		std::string drawn, fontsDir;
@@ -251,7 +371,7 @@ namespace bp
 		// the settings' rows by id: the subtitle style's, Music display, Visualizer, the switches (REMEMBER), Pan area,
 		// Clear play history. Shown a group at a time (settingRows), after a list of the groups
 		static constexpr int STYLE_ROW0 = 0, MUSIC_ROW = STYLE_KEYS, VIS_ROW = STYLE_KEYS + 1, TOGGLE_ROW = STYLE_KEYS + 2,
-			TOGGLES = 11, PAN_ROW = TOGGLE_ROW + TOGGLES, DRAG_ROW = PAN_ROW + 1, CLEAR_ROW = DRAG_ROW + 1,
+			TOGGLES = 12, PAN_ROW = TOGGLE_ROW + TOGGLES, DRAG_ROW = PAN_ROW + 1, CLEAR_ROW = DRAG_ROW + 1,
 			CHECK_ROW = CLEAR_ROW + 1, INSTALL_ROW = CHECK_ROW + 1, TOP_LIGHT_ROW = INSTALL_ROW + 1,
 			BOTTOM_LIGHT_ROW = TOP_LIGHT_ROW + 1;
 		// the panels' backlights (BananaOS's own levels: changed here as its menu changes them)
@@ -269,18 +389,30 @@ namespace bp
 		void quickSetAt(int row, int x, Player& p);	// a finger on the row's bar
 		void quickChoose(int row, Player& p);
 		void drawQuick(const Player& p);
-		Rect quickPanel() const { return {40, 36, 560, 408}; }
-		Rect quickRowRect(int i) const { return {56, 92 + i * 62, 528, 54}; }
+		Rect quickPanel() const { int h = 74 + (int)quickRows().size() * 62; return {40, (436 - h) / 2, 560, h}; }
+		Rect quickRowRect(int i) const { return {56, quickPanel().y + 56 + i * 62, 528, 54}; }
 		Rect quickMinus(int i) const { Rect r = quickRowRect(i); return {r.x + 236, r.y + 3, 48, 48}; }
 		Rect quickBar(int i) const { Rect r = quickRowRect(i); return {r.x + 296, r.y + 17, 164, 20}; }
 		Rect quickPlus(int i) const { Rect r = quickRowRect(i); return {r.x + 472, r.y + 3, 48, 48}; }
 		void setBrightness(Backlight::Panel panel, int permille, Player& p);
-		static constexpr int SET_Y = 92, SET_H = 46, SET_SHOWN = 7, GROUP_Y = 58, GROUP_H = 54;
+		static constexpr int SET_Y = 92, SET_H = 46, SET_SHOWN = 7, HELP_Y = 400;
+		// a settings group's tile (Settings opens on them: two to a row)
+		Rect groupRect(int g) const { return {16 + g % 2 * 312, 70 + g / 2 * 86, 296, 78}; }
+		std::string settingHelp(int row) const;	// what a setting does, under its rows
 		static constexpr int64_t STYLE_ROW = -2;	// the subtitle menu's last row: the settings page
-		static constexpr int QUIT_BTN = 10, BACK_BTN = 11, SCREEN_BTN = 12, INFO_BTN = 13, LOCK_BTN = 14, EXIT_BTN = 15,
-			BACK_ICON = 16;	// "<" at the top left of the browser and the player: B
+		static constexpr int QUIT_BTN = 10, SCREEN_BTN = 12, INFO_BTN = 13, LOCK_BTN = 14, EXIT_BTN = 15,
+			BACK_ICON = 16,	// "<" at the top left of every page: B
+			EMPTY_BTN = 17,	// an empty page's button (no connections: Add connection)
+			GROUP_PREV = 18, GROUP_NEXT = 19;	// a settings group's neighbours, either side of its title (Y, X)
+		void stepGroup(int dir);	// to the settings group before (-1) or after (1), round
+		bool styleFromSubs = false;	// the subtitle style opened from the Subtitles list: B goes back to it
 		void drawBackIcon();
-		bool backIconShown(const Player& p) const { return (page == Page::Browse && !inMenu) || (page == Page::Main && p.playing()); }
+		// the browser's rows' marks: what each row is
+		enum RowIcon { ICON_NONE, ICON_RECENT, ICON_PLACE, ICON_FOLDER, ICON_VIDEO, ICON_SONG, ICON_PHOTO, ICON_NETWORK, ICON_REFRESH,
+			ICON_TYPE, ICON_TEST, ICON_SAVE };
+		RowIcon rowIcon(int row) const;
+		void drawRowIcon(RowIcon icon, int x, int y, SDL_Color c);
+		bool backIconShown(const Player&) const { return true; }	// every page has it
 		static constexpr Uint32 UNLOCK_HOLD_MS = 1000;	// buttonRect's ids beside the grid's 0..9
 		static constexpr int SET_ARROW_X = 372;	// a settings row's left arrow: a tap left of the value's middle steps back
 	};
