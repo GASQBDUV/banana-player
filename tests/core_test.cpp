@@ -114,6 +114,7 @@ struct NodeMap
 
 	void str(const char* k, const char* v) { add(k).u.string = const_cast<char*>(v), values.back().format = MPV_FORMAT_STRING; }
 	void i64(const char* k, int64_t v) { add(k).u.int64 = v, values.back().format = MPV_FORMAT_INT64; }
+	void dbl(const char* k, double v) { add(k).u.double_ = v, values.back().format = MPV_FORMAT_DOUBLE; }
 	void flag(const char* k, bool v) { add(k).u.flag = v, values.back().format = MPV_FORMAT_FLAG; }
 	mpv_node& add(const char* k)
 	{
@@ -165,6 +166,65 @@ static void testTrackList()
 	CHECK_EQ(trackLabel(t[3], 1), std::string("English · ASS · Signs & Songs · Forced"));
 
 	CHECK_EQ(parseTrackList(nullptr).size(), (size_t)0);
+}
+
+static void testChapters()
+{
+	NodeMap c1, c2, c3;
+	c1.dbl("time", 0); c1.str("title", "Opening");
+	c2.dbl("time", 15.5); c2.str("title", "00:00:15.500");
+	c3.i64("time", 30);	// whole seconds, no title
+	std::vector<mpv_node> items = {*c1.done(), *c2.done(), *c3.done()};
+	mpv_node_list l{};
+	l.num = (int)items.size();
+	l.values = items.data();
+	mpv_node arr{};
+	arr.format = MPV_FORMAT_NODE_ARRAY;
+	arr.u.list = &l;
+
+	auto ch = parseChapterList(&arr);
+	CHECK_EQ(ch.size(), (size_t)3);
+	CHECK_EQ(ch[0].title, std::string("Opening"));
+	CHECK_EQ(ch[1].time, 15.5);
+	CHECK_EQ(ch[2].time, 30.0);
+	CHECK_EQ(ch[2].title, std::string(""));
+	CHECK_EQ(parseChapterList(nullptr).size(), (size_t)0);
+
+	CHECK_EQ(chapterUntitled(""), true);
+	CHECK_EQ(chapterUntitled("  \t"), true);
+	CHECK_EQ(chapterUntitled("00:12:30.000"), true);
+	CHECK_EQ(chapterUntitled("12:30"), true);
+	CHECK_EQ(chapterUntitled("(unnamed)"), true);
+	CHECK_EQ(chapterUntitled("Chapter 03"), false);
+	CHECK_EQ(chapterUntitled("1984"), false);
+	CHECK_EQ(chapterUntitled("Intro 0:30"), false);
+	CHECK_EQ(chapterLabel(ch[0], 1), std::string("Opening"));
+	CHECK_EQ(chapterLabel(ch[1], 2), std::string("Chapter 2"));
+	CHECK_EQ(chapterLabel(ch[2], 3), std::string("Chapter 3"));
+
+	// the target table: next
+	CHECK_EQ(chapterTarget({}, -1, 3, 1), CHAPTER_NONE);
+	CHECK_EQ(chapterTarget({}, -1, 3, -1), CHAPTER_NONE);
+	CHECK_EQ(chapterTarget(ch, -1, 0, 1), 0);
+	CHECK_EQ(chapterTarget(ch, 0, 3, 1), 1);
+	CHECK_EQ(chapterTarget(ch, 1, 20, 1), 2);
+	CHECK_EQ(chapterTarget(ch, 2, 40, 1), CHAPTER_NONE);
+	// previous: past 5 s into a chapter its start, else the one before
+	CHECK_EQ(chapterTarget(ch, 1, 21, -1), 1);
+	CHECK_EQ(chapterTarget(ch, 1, 20.6, -1), 1);
+	CHECK_EQ(chapterTarget(ch, 1, 20.5, -1), 0);	// exactly 5 s in: still the one before
+	CHECK_EQ(chapterTarget(ch, 1, 15.5, -1), 0);
+	CHECK_EQ(chapterTarget(ch, 2, 36, -1), 2);
+	// the first chapter: its start (0) is the file's, so nothing before it; a later start goes to 0
+	CHECK_EQ(chapterTarget(ch, 0, 2, -1), CHAPTER_NONE);
+	CHECK_EQ(chapterTarget(ch, 0, 9, -1), 0);
+	std::vector<Chapter> late = {{10, "A"}, {20, "B"}};
+	CHECK_EQ(chapterTarget(late, -1, 4, -1), CHAPTER_FILE_START);
+	CHECK_EQ(chapterTarget(late, 0, 12, -1), CHAPTER_FILE_START);
+	CHECK_EQ(chapterTarget(late, 0, 16, -1), 0);
+	CHECK_EQ(chapterTarget(late, -1, 4, 1), 0);
+	std::vector<Chapter> nearZero = {{0.3, "A"}, {20, "B"}};
+	CHECK_EQ(chapterTarget(nearZero, 0, 1, -1), CHAPTER_NONE);
 }
 
 static void testSpeed()
@@ -473,7 +533,7 @@ static void testPlaylist()
 	CHECK_EQ(isVideoFile("a.MKV"), true);
 	CHECK_EQ(isVideoFile("a.srt"), false);
 	CHECK_EQ(isVideoFile(".hidden.mp4"), false);
-	for (const char* a : {"a.mp3", "b.FLAC", "c.ogg", "d.wav", "e.m4a", "f.opus"})
+	for (const char* a : {"a.mp3", "b.FLAC", "c.ogg", "d.wav", "e.m4a", "f.opus", "g.m4b"})
 	{
 		CHECK_EQ(isAudioFile(a), true);
 		CHECK_EQ(isMediaFile(a), true);
@@ -929,6 +989,7 @@ static void testKeyboard()
 
 int main()
 {
+	testChapters();
 	testSpeed();
 	testSubStyle();
 	testSettings();

@@ -16,6 +16,8 @@ namespace bp
 		case SDLK_s: return Button::Start;
 		case SDLK_TAB: return Button::Select;
 		case SDLK_r: return Button::L3;
+		case SDLK_LEFTBRACKET: return Button::L2;
+		case SDLK_RIGHTBRACKET: return Button::R2;
 		case SDLK_UP: return Button::Up;
 		case SDLK_DOWN: return Button::Down;
 		case SDLK_LEFT: return Button::Left;
@@ -55,7 +57,7 @@ namespace bp
 
 	Button buttonFromName(const std::string& name)
 	{
-		static const char* names[] = {"none", "a", "b", "x", "y", "l", "r", "up", "down", "left", "right", "start", "select", "l3"};
+		static const char* names[] = {"none", "a", "b", "x", "y", "l", "r", "up", "down", "left", "right", "start", "select", "l3", "l2", "r2"};
 		std::string n;
 		for (char c : name) n += (char)SDL_tolower((unsigned char)c);
 		for (int i = 1; i < (int)(sizeof names / sizeof *names); i++)

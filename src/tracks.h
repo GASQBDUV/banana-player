@@ -24,6 +24,29 @@ namespace bp
 	// tell it by: "Track 2 · AAC Stereo"
 	std::string trackLabel(const Track& t, int n);
 
+	// one entry of mpv's chapter-list
+	struct Chapter
+	{
+		double time = 0;
+		std::string title;
+	};
+
+	std::vector<Chapter> parseChapterList(const mpv_node* list);
+
+	// no title, mpv's "(unnamed)", or one that is only a timestamp (mkvmerge's "00:12:30.000"): the number says more
+	bool chapterUntitled(const std::string& title);
+
+	// the title, or "Chapter n" (n 1-based) when untitled
+	std::string chapterLabel(const Chapter& c, int n);
+
+	const int CHAPTER_FILE_START = -1;	// chapterTarget: seek to 0 (the file's first chapter starts later)
+	const int CHAPTER_NONE = -2;		// chapterTarget: nowhere to go
+	const double CHAPTER_BACK_S = 5;	// previous: further into a chapter than this goes to its start
+
+	// where previous (dir < 0) or next (dir > 0) goes from chapter `current` (-1 before the first) at `position`:
+	// an index, CHAPTER_FILE_START or CHAPTER_NONE. Next never runs on into the next file
+	int chapterTarget(const std::vector<Chapter>& chapters, int current, double position, int dir);
+
 	// ISO 639-1/-2 codes the menu knows -> their names; anything else comes back as it is
 	std::string languageName(const std::string& code);
 

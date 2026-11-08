@@ -99,7 +99,7 @@ static void usage()
 		"  --font TTF            the bottom panel's font\n"
 		"  -v                    mpv's verbose log\n"
 		"  --press LIST          test run: once the file is open, do these 0.8 s apart and print the state after\n"
-		"                        each, then quit: buttons (A,B,X,Y,L,R,Up,Down,Left,Right,Start,Select), taps\n"
+		"                        each, then quit: buttons (A,B,X,Y,L,R,L2,R2,Up,Down,Left,Right,Start,Select), taps\n"
 		"                        (tap:X:Y, dtap:X:Y a double-tap) and drags (drag:X1:Y1:X2:Y2) on the bottom panel's 640x480, and info\n"
 		"                        (prints the Media info page), hold:X:Y (a finger held 1.1 s), prop:NAME\n"
 		"                        (prints one of mpv's properties)\n"
@@ -409,7 +409,7 @@ int main(int argc, char** argv)
 			player.osd(ok ? "Screenshot saved" : "Screenshot couldn't be saved");
 			fprintf(stderr, "screenshot %s%s: %s\n", dir.c_str(), name, ok ? "saved" : "failed");
 		};
-		bool fHeld = false, fCombo = false, l2Down = false;
+		bool fHeld = false, fCombo = false, l2Down = false, r2Down = false;
 
 		// the volume and brightness keys (bananad's): their level on a card over the top panel for 1.5 s
 		LevelWatch levelWatch;
@@ -461,7 +461,7 @@ int main(int argc, char** argv)
 				else if (e.type == evMpv) mpvPending = false;
 				else if (e.type == SDL_CONTROLLERDEVICEADDED || e.type == SDL_CONTROLLERDEVICEREMOVED) handlePadHotplug(e);
 				else if (scripted && (e.type == SDL_KEYDOWN || e.type == SDL_CONTROLLERBUTTONDOWN || e.type == evTouch ||
-							 (e.type >= SDL_MOUSEMOTION && e.type <= SDL_MOUSEWHEEL) || (e.type >= SDL_FINGERDOWN && e.type <= SDL_FINGERMOTION)))
+							 (e.type >= SDL_MOUSEMOTION && e.type <= SDL_MOUSEWHEEL) || (e.type >= SDL_FINGERDOWN && e.type <= SDL_FINGERMOTION) || e.type == SDL_CONTROLLERAXISMOTION))
 				{
 					// a test run takes only its own steps: the windows can take the keyboard's focus while someone
 					// types elsewhere
@@ -477,13 +477,24 @@ int main(int argc, char** argv)
 					fHeld = down;
 				}
 				else if (e.type == SDL_KEYDOWN && e.key.keysym.sym == SDLK_F1 && !e.key.repeat && haveUi) ui.toggleQuick(player);
-				else if (e.type == SDL_CONTROLLERAXISMOTION && e.caxis.axis == SDL_CONTROLLER_AXIS_TRIGGERLEFT)
+				else if (e.type == SDL_CONTROLLERAXISMOTION && (e.caxis.axis == SDL_CONTROLLER_AXIS_TRIGGERLEFT || e.caxis.axis == SDL_CONTROLLER_AXIS_TRIGGERRIGHT))
 				{
-					// L2 is a trigger to SDL: pressed past half way
-					bool down = e.caxis.value > 16000;
-					if (down && fHeld) fCombo = true;
-					if (down && !l2Down && fHeld) screenshot();
-					l2Down = down;
+					// L2 and R2 are triggers to SDL: down past half way, up again only below a quarter, so a trigger
+					// hovering at the line doesn't press over and over
+					bool left = e.caxis.axis == SDL_CONTROLLER_AXIS_TRIGGERLEFT;
+					bool& was = left ? l2Down : r2Down;
+					bool down = was ? e.caxis.value > 8000 : e.caxis.value > 16000;
+					if (down != was)
+					{
+						was = down;
+						fprintf(stderr, "input: trigger %s %s (value %d)\n", left ? "L2" : "R2", down ? "down" : "up", e.caxis.value);
+						if (down && fHeld)
+						{
+							fCombo = true;
+							if (left) screenshot();	// F + L2; F + R2 does nothing
+						}
+						else if (down && haveUi && ui.press(left ? Button::L2 : Button::R2, player)) leave();
+					}
 				}
 				else if (e.type == SDL_KEYDOWN && e.key.keysym.sym == SDLK_F12 && !e.key.repeat) screenshot();
 				else if (e.type == SDL_CONTROLLERBUTTONUP) held = Button::None;
@@ -736,16 +747,32 @@ int main(int argc, char** argv)
 								player.index() + 1, player.count(), player.photoWidth(), player.photoHeight(), v.zoom, v.panX, v.panY,
 								v.rotate, v.fill ? "fill" : "fit", player.thumbW, player.thumbH, ui.screenOn() ? "on" : "off");
 						}
-						else printf("press %zu: file=%d/%d t=%.1f paused=%d speed=%s aspect=%s audio=%s sub=%s screen=%s%s\n", pressed,
+						else
+						{
+							// chapter=i/N: the current one (1-based, - before the first) of N, when the file has any
+							std::string chapterState;
+							if (!player.chapters.empty())
+							{
+								int c = player.currentChapter();
+								chapterState = " chapter=" + (c >= 0 ? std::to_string(c + 1) : std::string("-")) + "/" + std::to_string(player.chapters.size());
+							}
+							printf("press %zu: file=%d/%d t=%.1f paused=%d speed=%s aspect=%s audio=%s sub=%s screen=%s%s%s\n", pressed,
 							player.index() + 1, player.count(), player.position, player.paused, speedLabel(player.speed).c_str(),
 							aspectName(player.aspect), a ? trackLabel(*a, (int)a->id).c_str() : "off",
-							s ? trackLabel(*s, (int)s->id).c_str() : "off", ui.screenOn() ? "on" : "off", ui.touchIsLocked() ? " LOCKED" : "");
+							s ? trackLabel(*s, (int)s->id).c_str() : "off", ui.screenOn() ? "on" : "off", ui.touchIsLocked() ? " LOCKED" : "", chapterState.c_str());
+						}
 						fflush(stdout);
 					}
 				}
 			}
 
 			Uint32 now = SDL_GetTicks();
+			// a chapter card shown: it goes the way the volume card does, after 2 s
+			if (player.takeCardShown())
+			{
+				levelUntil = now + 2000;
+				renderPending = true;
+			}
 			if (levelUntil && now >= levelUntil)
 			{
 				player.hideLevel();

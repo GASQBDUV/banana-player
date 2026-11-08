@@ -26,7 +26,7 @@ namespace bp
 
 	bool isAudioFile(const std::string& name)
 	{
-		return hasExtension(name, {"mp3", "flac", "ogg", "oga", "wav", "m4a", "aac", "opus", "wma", "aiff", "aif", "ape",
+		return hasExtension(name, {"mp3", "flac", "ogg", "oga", "wav", "m4a", "m4b", "aac", "opus", "wma", "aiff", "aif", "ape",
 			"wv", "mka"});
 	}
 

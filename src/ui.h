@@ -129,12 +129,27 @@ namespace bp
 		SDL_Surface* capture(const Player& p);
 
 	private:
-		enum class Page { Main, Audio, Subs, Settings, Browse, Info, About, Exit };
+		enum class Page { Main, Tracks, Chapters, Settings, Browse, Info, About, Exit };
 		struct Rect { int x, y, w, h; bool hit(int px, int py) const { return px >= x && py >= y && px < x + w && py < y + h; } };
 		struct Row { int64_t id; std::string label; bool selected; std::string note = ""; };
 
 		std::vector<Row> rows(const Player& p) const;
 		void openMenu(Page pg, const Player& p);
+		// Audio & Subtitles: one page, two tabs (Y the left one, X the right), the last one open kept for the run
+		enum TracksTab { TRACKS_AUDIO, TRACKS_SUBS };
+		int tracksTab = TRACKS_AUDIO;
+		TrackType trackType() const { return tracksTab == TRACKS_AUDIO ? TrackType::Audio : TrackType::Sub; }
+		void openTracks(int tab, const Player& p);
+		Rect tracksTabRect(int t) const { return {t == TRACKS_AUDIO ? 72 : 248, 10, 168, 44}; }
+		void drawTracksHeader(const Player& p);
+		// the file's chapters: the cursor on the one playing
+		void openChapters(const Player& p);
+		void drawChapters(const Player& p);
+		// the chapter line over the bar (the one playing), and the two track lines under the buttons: each opens its
+		// page. Their ids are apart from buttonRect's grid and the photo's
+		static constexpr int LINE1_BTN = 500, LINE2_BTN = 501, CHAPTER_BTN = 502;
+		static constexpr int CHAPTER_Y = 126;
+		bool chapterLineShown(const Player& p) const;
 		void choose(int i, Player& p);
 		void changeSetting(int row, int dir, Player& p);
 		// Settings opens on its groups (setGroup -1); A or a tap opens one, B goes back to them

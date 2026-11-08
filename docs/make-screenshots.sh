@@ -26,7 +26,7 @@ run Right,Right,B,B "$MOVIE"
 # the scenes (each step 0.8 s apart: the picture has moved on by the shot)
 run prop:pause,shot:browser "$DEMO/Movies"    # the browser, opened in Movies
 run prop:pause,prop:pause,shot:playing "$MOVIE"
-run prop:pause,prop:pause,Y,shot:subs "$MOVIE"
+run prop:pause,prop:pause,X,X,shot:subs "$MOVIE"    # X opens Audio & Subtitles on Audio; X again, Subtitles
 run Right,shot:music "$SONG"
 run Start,R,A,Down,Down,shot:settings "$MOVIE"	# Settings › Subtitles
 run prop:pause,prop:pause,tap:242:450,Down,Down,Down,Down,Down,Down,shot:info "$MOVIE"

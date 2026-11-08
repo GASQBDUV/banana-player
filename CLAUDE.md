@@ -20,7 +20,7 @@ docs/make-screenshots.sh <library>                   # the README's docs/img/scr
 
 - **Scripted runs** are the end-to-end test harness: `--press STEPS` runs comma-separated steps 0.8 s apart and prints
   the state after each, then quits; real keyboard/mouse/touch input is ignored meanwhile. Steps are button names
-  (`A,B,X,Y,L,R,Up,Down,Left,Right,Start,Select,L3`), `tap:X:Y`, `dtap:X:Y`, `drag:X1:Y1:X2:Y2`, `hold:X:Y` (in the
+  (`A,B,X,Y,L,R,L2,R2,Up,Down,Left,Right,Start,Select,L3`), `tap:X:Y`, `dtap:X:Y`, `drag:X1:Y1:X2:Y2`, `hold:X:Y` (in the
   bottom panel's 640×480 layout units), `info`, `page`, `rows` (the browser's rows, in view or not), `prop:NAME` (any mpv property),
   `shot:NAME` (both panels to `$BP_SHOTS/NAME-{top,bottom}.png`), `screenshot`. Use `--state-dir` with a scratch dir
   so runs don't share settings/resume/history. The state line can lag a step behind (mpv is asynchronous; the
@@ -90,7 +90,9 @@ docs/make-screenshots.sh <library>                   # the README's docs/img/scr
   one's graph when it's the same (taking it off and on reopens the sound output).
 - **Loading:** `loading()` is true from `load()` till mpv's `PLAYBACK_RESTART`; the stale `video-params` and
   `video-out-params` of the last file (or the idle window) can't tell.
-- **`Ui`** is the whole bottom panel: pages (Main, Audio, Subs, Settings, Browse, Info, About, Exit), START's tabbed
+- **Chapters** come by `observe_property` (`chapter-list`, `chapter`), as the track list does; `chapterTarget` in bpcore
+  computes each L2/R2 jump, a pending chapter covers quick repeated presses, and the L2/R2 card shares `osd-overlay` id 2 with the volume card.
+- **`Ui`** is the whole bottom panel: pages (Main, Tracks (Audio & Subtitles tabs), Chapters, Settings, Browse, Info, About, Exit), START's tabbed
   menu (`inMenu`: Recent, Settings, About, Quit), the Options menu (X), Lock, Screen off. Main over a photo is
   `drawPhoto` (the pan area and `photoBtn`s, ids from `PHOTO_BTN`; `photoPointer`, a flick's glide in `tick()`; a
   drag moves the photo or, `dragBox`, the box). `BACK_ICON` ("<", top left of every page) is B by touch, except
@@ -173,8 +175,8 @@ docs/make-screenshots.sh <library>                   # the README's docs/img/scr
   `rk3568-anbernic-rg-ds*.dts`), not an RK3566.
 - The panels use the Nintendo button layout: A is the east button, which is `SDL_CONTROLLER_BUTTON_B`. The RG DS Plus
   has one stick, the left, and it clicks (L3, `SDL_CONTROLLER_BUTTON_LEFTSTICK`).
-- F is SDL's `GUIDE` button and L2 a trigger axis (handled in `main.cpp`, not `Button`): F + L2 screenshot, F + START
-  quits. The Back key is mapped to B as `SDLK_AC_BACK` (unconfirmed on the
+- F is SDL's `GUIDE` button. `main.cpp` reads both trigger axes (with hysteresis) and turns them into `Button::L2`/`R2`,
+  unless F is held: F + L2 screenshot, F + START quits. The Back key is mapped to B as `SDLK_AC_BACK` (unconfirmed on the
   handheld); every button press is logged as `input: ...` to find what a key sends.
 - Photos are scaled to 4096 pixels at most: the RK3568's GPU (Mali-G52, Panfrost) may take no texture over 8192
   (unverified), and a 50 MP photo's would be 200 MB.

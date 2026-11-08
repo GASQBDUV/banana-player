@@ -117,7 +117,7 @@ Docker:
 
 ```sh
 docker run --rm -v "$PWD":/src:ro debian:trixie bash -c "apt-get update -qq && \
-  apt-get install -y -qq g++ cmake make pkg-config libmpv-dev libsdl2-dev libsdl2-ttf-dev >/dev/null && \
+  apt-get install -y -qq g++ cmake make pkg-config libmpv-dev libsdl2-dev libsdl2-ttf-dev libssl-dev libcurl4-openssl-dev >/dev/null && \
   cmake -S /src -B /tmp/b -DCMAKE_CXX_FLAGS='-Wall -Wextra' && cmake --build /tmp/b -j && /tmp/b/core-test"
 ```
 
@@ -187,6 +187,9 @@ build/bp-net cancel-ls|cancel-cat ...                      # with the server `do
       one dialog style, error and locked states, Pixelify's broken "fi" ligature split. `BP_BOTTOM_SIZE=1024x768`
       draws the bottom panel at the Plus's size in tests.
 - [x] **Loading spinner** on the top panel (from 0.3 s, till mpv's `playback-restart`), for any file.
+- [x] **Chapters:** the file's own chapter markers (`chapter-list`, `chapter`): L2/R2 jump (`chapterTarget` in bpcore),
+      a Chapters page, the chapter line on Main, bar marks, and the top-panel card (`osd-overlay` id 2). Audiobooks
+      (M4B) play as music, with the chapter under the title.
 - [ ] **On the handheld (needs the hardware):**
   - [ ] Does SDL2's KMSDRM give both panels as two displays, with a GLES window on one and a renderer on the other?
         If not, the bottom panel falls back to raw KMS, as banana-ui uses.

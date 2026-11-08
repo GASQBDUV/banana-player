@@ -93,6 +93,8 @@ namespace bp
 	GLYPH(G_PLUG, "..#...#..", "..#...#..", "#########", "#########", ".#######.", "..#####..", "...###...",
 		"....#....", "....#....")
 	GLYPH(G_BACK, "....##", "...##.", "..##..", ".##...", "##....", ".##...", "..##..", "...##.", "....##")
+GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "###.#####..", "...........",
+		"###.######.", "###.######.")
 #undef GLYPH
 
 	// the two rows of buttons: what each does is the button it stands for
@@ -293,9 +295,17 @@ namespace bp
 	{
 		if (page == Page::Browse) return browseRows;
 		std::vector<Row> out;
-		TrackType type = page == Page::Audio ? TrackType::Audio : TrackType::Sub;
+		if (page == Page::Chapters)
+		{
+			// a chapter a row (its index the id), the one playing as selected
+			int cur = p.currentChapter();
+			for (size_t i = 0; i < p.chapters.size(); i++) out.push_back({(int64_t)i, chapterLabel(p.chapters[i], (int)i + 1), (int)i == cur});
+			return out;
+		}
+		TrackType type = trackType();
 		auto list = p.tracksOf(type);
-		if (type == TrackType::Sub) out.push_back({0, "Off", p.selected(TrackType::Sub) == nullptr});
+		if (type == TrackType::Sub)
+			out.push_back({0, "Off", p.selected(TrackType::Sub) == nullptr, list.empty() ? "No subtitles in this file" : ""});
 		for (size_t i = 0; i < list.size(); i++) out.push_back({list[i].id, trackLabel(list[i], (int)i + 1), list[i].selected});
 		if (type == TrackType::Sub) out.push_back({STYLE_ROW, "Subtitle style...", false});
 		if (out.empty()) out.push_back({-1, "No audio in this file", false});
@@ -311,6 +321,21 @@ namespace bp
 		for (size_t i = 0; i < r.size(); i++)
 			if (r[i].selected) cursor = (int)i;
 		scroll = std::max(0, cursor - ROWS_SHOWN + 1);
+	}
+
+	void Ui::openTracks(int tab, const Player& p)
+	{
+		tracksTab = tab;
+		openMenu(Page::Tracks, p);
+	}
+
+	void Ui::openChapters(const Player& p)
+	{
+		page = Page::Chapters;
+		// on the one playing, three rows above it showing where the list allows (what came before it, a little)
+		int n = (int)p.chapters.size();
+		cursor = std::clamp(p.currentChapter(), 0, std::max(0, n - 1));
+		scroll = std::clamp(cursor - 3, 0, std::max(0, n - ROWS_SHOWN));
 	}
 
 	void Ui::choose(int i, Player& p)
@@ -376,8 +401,18 @@ namespace bp
 			styleFromSubs = true;
 			return;
 		}
+		if (page == Page::Chapters)
+		{
+			// from there: playing (a paused one too), the card says where, back to the player
+			int c = (int)r[i].id;
+			p.seekChapter(c);
+			p.unpause();
+			p.showChapterCard(c);
+			page = Page::Main;
+			return;
+		}
 		if (r[i].id < 0) return;
-		TrackType type = page == Page::Audio ? TrackType::Audio : TrackType::Sub;
+		TrackType type = trackType();
 		p.selectTrack(type, r[i].id);
 		p.osd(std::string(type == TrackType::Audio ? "Audio: " : "Subtitles: ") + r[i].label);
 		page = Page::Main;
@@ -1128,7 +1163,8 @@ namespace bp
 		// a photo: on to the next, and zooming, while held
 		if (page == Page::Main && !inMenu && p.playingPhoto())
 			return b == Button::Left || b == Button::Right || b == Button::L || b == Button::R || b == Button::Up || b == Button::Down;
-		if (b == Button::Left || b == Button::Right) return page != Page::Audio && page != Page::Subs;
+		if (b == Button::L2 || b == Button::R2) return false;
+		if (b == Button::Left || b == Button::Right) return page != Page::Tracks && page != Page::Chapters;
 		if (b == Button::L || b == Button::R) return false;	// (the browser's tabs)
 		return page != Page::Main && (b == Button::Up || b == Button::Down);
 	}
@@ -1153,8 +1189,9 @@ namespace bp
 			s.loop = (s.loop + 1) % LOOPS;
 			said = loopLabel(s.loop);
 		}
-		else if (b == Button::Y)
+		else if (b == Button::Y && p.chapters.empty())
 		{
+			// (a song or audiobook with chapters: Y is its chapters, the visualizer stays in Settings)
 			s.visualizer = (s.visualizer + 1) % VISUALIZERS;
 			said = std::string("Visualizer: ") + visualizerLabel(s.visualizer);
 		}
@@ -1177,6 +1214,16 @@ namespace bp
 		// Button hotkeys off: the buttons do nothing over a playing video (touch does it all); the pages opened from
 		// there by touch still take them
 		if (page == Page::Main && !p.settings.buttonHotkeys) return false;
+		// L2/R2: the chapter before or after, over what plays and its two pages (the Chapters page's mark follows).
+		// Not in START's menu, not over a photo (its keys are its own), and nothing with Button hotkeys off: they
+		// have no touch button to stand for
+		if (b == Button::L2 || b == Button::R2)
+		{
+			if (p.settings.buttonHotkeys && !inMenu && p.playing() && !p.playingPhoto() && p.error.empty() &&
+				(page == Page::Main || page == Page::Tracks || page == Page::Chapters))
+				p.stepChapter(b == Button::L2 ? -1 : 1);
+			return false;
+		}
 		// the buttons play on with the panel dark; the ones that open a page bring it back
 		if (!panel.on() && (b == Button::X || b == Button::Y || b == Button::Start)) panel.set(true);
 		if (b != Button::B) quitArmed = 0;
@@ -1188,7 +1235,7 @@ namespace bp
 			{
 				styleFromSubs = false;
 				inMenu = false;
-				openMenu(Page::Subs, p);
+				openTracks(TRACKS_SUBS, p);
 				cursor = (int)rows(p).size() - 1;	// on Subtitle style, where it was
 				scroll = std::max(0, cursor - ROWS_SHOWN + 1);
 				return false;
@@ -1322,9 +1369,22 @@ namespace bp
 			return false;
 		}
 		if (page == Page::Browse && b == Button::Start) { openMainMenu(p); return false; }
+		if (page == Page::Tracks)
+		{
+			// the tabs: Y the left one (Audio), X the right one (Subtitles); L/R as well, as the browser's tabs go
+			if (b == Button::Y || b == Button::L) { if (tracksTab != TRACKS_AUDIO) openTracks(TRACKS_AUDIO, p); return false; }
+			if (b == Button::X || b == Button::R) { if (tracksTab != TRACKS_SUBS) openTracks(TRACKS_SUBS, p); return false; }
+		}
+		if (page == Page::Chapters && p.chapters.empty())
+		{
+			// (the list can also empty under it: the next file has none)
+			if (b == Button::B) page = home(p);
+			return false;
+		}
 		if (page != Page::Main)
 		{
 			int n = (int)rows(p).size();
+			cursor = std::min(cursor, n - 1);
 			switch (b)
 			{
 			case Button::Up: cursor = (cursor + n - 1) % n; break;
@@ -1354,8 +1414,9 @@ namespace bp
 			p.osd(std::string(p.settings.buttonHotkeys ? "Press B" : "Tap") + " again to " + (browserMode ? "close" : "quit"),
 				QUIT_WINDOW_MS);
 			break;
-		case Button::X: if (!musicKey(b, p)) openMenu(Page::Audio, p); break;
-		case Button::Y: if (!musicKey(b, p)) openMenu(Page::Subs, p); break;
+		case Button::X: if (!musicKey(b, p)) openTracks(tracksTab, p); break;
+		// (a file with no chapters, or none known yet: the page says so)
+		case Button::Y: if (!musicKey(b, p)) openChapters(p); break;
 		case Button::Start: openMainMenu(p); break;
 		case Button::Select:
 			if (musicKey(b, p)) break;
@@ -1497,6 +1558,9 @@ namespace bp
 
 	Ui::Rect Ui::buttonRect(int id) const
 	{
+		if (id == LINE1_BTN) return {24, LINE1_Y - 12, 592, 24};
+		if (id == LINE2_BTN) return {24, LINE2_Y - 12, 592, 24};
+		if (id == CHAPTER_BTN) return {24, CHAPTER_Y - 14, 592, 24};
 		if (id >= PHOTO_BTN) return {0, 0, 0, 0};	// photoBtn's: they move with the pan area
 		if (id == QUIT_BTN) return {468, 428, 148, 44};
 		if (id == EMPTY_BTN) return {200, 300, 240, 52};
@@ -1518,6 +1582,8 @@ namespace bp
 		if (id == BACK_ICON && (inMenu || (page != Page::Browse && page != Page::Main))) return pressAnyway(Button::B, p);
 		if (id == QUIT_BTN || id == BACK_ICON) return pressAnyway(Button::B, p);
 		if (id == EMPTY_BTN) { openForm(nullptr, nullptr, p); return false; }
+		if (id == LINE1_BTN || id == LINE2_BTN) { openTracks(id == LINE1_BTN ? TRACKS_AUDIO : TRACKS_SUBS, p); return false; }
+		if (id == CHAPTER_BTN) { openChapters(p); return false; }
 		if (id == GROUP_PREV || id == GROUP_NEXT) { stepGroup(id == GROUP_NEXT ? 1 : -1); return false; }
 		if (id == SCREEN_BTN) { panel.set(false); return false; }
 		if (id == EXIT_BTN) { quitRequested = true; return false; }
@@ -1741,6 +1807,13 @@ namespace bp
 				if (browseTabRect(t).hit(x, y)) switchTab(t, p);
 			return false;
 		}
+		if (page == Page::Tracks && y < 60)
+		{
+			// a tab switches as the finger lands (as the browser's do)
+			for (int t = 0; t < 2; t++)
+				if (tracksTabRect(t).hit(x, y) && t != tracksTab) openTracks(t, p);
+			return false;
+		}
 		if (page != Page::Main)
 		{
 			if (y < ROW_Y || y >= ROW_Y + ROWS_SHOWN * ROW_H) return false;
@@ -1774,6 +1847,12 @@ namespace bp
 			if (buttonRect(QUIT_BTN).hit(x, y)) pressedBtn = QUIT_BTN;
 			return false;
 		}
+		// the chapter line first: the bar's room around it reaches up over its lower part
+		if (chapterLineShown(p) && buttonRect(CHAPTER_BTN).hit(x, y)) { pressedBtn = CHAPTER_BTN; return false; }
+		// a video's track lines: each opens its tab
+		if (!p.playingAudio() && p.error.empty())
+			for (int id : {LINE1_BTN, LINE2_BTN})
+				if (buttonRect(id).hit(x, y)) { pressedBtn = id; return false; }
 		// the bar is easier to hit with some room around it
 		if (Rect{BAR.x - 8, BAR.y - 20, BAR.w + 16, BAR.h + 40}.hit(x, y) && p.duration > 0)
 		{
@@ -1816,6 +1895,9 @@ namespace bp
 		if (updater)
 			upd += "|upd" + std::to_string((int)updater->state()) + " " + std::to_string(updater->progress()) + " " + updater->available() +
 				" " + std::to_string(popupShown(p)) + std::to_string(popupCursor) + std::to_string(pressedBtn);
+		// the chapters: the list, the one playing (the Chapters page's progress goes by the position, above), the tab
+		photo += "|ch" + std::to_string(p.chapterSerial) + " " + std::to_string(p.chapters.size()) + " " +
+			std::to_string(p.currentChapter()) + " t" + std::to_string(tracksTab);
 		// the dots of "Loading..." go round
 		if (p.loading() || p.thumbPending()) photo += "|loading" + std::to_string(SDL_GetTicks() / 400 % 4);
 		return buf + photo + p.title + "|" + p.error + "|" + serializeSettings(p.settings) + "|bat" + std::to_string(battery.percent) + (battery.charging ? "c" : "") + (inMenu ? "|menu" + std::to_string(menuTab) : "") + (ctxOpen ? "|ctx" + std::to_string(ctxCursor) + std::to_string(pressedBtn) + ctxStatus + (ctxArmed ? "!" : "") : "") + upd
@@ -1994,7 +2076,7 @@ namespace bp
 		if (page == Page::Info || page == Page::About) drawInfo(p);
 		else if (page == Page::Exit) drawExit(p);
 		else if (page == Page::Settings) drawSettings(p);
-		else if (page == Page::Browse) drawTracks(p);
+		else if (page == Page::Chapters) drawChapters(p);
 		else if (page != Page::Main) drawTracks(p);
 		else drawMain(p);
 		if (inMenu) drawTabs();
@@ -2473,9 +2555,10 @@ namespace bp
 				drawTextMid(where.substr(cut + 3), 0, CREAM, 24 + (int)std::lround(textWidth(head, 0) / sx), SUB_Y);
 			}
 		}
-		else if (!browse) drawHeader(page == Page::Audio ? "Audio" : "Subtitles", p);
+		else if (!browse) drawTracksHeader(p);
 		auto r = rows(p);
 		bool form = browse && browseDir == FORMDIR;
+		bool noAudio = !browse && trackType() == TrackType::Audio && r.size() == 1 && r[0].id < 0;
 		// a message alone (nothing here, loading, no connections): in the middle of the page, not as a row to choose
 		if (browse && !form && r.size() == 1 && r[0].id < 0)
 		{
@@ -2489,6 +2572,7 @@ namespace bp
 			std::string title = m == "Play history is off (Settings)" ? "Play history is off" : m;
 			drawEmpty(g, title, sub, emptyAction() ? "Add connection" : nullptr);
 		}
+		else if (noAudio) drawEmpty(G_SPEAKER, "No audio in this file", "This video has no sound track", nullptr);
 		else
 			for (int i = scroll; i < (int)r.size() && i < scroll + ROWS_SHOWN; i++)
 			{
@@ -2542,7 +2626,15 @@ namespace bp
 			}
 		int n = (int)r.size();
 		drawScrollBar(ROW_Y, ROWS_SHOWN * ROW_H - 4, scroll, ROWS_SHOWN, n);
-		if (!browse) { drawHints({{"A", "Choose"}, {"B", "Back"}}); return; }
+		if (!browse)
+		{
+			// the other tab's key, as on its tab; on Subtitle style A opens it
+			bool audio = trackType() == TrackType::Audio;
+			const char* verb = cursor < n && r[cursor].id == STYLE_ROW ? "Style" : "Choose";
+			if (noAudio) drawHints({{"X", "Subtitles"}, {"B", "Back"}});
+			else drawHints({{"A", verb}, {audio ? "X" : "Y", audio ? "Subtitles" : "Audio"}, {"B", "Back"}});
+			return;
+		}
 		if (quitArmed) { drawFooterText("Press B again to quit", YELLOW); return; }
 		const char* other = browseTab == TAB_LOCAL ? "Network" : "Local";
 		const char* tabKey = browseTab == TAB_LOCAL ? "R" : "L";
@@ -2555,6 +2647,75 @@ namespace bp
 			drawHints({{"B", "Back"}, {"X", "Options"}, {tabKey, other}, {"START", "Menu"}});
 		else if (browseDir.empty()) drawHints({{"A", "Open"}, {"X", "Options"}, {tabKey, other}, {"START", "Menu"}, {"B\xC3\x97" "2", "Quit"}});
 		else drawHints({{"A", browseDir == RECENT ? "Play" : "Open"}, {"B", "Back"}, {"X", "Options"}, {tabKey, other}, {"START", "Menu"}});
+	}
+
+	void Ui::drawTracksHeader(const Player& p)
+	{
+		drawBackIcon();
+		// the tabs: the open one as START's menu draws its tab; the other with its key on its outer side (Y on the
+		// left one, X on the right one, as the buttons sit), its name centred in the rest
+		static const char* NAMES[2] = {"Audio", "Subtitles"};
+		for (int t = 0; t < 2; t++)
+		{
+			Rect r = tracksTabRect(t);
+			if (t == tracksTab) { drawTab(r, NAMES[t], true); continue; }
+			fill(r, TEAL);
+			const char* key = t == TRACKS_AUDIO ? "Y" : "X";
+			int kw = (int)std::lround(textWidth(key, 0) / sx), mid = r.y + r.h / 2;
+			int left = r.x, right = r.x + r.w;
+			if (t == TRACKS_AUDIO)
+			{
+				drawTextMid(key, 0, YELLOW, r.x + 14, mid);
+				left = r.x + 14 + kw;
+			}
+			else
+			{
+				drawTextMid(key, 0, YELLOW, r.x + r.w - 14, mid, 0, 1);
+				right = r.x + r.w - 14 - kw;
+			}
+			drawTextMid(NAMES[t], 1, CREAM, (left + right) / 2, mid, right - left - 8, 2);
+		}
+		drawBattery(616, 24, p);
+	}
+
+	void Ui::drawChapters(const Player& p)
+	{
+		drawHeader("Chapters", p);
+		int n = (int)p.chapters.size();
+		if (n == 0)
+		{
+			drawEmpty(G_CHAPTERS, "No chapters in this file", "When a file has chapters, L2 and R2 jump between them", nullptr);
+			drawHints({{"B", "Back"}});
+			return;
+		}
+		int cur = p.currentChapter(), at = std::min(cursor, n - 1);
+		for (int i = scroll; i < n && i < scroll + ROWS_SHOWN; i++)
+		{
+			int y = ROW_Y + (i - scroll) * ROW_H, mid = y + 22;
+			bool focus = i == at, now = i == cur;
+			if (focus) drawFocus({16, y, 608, ROW_H - 4});
+			SDL_Color soft = focus ? DIM_TEAL : DIM;
+			// the one playing: its mark, as the status line has it
+			if (now) drawGlyphMid(p.paused ? G_PAUSE : G_PLAY, 40, mid, YELLOW);
+			drawTextMid(std::to_string(i + 1), 0, now ? YELLOW : soft, 90, mid, 0, 1);
+			const Chapter& c = p.chapters[i];
+			std::string start = formatTime(c.time);
+			drawTextMid(start, 0, soft, 608, mid, 0, 1);
+			int timeW = (int)std::lround(textWidth(start, 0) / sx);
+			int maxW = 608 - 16 - timeW - 104;
+			if (chapterUntitled(c.title)) drawTextMid(chapterLabel(c, i + 1), 1, soft, 104, mid, maxW);
+			else drawTextMid(c.title, 1, focus ? YELLOW : CREAM, 104, mid, maxW);
+			if (now)
+			{
+				// how far into it: up to the next one's start, or the file's end
+				double end = i + 1 < n ? p.chapters[i + 1].time : p.duration;
+				double f = end > c.time && p.position >= 0 ? std::clamp((p.position - c.time) / (end - c.time), 0.0, 1.0) : 0;
+				fill({104, y + 37, 504, 3}, focus ? BG : SCREEN);
+				fill({104, y + 37, (int)(504 * f), 3}, YELLOW);
+			}
+		}
+		drawScrollBar(ROW_Y, ROWS_SHOWN * ROW_H - 4, scroll, ROWS_SHOWN, n);
+		drawHints({{"A", "Play from here"}, {"L2/R2", "Prev/Next"}, {"B", "Back"}});
 	}
 
 	void Ui::readInfo(const Player& p)
@@ -2966,6 +3127,13 @@ namespace bp
 		if (hint) drawTextMid(key, 0, off ? DIM : YELLOW, b.x + b.w / 2, b.y + b.h * 4 / 5 - 2, b.w - 6, 2);
 	}
 
+	bool Ui::chapterLineShown(const Player& p) const
+	{
+		// before the first chapter starts there's none to name (and nothing to tap)
+		return p.playing() && !p.playingPhoto() && !p.loading() && p.error.empty() && !p.chapters.empty() &&
+			p.currentChapter() >= 0 && p.currentChapter() < (int)p.chapters.size();
+	}
+
 	void Ui::drawMain(const Player& p)
 	{
 		if (p.playingPhoto()) { drawPhoto(p); return; }
@@ -2999,17 +3167,66 @@ namespace bp
 			}
 			drawTextMid(status, 1, YELLOW, x, STATUS_Y, 330);
 
+			// the chapter playing, between the status line and the bar: its title (the Y button has its number), or
+			// "Chapter 3 of 12" dim when it has none. A tap opens the list
+			if (chapterLineShown(p))
+			{
+				int c = p.currentChapter(), n = (int)p.chapters.size();
+				if (pressedBtn == CHAPTER_BTN) fill(buttonRect(CHAPTER_BTN), PRESSED);
+				drawGlyphMid(G_CHAPTERS, 35, CHAPTER_Y, DIM);
+				if (chapterUntitled(p.chapters[c].title))
+					drawTextMid("Chapter " + std::to_string(c + 1) + " of " + std::to_string(n), 0, DIM, 52, CHAPTER_Y, 540);
+				else drawTextMid(p.chapters[c].title, 0, CREAM, 52, CHAPTER_Y, 540);
+				drawGlyphMid(G_RIGHT, 604, CHAPTER_Y, DIM);
+			}
+
 			double frac = dragging ? dragFraction : p.duration > 0 && p.position >= 0 ? std::clamp(p.position / p.duration, 0.0, 1.0) : 0;
 			fill(BAR, TEAL);
 			fill({BAR.x, BAR.y, (int)(BAR.w * frac), BAR.h}, YELLOW);
+			// where each chapter starts: a notch through the bar (none too close to the last, none at all past 100:
+			// they'd be a comb)
+			if (p.duration > 0 && p.chapters.size() <= 100)
+			{
+				int last = -1000;
+				for (auto& c : p.chapters)
+				{
+					if (c.time <= 0) continue;
+					int x = BAR.x + (int)(BAR.w * std::min(1.0, c.time / p.duration));
+					if (x - last < 6) continue;
+					fill({x - 1, BAR.y, 2, BAR.h}, BG);
+					last = x;
+				}
+			}
 			fill({BAR.x + (int)(BAR.w * frac) - 4, BAR.y - 6, 8, BAR.h + 12}, CREAM);
 			drawText(formatTime(dragging ? dragFraction * p.duration : p.position), 1, CREAM, BAR.x, BAR.y + 32);
 			drawText(formatTime(p.duration), 1, DIM, BAR.x + BAR.w, BAR.y + 32, 0, 1);
 			// how long is left, at the speed it plays (half at 2x)
 			double left = timeLeft(dragging ? dragFraction * p.duration : p.position, p.duration, p.speed);
-			if (left >= 0) drawText(formatTime(left) + " left", 0, DIM, BAR.x + BAR.w / 2, BAR.y + 36, 0, 2);
+			// dragging the bar of a file with chapters: the chapter under the finger instead ("3 · The Dragon")
+			int under = -1;
+			if (dragging && p.duration > 0)
+				for (int i = 0; i < (int)p.chapters.size(); i++)
+					if (p.chapters[i].time <= dragFraction * p.duration) under = i;
+			if (under >= 0)
+				drawText(std::to_string(under + 1) + " \xC2\xB7 " + chapterLabel(p.chapters[under], under + 1), 0, CREAM,
+					BAR.x + BAR.w / 2, BAR.y + 36, 300, 2);
+			else if (left >= 0) drawText(formatTime(left) + " left", 0, DIM, BAR.x + BAR.w / 2, BAR.y + 36, 0, 2);
 		}
 		if (!right.empty()) drawTextMid(right, 0, rightInk, 616, STATUS_Y, 250, 1);
+		// a file with chapters, the buttons on: what L2/R2 do, left of the count (a message in yellow takes the place)
+		if (!err && !p.chapters.empty() && hotkeys && !quitArmed && !touchLocked)
+		{
+			int x = 616;
+			if (!right.empty())
+			{
+				x -= (int)std::lround(textWidth(right, 0) / sx) + 12;
+				fill({x, STATUS_Y - 8, 1, 16}, SCREEN);
+				x -= 12;
+			}
+			int vw = (int)std::lround(textWidth(" Chapters", 0) / sx);
+			drawTextMid(" Chapters", 0, DIM, x, STATUS_Y, 0, 1);
+			drawTextMid("L2/R2", 0, YELLOW, x - vw, STATUS_Y, 0, 1);
+		}
 
 		for (int r = 0; r < 2; r++)
 			for (int c = 0; c < 5; c++)
@@ -3027,8 +3244,8 @@ namespace bp
 				case Button::Right: label = "+10s"; break;
 				case Button::R: label = "Next"; g = &G_NEXT; off = p.index() + 1 >= p.count(); break;
 				// music: loop, visualizer, what's shown; a video: audio, subtitles, picture size
-				case Button::X: label = p.playingAudio() ? loopLabel(p.settings.loop) : "Audio"; break;
-				case Button::Y: label = p.playingAudio() ? visualizerLabel(p.settings.visualizer) : "Subs"; break;
+				case Button::X: label = p.playingAudio() ? loopLabel(p.settings.loop) : ""; break;
+				case Button::Y: label = p.playingAudio() && p.chapters.empty() ? visualizerLabel(p.settings.visualizer) : ""; break;
 				case Button::Select: label = p.playingAudio() ? SHOW_SHORT[p.settings.musicShow] : aspectName(p.aspect); break;
 				case Button::Up: label = speedLabel(p.speed); break;
 				default: label = "Menu"; break;
@@ -3036,8 +3253,30 @@ namespace bp
 				// a file that didn't open: only what leads elsewhere (the next file, the menu)
 				if (err && which != Button::L && which != Button::R && which != Button::Start) off = true;
 				fill(b, pressedBtn == r * 5 + c && !off ? PRESSED : TEAL);
+				const char* key = hotkeys ? GRID[r][c].hint : nullptr;
+				if (which == Button::X && !p.playingAudio())
+				{
+					// a video's Audio & Subtitles: their two marks, no words
+					SDL_Color ink = off ? DIM : CREAM;
+					drawGlyphMid(G_SPEAKER, b.x + 40, b.y + 24, ink);
+					drawGlyphMid(G_CC, b.x + 66, b.y + 24, ink);
+					if (key) drawTextMid(key, 0, off ? DIM : YELLOW, b.x + b.w / 2, b.y + b.h * 4 / 5 - 2, b.w - 6, 2);
+				}
+				else if (which == Button::Y && (!p.playingAudio() || !p.chapters.empty()))
+				{
+					// Chapters: the one playing of how many ("3/12"; "3" when that's too wide, "–/12" before the first).
+					// None (or not known yet) dims it, though it still opens the page that says so
+					int n = (int)p.chapters.size(), c = p.currentChapter();
+					std::string num;
+					if (n > 0)
+					{
+						num = (c >= 0 ? std::to_string(c + 1) : std::string("\xE2\x80\x93")) + "/" + std::to_string(n);
+						if (textWidth(num, 1) / sx > 66 && c >= 0) num = std::to_string(c + 1);
+					}
+					drawButton(b, &G_CHAPTERS, num, key, off || n == 0, 1);
+				}
 				// the button it stands for, while the buttons work here (Button hotkeys); else the name alone, centred
-				drawButton(b, g, label, hotkeys ? GRID[r][c].hint : nullptr, off, 1);
+				else drawButton(b, g, label, key, off, 1);
 			}
 
 		const Track* a = p.selected(TrackType::Audio);
@@ -3051,10 +3290,17 @@ namespace bp
 			return trackLabel(*t, n);
 		};
 		// what's chosen, each after its mark: the sound, then the subtitles (a song: its artist and album)
+		// a video's lines open their tab of Audio & Subtitles: a chevron says so
+		bool video = !p.playingAudio();
+		auto lineEnd = [&](int id, int y) {
+			if (pressedBtn == id) fill(buttonRect(id), PRESSED);
+			drawGlyphMid(G_RIGHT, 604, y, DIM);
+		};
 		if (!err)
 		{
+			if (video) lineEnd(LINE1_BTN, LINE1_Y);
 			drawGlyphMid(G_SPEAKER, 33, LINE1_Y, DIM);
-			drawTextMid(label(a, TrackType::Audio), 0, CREAM, 52, LINE1_Y, 564);
+			drawTextMid(label(a, TrackType::Audio), 0, CREAM, 52, LINE1_Y, video ? 540 : 564);
 		}
 		if (err) {}
 		else if (p.playingAudio())
@@ -3069,8 +3315,9 @@ namespace bp
 		}
 		else
 		{
+			lineEnd(LINE2_BTN, LINE2_Y);
 			drawGlyphMid(G_CC, 33, LINE2_Y, DIM);
-			drawTextMid(label(s, TrackType::Sub), 0, CREAM, 52, LINE2_Y, 564);
+			drawTextMid(label(s, TrackType::Sub), 0, CREAM, 52, LINE2_Y, 540);
 		}
 
 		// the row along the bottom: Lock, Info, Screen off, and leaving

@@ -8,6 +8,7 @@ Everything Banana Player does, button by button. For installing it, see the [REA
 - [Photos](#photos)
 - [Picture size](#picture-size)
 - [Music](#music)
+- [Chapters](#chapters)
 - [Settings](#settings)
 - [Quick settings](#quick-settings)
 - [Updates](#updates)
@@ -18,7 +19,7 @@ Everything Banana Player does, button by button. For installing it, see the [REA
 | | |
 |---|---|
 | **Video** | MP4, MKV, WebM, AVI, MOV, TS, M4V, MPG, WMV, FLV and more: H.264, HEVC, VP9, AV1, MPEG-2/4… |
-| **Music** | MP3, FLAC, OGG, WAV, M4A, AAC, Opus, WMA, AIFF, APE and more |
+| **Music** | MP3, FLAC, OGG, WAV, M4A, M4B (audiobooks), AAC, Opus, WMA, AIFF, APE and more |
 | **Photos** | JPG, PNG, WebP, GIF (animated too), BMP, TIFF, AVIF |
 | **Subtitles** | Inside the video (SRT, ASS/SSA, PGS, VobSub, VTT), or files next to it (`movie.srt`, `movie.en.ass`) |
 | **Languages** | Subtitles, titles and file names in Latin scripts (Vietnamese too), Cyrillic, Greek, Chinese, Japanese, Korean, Thai, Arabic, Hebrew and Hindi |
@@ -56,9 +57,10 @@ its folder on that file.
 | **A** | Play / pause |
 | **LEFT / RIGHT** | Back 5 seconds / forward 10 seconds (hold to keep going) |
 | **L / R** | Previous / next file in the folder |
+| **L2 / R2** | Previous / next chapter (**F + L2** is still the screenshot) |
 | **UP / DOWN** | Faster / slower (0.5x, 1x, 1.5x, 2x, 2.5x) |
-| **X** | Video: choose the audio track · Music: No loop → Loop all → Loop one |
-| **Y** | Video: choose subtitles · Music: Bars → Waves → Spectrum → Circle |
+| **X** | Video: audio and subtitles (one page, two tabs: **Y** / **X** or **L / R** switch them) · Music: No loop → Loop all → Loop one |
+| **Y** | Video: chapters · Music: Bars → Waves → Spectrum → Circle, or chapters for a song or audiobook that has them (the visualizer is still in Settings › Music) |
 | **SELECT** | Video: Fit → Fill → Stretch · Music: Album art → Art + visualizer → Visualizer → None |
 | **START** | Menu: Recent, Settings, About, Quit |
 | **B** (or **Back**) **twice** | Close the video (back to the list) |
@@ -69,6 +71,8 @@ its folder on that file.
 **By touch:**
 - **Progress bar:** touch it to jump there. Hold and drag to scrub, and the picture follows your finger.
 - **Buttons:** they act when you lift your finger, so slide off one to cancel.
+- **Audio and subtitles:** on a video, tap the audio or subtitle line under the buttons to change that track.
+- **Chapters:** tap the chapter line above the progress bar to see the chapters.
 - **Lists:** tap to choose, drag to scroll.
 - **Close:** tap **<** (top left) once, or Close (bottom right, marked **B×2**) twice.
 - **Lock**, **Info** and **Screen off** are along the bottom, beside Close.
@@ -166,9 +170,28 @@ Songs show their title, artist and album on the top screen. While a song plays, 
   on Album art, and the visualizer on Art + visualizer. Album art can be inside the song file or a `cover.jpg` in the
   same folder.
 - **Y: the visualizer.** **Bars**, **Waves**, **Spectrum** or **Circle** (bars round a glowing ring, cyan to pink;
-  with Art + visualizer, the album art sits inside the ring).
+  with Art + visualizer, the album art sits inside the ring). A song or audiobook with chapters has **Y** for its
+  chapters instead; the visualizer is still in Settings › Music.
 - **X: looping.** **No loop**, **Loop all** (the folder starts again after its last song) or **Loop one** (the same
   song again). Videos never loop.
+
+## Chapters
+
+Videos (MKV, MP4, M4V) and audiobooks (M4B, which play as music) have chapters when the file
+marks them:
+
+- **L2** goes back: to the start of the current chapter if you're more than 5 seconds into it, otherwise to the
+  chapter before. **R2** goes to the next chapter. On the last one it stops there and doesn't run into the next file
+  (**R** does that).
+- The top screen shows a card on each jump: **Chapter 3 of 12** and the chapter's title.
+- The line above the progress bar on the Main page shows the chapter you're in (its title, or "Chapter 3 of 12" if it
+  has none). Tap it for the list.
+- **Y** (for a video, or a song with chapters) or that line opens the **Chapters** page: every chapter with its start
+  time, and the one playing marked. **A** (or a tap) plays from the chapter you pick, and **L2** / **R2** still work
+  there.
+- Marks on the progress bar show where each chapter starts.
+- Audiobooks and songs with chapters also show the chapter under the title on the top screen.
+- Nothing pops up over a film by itself: the card appears only when you jump with **L2** or **R2**.
 
 All three are remembered.
 

@@ -20,7 +20,7 @@
 
 namespace bp
 {
-	enum Observed : uint64_t { TIME_POS = 1, DURATION, PAUSE, TRACK_LIST, MEDIA_TITLE, AID, SID, SPEED, METADATA, PAUSED_FOR_CACHE, SEEKING };
+	enum Observed : uint64_t { TIME_POS = 1, DURATION, PAUSE, TRACK_LIST, MEDIA_TITLE, AID, SID, SPEED, METADATA, PAUSED_FOR_CACHE, SEEKING, CHAPTER_LIST, CHAPTER };
 	// screenshot-raw's answers for the photo's thumbnail: this plus the load they were asked in
 	static const uint64_t THUMB_REPLY = 1000;
 	// the panels' shape (both are 4:3)
@@ -116,6 +116,8 @@ namespace bp
 		mpv_observe_property(mpv, SPEED, "speed", MPV_FORMAT_DOUBLE);
 		mpv_observe_property(mpv, PAUSED_FOR_CACHE, "paused-for-cache", MPV_FORMAT_FLAG);
 		mpv_observe_property(mpv, SEEKING, "seeking", MPV_FORMAT_FLAG);
+		mpv_observe_property(mpv, CHAPTER_LIST, "chapter-list", MPV_FORMAT_NODE);
+		mpv_observe_property(mpv, CHAPTER, "chapter", MPV_FORMAT_INT64);
 		if (o.net && !o.net->attach(mpv)) fprintf(stderr, "net: mpv has no stream callbacks: network files won't open\n");
 		mpv_set_wakeup_callback(mpv, wakeup, ctx);
 		setAspect(aspect);
@@ -205,6 +207,7 @@ namespace bp
 		error.clear();
 		title.clear();
 		tracks.clear();
+		clearChapters();
 		position = duration = -1;
 		seenAid = seenSid = -1;
 		isAudio = isAudioFile(path);
@@ -414,6 +417,16 @@ namespace bp
 				case MEDIA_TITLE:
 					title = p->format == MPV_FORMAT_STRING ? *(char**)p->data : "";
 					if (isAudio && loaded) updateOverlay();	// it can come after the file's start
+					break;
+				case CHAPTER_LIST:
+					chapters = parseChapterList(p->format == MPV_FORMAT_NODE ? (mpv_node*)p->data : nullptr);
+					chapterSerial++;
+					if (isAudio && loaded) updateOverlay();	// a song's chapter line under its title
+					break;
+				case CHAPTER:
+					chapter = p->format == MPV_FORMAT_INT64 ? (int)*(int64_t*)p->data : -1;
+					if (pendingOn && chapter == pendingChapter) pendingOn = false;
+					if (isAudio && loaded) updateOverlay();
 					break;
 				case TRACK_LIST:
 					refreshTracks(p->format == MPV_FORMAT_NODE ? (mpv_node*)p->data : nullptr);
@@ -956,6 +969,128 @@ namespace bp
 		mpv_command_async(mpv, 0, cmd);
 	}
 
+	void Player::clearChapters()
+	{
+		chapters.clear();
+		chapter = -1;
+		chapterSerial++;
+		pendingOn = false;
+	}
+
+	int Player::currentChapter() const
+	{
+		return pendingOn && ticks() - pendingAt < 1000 ? pendingChapter : chapter;
+	}
+
+	void Player::seekChapter(int index)
+	{
+		if (index == CHAPTER_NONE || playlist.empty()) return;
+		pendingOn = true;
+		pendingChapter = index;
+		pendingAt = ticks();
+		if (index == CHAPTER_FILE_START)
+		{
+			const char* cmd[] = {"seek", "0", "absolute", nullptr};
+			mpv_command_async(mpv, 0, cmd);
+		}
+		else prop("chapter", std::to_string(index));
+		// a song's chapter line follows the jump at once, not after mpv's answer
+		if (isAudio && loaded) updateOverlay();
+	}
+
+	int Player::stepChapter(int dir)
+	{
+		if (!loaded || !error.empty() || isPhoto || playlist.empty()) return CHAPTER_NONE;
+		if (chapters.empty())
+		{
+			osd("No chapters in this file");
+			return CHAPTER_NONE;
+		}
+		int cur = currentChapter();
+		if (cur >= (int)chapters.size()) cur = (int)chapters.size() - 1;
+		// no earlier than the chapter's start: the position can lag a jump, and would read as before it
+		double pos = cur >= 0 ? std::max(position, chapters[cur].time) : 0;
+		int target = chapterTarget(chapters, cur, pos, dir);
+		if (target == CHAPTER_NONE)
+			showChapterCard(dir < 0 ? 0 : (int)chapters.size() - 1, dir < 0 ? -1 : 1);
+		else
+		{
+			seekChapter(target);
+			if (target >= 0) showChapterCard(target);
+			else osd("Start of the file");
+		}
+		return target;
+	}
+
+	// a card's text: libass has no way to say a brace or a backslash literally, so they become look-alikes
+	static std::string cardText(const std::string& s, size_t maxChars)
+	{
+		std::string out;
+		size_t chars = 0;
+		for (size_t i = 0; i < s.size(); i++)
+		{
+			unsigned char c = (unsigned char)s[i];
+			if ((c & 0xC0) != 0x80)
+			{
+				if (chars == maxChars) { out += "\xe2\x80\xa6"; break; }
+				chars++;
+			}
+			out += c == '{' ? '(' : c == '}' ? ')' : c == '\\' ? '/' : c == '\n' || c == '\r' ? ' ' : (char)c;
+		}
+		return out;
+	}
+
+	void Player::showChapterCard(int index, int edge)
+	{
+		int n = (int)chapters.size();
+		if (index < 0 || index >= n || playlist.empty()) return;
+		std::string of = "Chapter " + std::to_string(index + 1) + " of " + std::to_string(n);
+		bool untitled = chapterUntitled(chapters[index].title);
+		std::string ev =
+			"{\\an7\\pos(180,296)\\bord0\\shad0\\1c&H1C1617&\\1a&H20&\\p1}m 0 0 l 600 0 600 128 0 128{\\p0}\n";
+		// the line 1 note over the first or last chapter, in yellow after the count
+		std::string note = edge < 0 ? "  \xc2\xb7  This is the first chapter" : edge > 0 ? "  \xc2\xb7  This is the last chapter" : "";
+		auto line1 = [&](const std::string& text) {
+			ev += "{\\an7\\pos(208,310)\\bord0\\shad0\\fnInter\\fs24\\1c&H7C868A&}" + text;
+			if (!note.empty()) ev += "{\\1c&H29B4F0&}" + note;
+			ev += "\n";
+		};
+		if (untitled)
+		{
+			// the count is the title line; a note has line 1 to itself (no empty title line under it)
+			if (!note.empty())
+				ev += "{\\an7\\pos(208,310)\\bord0\\shad0\\fnInter\\fs24\\1c&H29B4F0&}" + note.substr(6) + "\n";
+			ev += "{\\an7\\pos(208,340)\\bord0\\shad0\\fnInter\\fs32\\1c&HE2EDF1&}" + of + "\n";
+		}
+		else
+		{
+			line1(of);
+			if (!untitled)
+				ev += "{\\an7\\pos(208,340)\\bord0\\shad0\\fnInter\\fs32\\q2\\clip(180,296,780,424)\\1c&HE2EDF1&}" +
+					cardText(chapters[index].title, 32) + "\n";
+		}
+		// the bar: a segment a chapter by its start, a gap at each boundary (none in a segment under 6 units)
+		if (duration > 0)
+		{
+			std::string teal, yellow;
+			for (int i = 0; i < n; i++)
+			{
+				int x0 = (int)std::lround(std::min(1.0, std::max(0.0, chapters[i].time / duration)) * 544);
+				int x1 = i + 1 < n ? (int)std::lround(std::min(1.0, std::max(0.0, chapters[i + 1].time / duration)) * 544) : 544;
+				if (x1 - x0 >= 6 && i + 1 < n) x1 -= 2;
+				x1 = std::max(x1, x0 + 1);
+				char r[96];
+				snprintf(r, sizeof r, "m %d 0 l %d 0 %d 10 %d 10 ", x0, x1, x1, x0);
+				(i == index ? yellow : teal) += r;
+			}
+			ev += "{\\an7\\pos(208,398)\\bord0\\shad0\\1c&H464323&\\p1}" + teal + "{\\p0}\n";
+			ev += "{\\an7\\pos(208,398)\\bord0\\shad0\\1c&H29B4F0&\\p1}" + yellow + "{\\p0}";
+		}
+		const char* cmd[] = {"osd-overlay", "2", "ass-events", ev.c_str(), "960", "720", "10", "no", "no", nullptr};
+		mpv_command_async(mpv, 0, cmd);
+		cardShown = true;
+	}
+
 	void Player::hideLevel()
 	{
 		const char* cmd[] = {"osd-overlay", "2", "none", "", nullptr};
@@ -993,6 +1128,7 @@ namespace bp
 		error.clear();
 		title.clear();
 		tracks.clear();
+		clearChapters();
 		position = duration = -1;
 		const char* cmd[] = {"stop", nullptr};
 		mpv_command_async(mpv, 0, cmd);
@@ -1097,6 +1233,16 @@ namespace bp
 		const char* at = show == SHOW_ART ? "{\\an2}" : show == SHOW_NONE ? "{\\an5}" : "{\\an8}";
 		int big = show == SHOW_NONE ? 56 : 40;
 		std::string text = std::string(at) + "{\\bord3}{\\fs" + std::to_string(big) + "}{\\b1}" + assText(title) + "{\\b0}";
+		// an audiobook's (or a song's) chapter, under the title in yellow: where in the book this is
+		int c = currentChapter();
+		if (c >= 0 && c < (int)chapters.size())
+		{
+			std::string label = chapterUntitled(chapters[c].title)
+				? "Chapter " + std::to_string(c + 1) + " of " + std::to_string(chapters.size()) : cardText(chapters[c].title, 36);
+			// (no \q2: libass takes an event's last wrap style for all of it, and the title would stop wrapping; the
+			// label's cut keeps it to one line)
+			text += "\\N{\\b0}{\\fs" + std::to_string(big * 3 / 4) + "}{\\c&H29B4F0&}" + assText(label) + "{\\c&HFFFFFF&}";
+		}
 		if (!artist.empty()) text += "\\N{\\fs" + std::to_string(big * 3 / 4) + "}" + assText(artist);
 		if (!album.empty()) text += "\\N{\\fs" + std::to_string(big * 2 / 3) + "}{\\c&HB4B4B4&}" + assText(album);
 		const char* cmd[] = {"osd-overlay", "1", "ass-events", text.c_str(), "0", "720", "0", "no", "no", nullptr};
@@ -1160,8 +1306,8 @@ namespace bp
 		if (duration > 0) row("Duration", formatTime(duration));
 		double left = timeLeft(position, duration, speed);
 		if (left >= 0) row("Time left", formatTime(left) + (speed != 1 ? " at " + speedLabel(speed) : ""));
-		double chapters = num("chapters");
-		if (chapters > 0) row("Chapters", std::to_string((int)chapters));
+		double nChapters = chapters.empty() ? num("chapters") : (double)chapters.size();
+		if (nChapters > 0) row("Chapters", std::to_string((int)nChapters));
 
 		if (!get("current-tracks/video/id").empty())
 		{

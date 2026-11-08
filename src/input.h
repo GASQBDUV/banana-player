@@ -6,8 +6,9 @@ namespace bp
 {
 	// The handheld's buttons by their printed names (Nintendo layout: A is the east button, B the south one), as
 	// banana-ui reads them.
-	// L3: the stick pressed in (the RG DS Plus has the left one only)
-	enum class Button { None, A, B, X, Y, L, R, Up, Down, Left, Right, Start, Select, L3 };
+	// L3: the stick pressed in (the RG DS Plus has the left one only); L2/R2: the triggers, which SDL reports as axes
+	// (main.cpp turns them into presses; on a computer [ and ] stand in)
+	enum class Button { None, A, B, X, Y, L, R, Up, Down, Left, Right, Start, Select, L3, L2, R2 };
 
 	// a button pressed (repeats included), from a pad or, on a computer, the keyboard; None for anything else
 	Button buttonFromEvent(const SDL_Event& e);

@@ -59,6 +59,56 @@ namespace bp
 		return out;
 	}
 
+	std::vector<Chapter> parseChapterList(const mpv_node* list)
+	{
+		std::vector<Chapter> out;
+		if (!list || list->format != MPV_FORMAT_NODE_ARRAY) return out;
+		for (int i = 0; i < list->u.list->num; i++)
+		{
+			const mpv_node* m = &list->u.list->values[i];
+			Chapter c;
+			const mpv_node* t = field(m, "time");
+			if (t && t->format == MPV_FORMAT_DOUBLE) c.time = t->u.double_;
+			else if (t && t->format == MPV_FORMAT_INT64) c.time = (double)t->u.int64;
+			c.title = str(m, "title");
+			out.push_back(c);
+		}
+		return out;
+	}
+
+	bool chapterUntitled(const std::string& title)
+	{
+		// mpv's own stand-in for a Matroska chapter with no name
+		if (title == "(unnamed)") return true;
+		bool any = false, digits = false, colon = false;
+		for (unsigned char ch : title)
+		{
+			if (isspace(ch)) continue;
+			any = true;
+			if (isdigit(ch)) digits = true;
+			else if (ch == ':') colon = true;
+			else if (ch != '.') return false;
+		}
+		// blank; or digits, colons and dots with a colon in them: a timestamp ("1.5" is a title)
+		return !any || (digits && colon);
+	}
+
+	std::string chapterLabel(const Chapter& c, int n)
+	{
+		return chapterUntitled(c.title) ? "Chapter " + std::to_string(n) : c.title;
+	}
+
+	int chapterTarget(const std::vector<Chapter>& chapters, int current, double position, int dir)
+	{
+		int n = (int)chapters.size();
+		if (n == 0) return CHAPTER_NONE;
+		if (dir > 0) return current + 1 < n ? current + 1 : CHAPTER_NONE;
+		if (current >= n) current = n - 1;
+		if (current >= 0 && position - chapters[current].time > CHAPTER_BACK_S) return current;
+		if (current > 0) return current - 1;
+		return chapters[0].time > 0.5 ? CHAPTER_FILE_START : CHAPTER_NONE;
+	}
+
 	std::string languageName(const std::string& code)
 	{
 		static const struct { const char* codes; const char* name; } names[] = {

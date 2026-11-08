@@ -91,6 +91,24 @@ namespace bp
 		// the volume/brightness card over the top panel ("Volume", 85), till hideLevel
 		void showLevel(const std::string& label, int percent);
 		void hideLevel();
+
+		// Chapters (the file's own markers; mpv's chapter-list and chapter, observed, never read)
+		std::vector<Chapter> chapters;
+		int chapter = -1;		// mpv's current one, -1 before the first
+		int chapterSerial = 0;	// bumped when the list changes
+		// the chapter shown as current: a jump made less than a second ago counts at once, till mpv's answer is in,
+		// so two quick presses step twice instead of landing on the same start
+		int currentChapter() const;
+		// to chapter `index` (CHAPTER_FILE_START: to 0), at once, no wait for mpv
+		void seekChapter(int index);
+		// previous (dir < 0) or next (dir > 0): seeks and shows the card; returns chapterTarget's answer (an index,
+		// CHAPTER_FILE_START or CHAPTER_NONE, which also shows the card's first/last note). A file with no chapters
+		// says so; a photo, a file not started or an error does nothing
+		int stepChapter(int dir);
+		// the card over the top panel for chapter `index`; edge < 0: "This is the first chapter", > 0: "...last"
+		void showChapterCard(int index, int edge = 0);
+		// true once after a card was shown: the caller keeps it up for 2 s (its levelUntil), then hideLevel()
+		bool takeCardShown() { bool b = cardShown; cardShown = false; return b; }
 		// the top panel with nothing playing: the icon, the name, where to pick something
 		void showIdle(bool on);
 		// the top panel's output made with nothing playing: mpv 0.40 makes force-window's only as it goes idle, and
@@ -166,6 +184,11 @@ namespace bp
 		void load();
 		std::string netFileOptions(const std::string& path) const;	// loadfile's options for a network file
 		void refreshTracks(mpv_node* trackList);
+		void clearChapters();
+		bool cardShown = false;
+		bool pendingOn = false;		// a chapter jump made, mpv's answer not in yet
+		int pendingChapter = -1;
+		uint64_t pendingAt = 0;
 		// the file opened and its track list known: the art's choice, the title, tracks gone missing
 		void fileReady();
 		bool readyPending = false;	// opened, its track list still to come
