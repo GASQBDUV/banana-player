@@ -171,7 +171,7 @@ Like a song or a video to keep it in **Liked**, a playlist of its own. Photos an
 - **Buttons:** they act when you lift your finger, so slide off one to cancel.
 - **Audio and subtitles:** on a video, tap the audio or subtitle line under the buttons to change that track.
 - **Sound:** on a song, tap the line under the buttons (it shows the preset and effect) to open the Sound page. On a
-  song without chapters, the **Sound** button does the same.
+  song without chapters, the **Sound** button (**FX**) does the same.
 - **Chapters:** tap the chapter line above the progress bar to see the chapters.
 - **Lists:** tap to choose, drag to scroll.
 - **Close:** tap **<** (top left) once, or Close (bottom right, marked **B×2**) twice.

@@ -4575,11 +4575,11 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 				}
 				else if (which == Button::Y)
 				{
-					// a song with no chapters: Sound, by touch only (no key: Y does nothing here). "On" while the
-					// equalizer or an effect is; both off, all of it dim
-					bool on = (p.settings.eqOn || p.settings.soundFx != SoundFx::None) && !off;
-					drawButton({b.x, b.y, b.w, b.h * 4 / 5}, &G_EQ, on ? "On" : "Off", nullptr, !on, 1);
-					drawTextMid("Sound", 0, on ? DIM_TEAL : DIM, b.x + b.w / 2, b.y + b.h * 4 / 5 - 2, b.w - 6, 2);
+					// a song with no chapters: Sound, by touch only (no key: Y does nothing here). "FX", never dim, whether
+					// the equalizer and effect are on or off (dim read as a button that can't be pressed); what's set
+					// is on the line under the buttons
+					drawButton({b.x, b.y, b.w, b.h * 4 / 5}, &G_EQ, "FX", nullptr, off, 1);
+					drawTextMid("Sound", 0, off ? DIM : DIM_TEAL, b.x + b.w / 2, b.y + b.h * 4 / 5 - 2, b.w - 6, 2);
 				}
 				// the button it stands for, while the buttons work here (Button hotkeys); else the name alone, centred
 				else drawButton(b, g, label, key, off, 1);
