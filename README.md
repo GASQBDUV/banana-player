@@ -20,21 +20,21 @@ photos with a finger. When a new version is out, it updates itself.
 
 <table>
   <tr>
-    <td align="center" width="33%"><img src="docs/img/screen-browser.png?v=0.3.0" alt="The file list on the bottom screen, the Banana Player logo on the top"><br><sub><b>Your files.</b> Icons, sizes, and where you left off in each film</sub></td>
-    <td align="center" width="33%"><img src="docs/img/screen-network.png?v=0.3.0" alt="The Network tab on the bottom screen, with saved connections"><br><sub><b>Network folders.</b> Your computer or NAS on the Wi-Fi, found by name</sub></td>
-    <td align="center" width="33%"><img src="docs/img/screen-playing.png?v=0.3.0" alt="A film playing on the top screen, the controls on the bottom"><br><sub><b>Watching.</b> Seek, skip, speed, subtitles and audio tracks, by button or by touch</sub></td>
+    <td align="center" width="33%"><img src="docs/img/screen-browser.png?v=0.4.0" alt="The file list on the bottom screen, the Banana Player logo on the top"><br><sub><b>Your files.</b> Icons, sizes, and where you left off in each film</sub></td>
+    <td align="center" width="33%"><img src="docs/img/screen-network.png?v=0.4.0" alt="The Network tab on the bottom screen, with saved connections"><br><sub><b>Network folders.</b> Your computer or NAS on the Wi-Fi, found by name</sub></td>
+    <td align="center" width="33%"><img src="docs/img/screen-playing.png?v=0.4.0" alt="A film playing on the top screen, the controls on the bottom"><br><sub><b>Watching.</b> Seek, skip, chapters, speed, subtitles and audio tracks, by button or by touch</sub></td>
   </tr>
   <tr>
-    <td align="center"><img src="docs/img/screen-music.png?v=0.3.0" alt="A song with its album art inside the Circle visualizer"><br><sub><b>Music.</b> Album art, a visualizer, or both (here: Circle)</sub></td>
-    <td align="center"><img src="docs/img/screen-photo.png?v=0.3.0" alt="A photo zoomed in on the top screen, the pan area and its buttons on the bottom"><br><sub><b>Photos.</b> Zoom in and drag the box to look around</sub></td>
-    <td align="center"><img src="docs/img/screen-settings.png?v=0.3.0" alt="Settings › Subtitles, with a subtitle preview"><br><sub><b>Settings</b> as tiles, with a help line for each and a live subtitle preview</sub></td>
+    <td align="center"><img src="docs/img/screen-music.png?v=0.4.0" alt="A song with its album art inside the Circle visualizer"><br><sub><b>Music.</b> Album art, a visualizer, or both (here: Circle)</sub></td>
+    <td align="center"><img src="docs/img/screen-photo.png?v=0.4.0" alt="A photo zoomed in on the top screen, the pan area and its buttons on the bottom"><br><sub><b>Photos.</b> Zoom in and drag the box to look around</sub></td>
+    <td align="center"><img src="docs/img/screen-settings.png?v=0.4.0" alt="Settings › Subtitles, with a subtitle preview"><br><sub><b>Settings</b> as tiles, with a help line for each and a live subtitle preview</sub></td>
   </tr>
 </table>
 
 ## Why you'll like it
 
-- 🎬 **Videos:** MP4, MKV, AVI and more, with subtitles and audio tracks you can switch mid-film.
-- 🎵 **Music:** a folder plays as an album, with the cover art, a visualizer, or both.
+- 🎬 **Videos:** MP4, MKV, AVI and more, with subtitles and audio tracks you can switch mid-film, and chapters you can jump between with L2 and R2.
+- 🎵 **Music:** a folder plays as an album, with the cover art, a visualizer, or both. Audiobooks (M4B) keep their chapters.
 - 🖼️ **Photos:** zoom in, look around, step through a folder; scanned comics keep your zoom from page to page.
 - 📡 **From your computer or NAS:** play straight from shared folders on your Wi-Fi (SMB or FTP), with nothing copied to the card. "Find on the network" finds computers by name, with no addresses to type, and passwords are saved encrypted.
 - 👆 **Built for two screens:** the picture on top, every control a big button under your thumb below. Every page has the same header and a footer that names the buttons, and an on-screen keyboard takes care of typing.
@@ -46,10 +46,10 @@ Videos play on the handheld's CPU: up to 720p runs smoothly, while 1080p and HEV
 ## Install
 
 > [!TIP]
-> **Latest: [Banana Player 0.3.0](https://github.com/tonywei92/banana-player/releases/tag/v0.3.0)**, for BananaOS on the
+> **Latest: [Banana Player 0.4.0](https://github.com/tonywei92/banana-player/releases/tag/v0.4.0)**, for BananaOS on the
 > Anbernic RG DS and RG DS Plus.
 
-1. **Download** `BananaPlayer-0.3.0-aarch64.zip` from [the release](https://github.com/tonywei92/banana-player/releases/tag/v0.3.0).
+1. **Download** `BananaPlayer-0.4.0-aarch64.zip` from [the release](https://github.com/tonywei92/banana-player/releases/tag/v0.4.0).
 2. **Unzip it into `roms/ports`** on your SD card. You should end up with `Banana Player.sh`, a `BananaPlayer` folder
    and a `media` folder there. (On a Mac, if the zip opens into a folder of its own, move those three out of it.)
 3. **Play:** put the card back in, open the **Ports** shelf and choose **Banana Player**.
