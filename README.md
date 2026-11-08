@@ -21,7 +21,7 @@ photos with a finger. When a new version is out, it installs in one tap.
 <table>
   <tr>
     <td align="center" width="33%"><img src="docs/img/screen-browser.png?v=0.4.0" alt="The file list on the bottom screen, the Banana Player logo on the top"><br><sub><b>Your files.</b> Icons, sizes, and where you left off in each film</sub></td>
-    <td align="center" width="33%"><img src="docs/img/screen-network.png?v=0.4.0" alt="The Network tab on the bottom screen, with saved connections"><br><sub><b>Network folders.</b> Your computer or NAS on the Wi-Fi, found by name</sub></td>
+    <td align="center" width="33%"><img src="docs/img/screen-network.png?v=0.4.0" alt="The Network tab on the bottom screen, with saved connections"><br><sub><b>Network folders.</b> Your computer or NAS, right from the Wi-Fi</sub></td>
     <td align="center" width="33%"><img src="docs/img/screen-playing.png?v=0.4.0" alt="A film playing on the top screen, the controls on the bottom"><br><sub><b>Watching.</b> Seek, skip, chapters, speed, subtitles and audio tracks, by button or by touch</sub></td>
   </tr>
   <tr>
