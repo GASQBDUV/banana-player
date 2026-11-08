@@ -51,7 +51,8 @@ tools/make-sprite.py                                 # regenerates web/sprite.sv
   1. Bump `project(... VERSION x.y.z)` in `CMakeLists.txt` (the bundle's `VERSION` comes from it), and the README's
      install links (`releases/tag/vx.y.z`, the zip's name), and the `?v=x.y.z` on the README's
      screenshot links (GitHub and browsers cache an image by its URL: a regenerated picture under the same URL shows the
-     old one).
+     old one). Regenerate the pictures first when a pictured screen changed (`docs/make-screenshots.sh` on a Sintel
+     library; its Network shot needs the Docker Samba and FTP test servers running).
   2. Commit and push, then run `build-bundle.sh` and `shasum -a 256` the zip into `<zip>.sha256`.
   3. `gh release create vx.y.z --target main --latest <zip> <zip>.sha256`, then prepend "Superseded by…" to the
      previous release's notes.
@@ -145,6 +146,10 @@ tools/make-sprite.py                                 # regenerates web/sprite.sv
   the m3u's path) are pseudo-dirs that `pseudoDir()` recognises, so a new path check must go through it. Select, add and
   move are `selMode` states of the browser page, not pages of their own. Edits are debounced 1 s (a dirty flag checked in
   `tick()`) and flushed on leaving and on quit (`flushPlaylist`).
+  **Liked** is built in: `<state>/playlists/.liked.m3u` (a name `playlistFileName` can't make; `list()` skips dot
+  files and adds it first, `Info::builtin`), newest first, the oldest dropped at `PL_MAX_ENTRIES`. Only the heart
+  (`Ui::toggleLike`/`setLikedPath`, `/api/like`) adds to it; Remove there is Unlike; every other edit path refuses it
+  (`isBuiltinFile`), and Add to playlist lists `addTargets()` (all but Liked).
 - **Web dashboard** (`BP_WEB`, default ON at build time, off at run time; `src/web/`, `web/`): cpp-httplib (split into
   `third_party/httplib/`), nayuki qrcodegen (`third_party/qrcodegen/`), Preact+htm and SortableJS vendored in `web/vendor/`
   (`third_party/README.md` has versions, hashes, licences). `web/` is embedded at build time by `cmake/EmbedWeb.cmake`
@@ -166,6 +171,16 @@ tools/make-sprite.py                                 # regenerates web/sprite.sv
   (on at start), `BP_WEB_PIN`, `BP_WEB_PORT`, `BP_WEB_DIR`, `BP_WEB_IP` (`none` = no Wi-Fi), `BP_WEB_FAIL` (the server
   won't start), `BP_WEB_KEEPALIVE` (idle seconds), and the scripted `web` step. Icons in `web/sprite.svg` come from the
   same `G_*` glyphs as the bottom panel: regenerate with `tools/make-sprite.py` after changing one.
+  **Playing in the browser** (`browserPlaying`): `/api/browser-play` opens the file on the handheld paused with
+  `Player::holdPaused()` (its screens show it), and its first play there reopens the sound output (`ao-reload`, in
+  `wakeHeld`): opened paused, the handheld's ALSA output stayed silent once played while the picture ran on. The
+  page's position (`/api/browser-pos`, on play/pause/seek and every 10 s) is never applied to the paused copy; the
+  bottom panel shows `Ui::shownPosition()` (extrapolated), and seeks made there count from it and go to the page.
+  **History in `web/app.js`:** each entry carries the load's id (`bpDoc`), how many of ours lie behind (`bpIdx`) and
+  whether it came from a tap (`bpOk`); the player's chevron goes back only when `canGoBack()` (Safari skips, going
+  back, an entry left by a step without a tap, and an entry from an earlier load reloads the page), else it replaces
+  (`replaceHash`). iPhone/iPad: playing in the page is off (`NO_HERE`). Overscroll is blocked on the y axis only: a
+  sideways block kills the two-finger swipe Back in Chrome.
 - **Updater** (`updater.*`, Ports installs; a Store install, under `/data/store`, is the Store's): a thread runs
   BananaOS's `curl` against GitHub's `/releases/latest` (`update.cpp` parses it), downloads the zip and its
   `.sha256`, checks the hash (SHA-256 in `update.cpp`), unpacks it (`unzip`, else `python3 -m zipfile`) and renames it
