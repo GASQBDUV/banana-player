@@ -41,7 +41,7 @@ photos with a finger. When a new version is out, it updates itself.
 - 💾 **Remembers for you:** where you stopped a film, which subtitles you chose, what you played recently.
 - 🔄 **Updates itself** when a new version is out (Wi-Fi on). Your settings stay put.
 
-Videos play on the handheld's CPU: up to 720p runs smoothly, while 1080p and HEVC may drop frames.
+Videos play on the handheld's CPU. The various 1080p videos we tested play well; very high bitrates, and HEVC (x265) especially, may drop frames.
 
 ## Install
 
