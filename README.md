@@ -33,7 +33,7 @@ photos with a finger. When a new version is out, it installs in one tap.
 
 ## Why you'll like it
 
-- 🎬 **Videos:** MP4, MKV, AVI and more, with subtitles and audio tracks you can switch mid-film, and chapters you can jump between with L2 and R2.
+- 🎬 **Videos:** MP4, MKV, AVI and more, with subtitles and audio tracks you can switch mid-film, and chapters you can jump between with L2 and R2, and playlists that mix your card and network.
 - 🎵 **Music:** a folder plays as an album, with the cover art, a visualizer, or both, and an equalizer with presets and room effects like Concert hall. Audiobooks (M4B) keep their chapters.
 - 🖼️ **Photos:** zoom in, look around, step through a folder; scanned comics keep your zoom from page to page.
 - 📡 **From your computer or NAS:** play straight from shared folders on your Wi-Fi (SMB or FTP), with nothing copied to the card.

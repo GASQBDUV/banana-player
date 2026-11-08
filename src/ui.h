@@ -13,11 +13,15 @@
 #include <SDL.h>
 #include <SDL_ttf.h>
 #include <string>
+#include <algorithm>
 #include <array>
 #include "keyboard.h"
+#include "playlists.h"
 #include "discovery.h"
 #include <functional>
 #include <map>
+#include <memory>
+#include <set>
 #include <unordered_map>
 
 namespace bp
@@ -42,8 +46,12 @@ namespace bp
 		bool repeats(Button b, const Player& p) const;
 		// called each turn of the loop: a flicked photo glides on
 		void tick(Player& p);
-		// something moves by itself (a flick): the loop should come round often
-		bool animating() const { return flickAt != 0; }
+		// something moves by itself (a flick, a playlist's rows scrolling under a dragged one): the loop should come
+		// round often
+		bool animating() const { return flickAt != 0 || plDrag.on; }
+		// the playlist edited in the browser, written now (its edits are written a second after they stop): before
+		// quitting, or stopping what plays
+		void flushPlaylist(Player& p) { plFlush(p); }
 		// a finger (or, on a computer, the mouse) on the bottom panel; true when the player should leave
 		bool pointer(const Pointer& pt, Player& p);
 
@@ -51,8 +59,11 @@ namespace bp
 		// folder: where to open (a folder given on the command line), else the remembered one or the first page
 		void startBrowser(Player& p, const std::string& folder = "");
 		// back to the browser from a video: the folder of the video last played, that video selected (whatever
-		// Remember last folder says: that's for the next launch)
-		void showBrowser(Player& p, const std::string& lastPlayed);
+		// Remember last folder says: that's for the next launch). from: what it played from (read before stop());
+		// a playlist goes back to that playlist, the cursor on the item (index: the player's, in the order played)
+		void showBrowser(Player& p, const std::string& lastPlayed, const PlaySource& from = {}, int index = -1);
+		// the saved playlists' folder (<stateDir>/playlists); empty: there are none to have
+		void setStateDir(const std::string& stateDir);
 		// the row the browser's cursor is on, for test runs
 		std::string browseSelection() const { return cursor < (int)browsePaths.size() ? browsePaths[cursor] : ""; }
 		void showPlayer()
@@ -65,14 +76,7 @@ namespace bp
 		std::string browseFolder() const { return browseDir; }
 		// a video picked in the browser, once: the caller opens it
 		// the browser's rows as they are listed (label, then note), for test runs
-		std::vector<std::string> browseLabels() const
-		{
-			std::vector<std::string> out;
-			for (size_t i = 0; i < browseRows.size(); i++)
-				out.push_back(std::string((int)i >= scroll && (int)i < scroll + ROWS_SHOWN ? "shown  " : "hidden ") +
-					(i == (size_t)cursor ? "> " : "  ") + browseRows[i].label);
-			return out;
-		}
+		std::vector<std::string> browseLabels() const;
 		// the Info or About page's lines as they are drawn, for test runs
 		std::vector<std::string> pageLines() const
 		{
@@ -81,6 +85,15 @@ namespace bp
 			return out;
 		}
 		std::string takeOpenRequest() { std::string r; r.swap(openRequest); return r; }
+		// a playlist picked in the browser (an item, Play, Shuffle play), once: the caller opens it (openPlaylist)
+		struct PlayRequest { std::vector<std::string> paths; int index = 0; PlaySource source; };
+		bool takePlayRequest(PlayRequest& out)
+		{
+			if (playRequest.paths.empty()) return false;
+			out = std::move(playRequest);
+			playRequest = {};
+			return true;
+		}
 		// started with no file: the video's Quit closes it (back to the browser)
 		bool browserMode = false;
 		// Settings' Quit Banana Player: out of the player, from the browser or a video
@@ -159,14 +172,151 @@ namespace bp
 		void openGroup(int g);
 		Page home(const Player& p) const { return p.playing() ? Page::Main : Page::Browse; }
 		void enterFolder(std::string dir, Player& p);	// "" the first page, RECENT the recent videos
-		// the browser's two tabs: Local (the cards) and Network (the saved connections, then their folders), each
-		// where it was left; L/R or a tap switch them
-		enum BrowseTab { TAB_LOCAL, TAB_NETWORK };
+		// the browser's three tabs: Local (the cards), Playlists (the saved ones, then their items) and Network (the
+		// saved connections, then their folders), each where it was left; L/R (a tab each way, no wrap) or a tap
+		enum BrowseTab { TAB_LOCAL, TAB_PLAYLISTS, TAB_NETWORK, BROWSE_TABS };
 		int browseTab = TAB_LOCAL;
-		std::string tabDir[2];
+		std::string tabDir[BROWSE_TABS];
 		void switchTab(int tab, Player& p);
 		bool atFirstPage() const;	// the tab's first page: B twice quits from it
-		Rect browseTabRect(int t) const { return {72 + t * 136, 10, 128, 44}; }
+		Rect browseTabRect(int t) const
+		{
+			return t == TAB_LOCAL ? Rect{72, 10, 120, 44} : t == TAB_PLAYLISTS ? Rect{200, 10, 152, 44} : Rect{360, 10, 136, 44};
+		}
+		// Playlists (browseDir PLROOT, the list; PLDIR + its file, a playlist's items). The store is null with no state
+		// folder. plCur: the playlist open (its items are browseRows, in its order; PL_ITEM rows)
+		std::unique_ptr<PlaylistStore> plStore;
+		Playlist plCur;
+		bool plLoaded = false;	// plCur read (false: the file couldn't be)
+		PlayRequest playRequest;
+		// the order the last playlist played in (shuffled or not): the player's index -> the item's, for coming back
+		std::vector<int> plOrder;
+		std::string plOrderId;
+		// a playlist item that isn't there: checked as its row first shows (access(), cached till the list is read
+		// again). 0 there, 1 not found (a local file), 2 its connection deleted; -1 not checked yet
+		mutable std::vector<int8_t> plMissing;
+		mutable int plMissingSerial = 0;
+		int plMissingAt(int row) const;
+		void plCheckShown();	// the rows in view checked
+		void plRows(Player& p);	// browseRows from plCur
+		std::vector<std::string> plNames() const;	// the playlists' names (for a new one's checks)
+		void plPlay(const Playlist& pl, int index, bool shuffle, Player& p);
+		void plSaved(Player& p, const std::vector<int>& remap);	// plCur edited: saved (soon), the list again, the player told
+		// plCur's edits wait a second for the next (a run of moves is one write): written by tick, or now by plFlush
+		// (leaving the page, playing, stopping, quitting)
+		bool plDirty = false;
+		Uint32 plDirtyAt = 0;
+		void plFlush(Player& p);
+		// a playlist that plays was edited (remap: its old items' new indexes; any index none maps to is new, played
+		// last): the player gets its new items in the order they play
+		void plTellPlayer(const Playlist& pl, const std::vector<int>& remap, Player& p);
+		void plRefresh(Player& p);	// browseRows from plCur again, the cursor and the scroll kept
+
+		// Selecting, one mode with three uses: Edit (a playlist's items: remove, move), Add (files on the Local and
+		// Network tabs, kept across folders and both tabs, added in the order ticked) and Pick (a folder for Add
+		// folder...). The tab bar is a header then, and the footer a bar of buttons
+		enum SelMode { SEL_NONE, SEL_EDIT, SEL_ADD, SEL_PICK };
+		int selMode = SEL_NONE;
+		std::set<int> plSel;	// Edit's: plCur's indexes
+		std::vector<std::string> pickOrder;	// Add's: full paths, in the order ticked
+		std::set<std::string> picked;
+		std::string selDest, selDestName;	// the playlist adding goes to ("": Add to... asks)
+		int selSerial = 0;	// a tick changed
+		Uint32 dropArmed = 0;	// Add's B at a first page with files ticked: again within 2 s drops them
+		bool removeArmed = false;	// Edit's Remove pressed once
+		void selStart(int mode, const std::string& dest);
+		void selEnd();
+		void selLeave(Player& p);	// out of it; a playlist's Add files... and Add folder... go back to it
+		bool selKey(Button b, Player& p);	// true: it was the mode's
+		bool selChoose(int row, Player& p);	// A or a tap on a row: true when it was the mode's (a tick)
+		void selBack(Player& p, bool button);
+		void selAct(Player& p);	// X: Remove, Add, Add this folder
+		void selAll(Player& p);	// SELECT
+		bool selTickable(int row) const;
+		bool selTicked(int row) const;
+		int selCount() const { return selMode == SEL_EDIT ? (int)plSel.size() : (int)picked.size(); }
+		int selFolderFiles(int& ticked) const;	// this folder's files that can be ticked (and how many are)
+		bool pickable() const;	// Pick: a folder of a card's or a server's (Add this folder)
+		std::string folderName(const std::string& dir) const;
+		// Move (Edit's Y, an item's menu): the ticked items gathered into a block, moved a row (UP/DOWN) or a page
+		// (LEFT/RIGHT), A drops it (saved), B puts everything back. moveRemap: the order before -> now
+		bool moving = false, moveFromMenu = false;
+		std::vector<PlaylistEntry> moveOrig;
+		std::set<int> moveOrigSel;
+		std::vector<int> moveRemap;
+		void moveStart(Player& p);
+		void moveStep(int dir, int times, Player& p);
+		void moveEnd(bool keep, Player& p);
+		void moveFollow();	// the block in view
+		// a finger on a row's grip (Edit): the row (or the ticked items, gathered) dragged; a line where it lands, the
+		// list scrolling near its edges; lifted, dropped and saved
+		struct PlDrag { bool on = false; int y = 0; Uint32 scrollAt = 0; } plDrag;
+		std::set<int> dragSel;
+		void dragBegin(int row, int y, Player& p);
+		int dragSlot() const;	// the gap the finger is at (0..n, before that row)
+		int dragTarget() const;	// where the block's first row goes
+		void dragEnd(Player& p);
+		// adding: "Add to..." (the playlists, New playlist... first), then the files or a folder's media added
+		bool pickerOpen = false;
+		int pickerCursor = 0, pickerScroll = 0, pickerTouchY = 0, pickerScrollStart = 0;
+		bool pickerScrolled = false;
+		std::vector<PlaylistStore::Info> pickerList;
+		std::string pickerFolder;	// a folder's media ("Add to playlist..." on a folder); "" the ticked files
+		void openPicker(const std::string& folder, Player& p);
+		void pickerChoose(int i, Player& p);
+		void pickerNew(Player& p);	// New playlist...: named on the keyboard, then added to
+		void pickerAdd(const std::string& dest, Player& p);
+		bool pickerKey(Button b, Player& p);
+		bool pickerPointer(const Pointer& pt, int x, int y, Player& p);
+		void drawPicker();
+		// as tall as its rows, 7 at most (then 392, from y 22)
+		static constexpr int PICKER_SHOWN = 7;
+		Rect pickerBox() const
+		{
+			int h = 66 + std::min((int)pickerList.size() + 1, PICKER_SHOWN) * 46;
+			return {96, (436 - h) / 2, 448, h};
+		}
+		Rect pickerRow(int i) const { return {112, pickerBox().y + 52 + (i - pickerScroll) * 46, 416, 42}; }
+		bool plNameThenAdd = false;	// the name typed is a new playlist to add to (pickerFolder's, or the ticked files)
+		std::string plNameAddFolder;
+		void addFolderTo(const std::string& dir, const std::string& dest, bool back, Player& p);
+		// added to dest (the end; up to the cap): what was added said, and back: to the playlist, on the first added.
+		// False: nothing was (none to add, the playlist full, a file that couldn't be read or written)
+		bool addTo(const std::string& destRef, const std::vector<PlaylistEntry>& add, int photos, const std::string& from,
+			bool back, Player& p);
+		std::vector<PlaylistEntry> pickedEntries() const;
+		void returnToPlaylist(const std::string& file, int item, Player& p);
+		// a network folder added before it was ever listed: listed first, a busy dialog meanwhile (B cancels)
+		struct AddPending { std::string dir, dest; int serial = 0; bool back = false; } addPending;
+		int addSerial = 1 << 29;
+		void cancelAdd(Player& p);
+		void drawBusy();
+		// the select mode's header (over the tabs), where line and bar (over the footer)
+		void drawSelHeader(const Player& p);
+		void drawSelBar();
+		void drawBarButton(int id, const Glyph* g, const std::string& label, const char* key, SDL_Color ink, bool filled, bool off);
+		void drawWhere(int x, int maxW);	// the browser's where line: its end kept, the last folder brighter
+		std::string whereOf(const std::string& dir) const;	// "Videos / Shows", "MY-PC / Media / Movies"
+		// the Main page's line under the title: what plays from (a folder, a network folder, a playlist)
+		void drawSource(const Player& p);
+		static constexpr int SOURCE_Y = 70;
+		void plDelete(const std::string& file, Player& p);
+		// naming a playlist on the keyboard (PL_NAME): New, or Rename (plRenameFile); a name refused keeps it up
+		bool plRenaming = false, plNameSubmit = false;
+		std::string plRenameFile, plNameNote;
+		// name: Rename's, or a new one's to start from ("" New playlist, the first number free)
+		void plNameOpen(bool rename, const std::string& file, const std::string& name);
+		void plNameDone(Player& p);
+		// the item a menu is for (a playlist's file and the item's index; -1 the playlist itself)
+		std::string ctxPlFile;
+		int ctxPlItem = -1;
+		std::string ctxTitle, ctxNote;	// a playlist's menu: its title, and the line under it ("12 items", why it's missing)
+		bool holdRow(int row) const;	// a finger held on it opens its menu
+		// a playlist's network items: their folders listed for their subtitles and covers (Player::netFolderWanted),
+		// each once a play; the answers by serial
+		std::set<std::string> sideAsked;
+		std::map<int, std::string> sidePending;
+		int sideSerial = 1 << 30;
 		// a network folder listing: what's asked of the worker now, and what went wrong last
 		int netSerial = 0;
 		bool netLoading = false;
@@ -180,7 +330,12 @@ namespace bp
 		void dropTouch();
 		// the browser's menu: X anywhere (or a finger held on a folder). On a card's folder Hide folder / Unhide
 		// folder (a ".hidden" file in it); everywhere Refresh (the list read again: a file copied in meanwhile); Cancel
-		enum CtxItem { CTX_HIDE, CTX_REFRESH, CTX_CANCEL, CTX_ADD, CTX_FIND, CTX_EDIT, CTX_TEST, CTX_DELETE };
+		enum CtxItem { CTX_HIDE, CTX_REFRESH, CTX_CANCEL, CTX_ADD, CTX_FIND, CTX_EDIT, CTX_TEST, CTX_DELETE,
+			// a playlist's (Y on one, X in one) and its items'
+			CTX_PL_NEW, CTX_PL_PLAY, CTX_PL_SHUFFLE, CTX_PL_RENAME, CTX_PL_DELETE, CTX_PL_DEDUP, CTX_PL_HERE, CTX_PL_REMOVE,
+			CTX_PL_SHOW, CTX_PL_ADD_FILES, CTX_PL_ADD_FOLDER, CTX_PL_SELECT, CTX_PL_MOVE,
+			// Local and Network: X's Select files, a folder's Add to playlist...
+			CTX_SELECT_FILES, CTX_ADD_TO };
 		// how it was opened: X (the place's menu), Y (the row's), a finger held on a row (the row's, folders and
 		// connections only)
 		enum MenuHow { MENU_X, MENU_Y, MENU_HOLD };
@@ -191,6 +346,7 @@ namespace bp
 		int ctxCursor = 0;
 		std::vector<int> ctxItems;	// CtxItem
 		std::string ctxPath;		// the folder Hide is for ("" none)
+		std::string ctxFolder;		// the folder "Add to playlist..." is for (a card's or a server's)
 		Uint32 holdAt = 0;	// a finger down on a row, for the hold that opens it
 		void openBrowseMenu(int row, MenuHow how);
 		void chooseBrowseMenu(int item, Player& p);
@@ -214,9 +370,22 @@ namespace bp
 		bool folderRow(int row) const;
 		// the menu's box, in the middle of the panel, as tall as its items
 		// (a connection's has a line under its title for Test's answer)
-		int ctxExtra() const { return ctxServer.empty() ? 0 : 34; }
-		Rect ctxBox() const { int h = 80 + ctxExtra() + (int)ctxItems.size() * 52; return {112, (436 - h) / 2, 416, h}; }
-		Rect ctxRow(int item) const { return {128, ctxBox().y + 62 + ctxExtra() + item * 52, 384, 46}; }
+		// A long menu (a playlist's eight) steps its rows closer, 52, 48 or 44 apart, to fit above the footer; one that
+		// still doesn't leaves its line out (a playlist's count: the page shows it)
+		int ctxStep() const
+		{
+			int n = (int)ctxItems.size(), extra = ctxServer.empty() && ctxNote.empty() ? 0 : 34;
+			for (int step : {52, 48})
+				if (80 + extra + n * step <= 436) return step;
+			return 44;
+		}
+		int ctxExtra() const
+		{
+			if (ctxServer.empty() && ctxNote.empty()) return 0;
+			return 80 + 34 + (int)ctxItems.size() * ctxStep() <= 436 ? 34 : 0;
+		}
+		Rect ctxBox() const { int h = 80 + ctxExtra() + (int)ctxItems.size() * ctxStep(); return {112, (436 - h) / 2, 416, h}; }
+		Rect ctxRow(int item) const { return {128, ctxBox().y + 62 + ctxExtra() + item * ctxStep(), 384, ctxStep() - 6}; }
 
 		// the Network tab's other pages, as the browser's (browseDir FORMDIR, FINDNET). A connection's form: its
 		// rows (form*), each opening the keyboard or stepping through its choices
@@ -365,6 +534,7 @@ namespace bp
 		void drawMain(const Player& p);
 		void drawLeave(const Player& p);	// Close (Quit): B twice, or a tap twice
 		void drawTracks(const Player& p);
+		void drawPlRow(int i, int mid, bool at);	// a playlist's item: its number, mark, name and where it is
 		// the pieces of a page: the header ("<", the title, the battery), a tab, the footer's hints (a button's name in
 		// yellow, what it does), the cursor's row, a list's scroll bar, a page with nothing to list
 		struct Hint { std::string key, verb; };
@@ -384,8 +554,9 @@ namespace bp
 		// a button's face: a glyph and a label side by side, the hardware button's name under them (key: none)
 		void drawButton(Rect b, const Glyph* g, const std::string& label, const char* key, bool off, int size);
 		static constexpr int STATUS_Y = 100, LINE1_Y = 378, LINE2_Y = 403;	// the player's status line, its two track lines
-		// the Network tab with no connections: its page offers Add connection
+		// the Network tab with no connections: its page offers Add connection; Playlists with none, New playlist
 		bool emptyAction() const;
+		void doEmptyAction(Player& p);
 		static constexpr int FOOT_Y = 458, SUB_Y = 70;	// the footer's line, the browser's "where" line (their middles)
 		void drawSettings(const Player& p);
 		void drawInfo(const Player& p);
@@ -488,6 +659,9 @@ namespace bp
 			BACK_ICON = 16,	// "<" at the top left of every page: B
 			EMPTY_BTN = 17,	// an empty page's button (no connections: Add connection)
 			GROUP_PREV = 18, GROUP_NEXT = 19;	// a settings group's neighbours, either side of its title (Y, X)
+		// the select mode's bar (and Move's), the busy dialog's Cancel, the Add to... picker's rows (PICK_ROW + i)
+		static constexpr int SEL_ALL = 530, SEL_MOVE = 531, SEL_ACT = 532, SEL_CANCEL = 533, MOVE_CANCEL = 534, MOVE_DONE = 535,
+			BUSY_CANCEL = 536, PICK_ROW = 900;
 		// Sound's touch buttons, apart from the grid's and the photo's; its dialogs' rows from DLG_ROW, the Display
 		// popup's chips from CHIP_BTN (row * 4 + chip)
 		static constexpr int SOUND_TAB0 = 510, SOUND_TAB1 = 511, EQ_SWITCH = 520, EQ_PREV = 521, EQ_NEXT = 522, EQ_NAME_ZONE = 523,
@@ -497,7 +671,7 @@ namespace bp
 		void drawBackIcon();
 		// the browser's rows' marks: what each row is
 		enum RowIcon { ICON_NONE, ICON_RECENT, ICON_PLACE, ICON_FOLDER, ICON_VIDEO, ICON_SONG, ICON_PHOTO, ICON_NETWORK, ICON_REFRESH,
-			ICON_TYPE, ICON_TEST, ICON_SAVE };
+			ICON_TYPE, ICON_TEST, ICON_SAVE, ICON_PLAYLIST };
 		RowIcon rowIcon(int row) const;
 		void drawRowIcon(RowIcon icon, int x, int y, SDL_Color c);
 		bool backIconShown(const Player&) const { return true; }	// every page has it

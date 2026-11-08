@@ -300,6 +300,7 @@ int main(int argc, char** argv)
 		});
 		ui.netStore = &netStore;
 		ui.netWorker = &netWorker;
+		ui.setStateDir(opts.stateDir);
 		// Find on the network: the servers that answer, on the main thread as evFound
 		Discovery discovery;
 		ui.discovery = &discovery;
@@ -354,9 +355,13 @@ int main(int argc, char** argv)
 		auto leave = [&] {
 			if (browserMode && player.playing())
 			{
+				// what it played from, read before stop() forgets it: a playlist goes back to that playlist
 				std::string last = player.currentPath();
+				PlaySource from = player.source();
+				int index = player.index();
+				if (haveUi) ui.flushPlaylist(player);
 				player.stop();
-				ui.showBrowser(player, last);
+				ui.showBrowser(player, last, from, index);
 				topDark = false;
 			}
 			else running = false;
@@ -630,6 +635,12 @@ int main(int argc, char** argv)
 				player.open(list, index, names);
 				ui.showPlayer();
 			}
+			// a playlist picked in the browser: its items, in its order (or shuffled)
+			if (Ui::PlayRequest pr; ui.takePlayRequest(pr))
+			{
+				player.openPlaylist(pr.paths, pr.index, pr.source);
+				ui.showPlayer();
+			}
 			// a connection added, changed or deleted: mpv's opens see it
 			if (netStore.version() != netVersion)
 			{
@@ -817,7 +828,16 @@ int main(int argc, char** argv)
 					player.reportSwap();
 				}
 			}
-			if (haveUi) ui.draw(player, refresh);
+			if (haveUi)
+			{
+				// a slow bottom panel, in the log: what a press waits for on the handheld (the folder it was in)
+				Uint32 t0 = SDL_GetTicks();
+				ui.draw(player, refresh);
+				Uint32 took = SDL_GetTicks() - t0;
+				if (took >= 30)
+					fprintf(stderr, "timing: bottom panel drawn in %u ms (%s)\n", (unsigned)took,
+						isNetPath(ui.browseFolder()) ? "network folder" : ui.browseFolder().empty() ? "player" : "browser");
+			}
 		}
 		if (!player.error.empty()) rc = 1;
 		// "Restart now": launch.sh starts again, the update put in place
@@ -825,6 +845,8 @@ int main(int argc, char** argv)
 		sleepWatch.stop();
 		levelWatch.stop();
 		bottomTouch.stop();
+		// a playlist's last edits (they wait a second to be written)
+		if (haveUi) ui.flushPlaylist(player);
 		player.saveResume();
 		SDL_GL_MakeCurrent(top, gl);
 		player.shutdown();

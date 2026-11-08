@@ -119,7 +119,7 @@ namespace bp
 		// clock stopped (the song never ended) and its memory grew by the gigabyte
 		std::string g =
 			"[aid1] asplit [ao] [a]; "
-			"[a] showfreqs=s=" + bars + ":mode=bar:cmode=combined:ascale=log:fscale=log:win_size=1024:colors=white|white,fps=30,format=gbrp [bars]; "
+			"[a] showfreqs=s=" + bars + ":mode=bar:cmode=combined:ascale=log:fscale=log:win_size=1024:rate=30:colors=white|white,format=gbrp [bars]; "
 			"nullsrc=s=" + bars + ":d=1,format=gbrp,"
 			"geq=r='59+196*clip(2*X/W-1,0,1)':g='232-140*clip(2*X/W,0,1)-13*clip(2*X/W-1,0,1)':b='224+31*clip(2*X/W,0,1)-39*clip(2*X/W-1,0,1)' [grad]; "
 			"[bars] [grad] blend=all_mode=multiply [cbars]; "
@@ -151,18 +151,23 @@ namespace bp
 		{
 		case VIS_WAVES: draw = "showwaves=" + size + ":mode=cline:split_channels=0:rate=30:colors=" + ink; break;
 		case VIS_SPECTRUM: draw = "showspectrum=" + size + ":slide=scroll:mode=combined:color=fire:scale=log,fps=30"; break;
-		default: draw = "showfreqs=" + size + ":mode=bar:cmode=combined:ascale=log:fscale=log:win_size=1024:colors=" + ink + ",fps=30"; break;
+		default: draw = "showfreqs=" + size + ":mode=bar:cmode=combined:ascale=log:fscale=log:win_size=1024:rate=30:colors=" + ink; break;
 		}
 		if (!overCover) return "[aid1] asplit [ao] [v]; [v] " + draw + ",format=yuv420p [vo]";
-		// the art (one picture: overlay repeats it) fitted on a black canvas timed by the visualizer, and the
-		// visualizer, its black keyed out, over the lower part
+		// the art fitted once, as one frame, and cut in two; only the 640x200 strip under it is drawn each frame (the
+		// visualizer over its slice of the art, black keyed out), in RGBA so no frame is converted back and forth.
+		// Redrawing the whole picture cost 3.5-4.4 ms a frame on a Mac and over the 33 ms budget on the A55s, on the
+		// thread that feeds the sound. vstack repeats the top's ended frame, as Circle's hstack does
+		if (vis == VIS_SPECTRUM) draw += ",format=rgba";
 		return "[aid1] asplit [ao] [a]; "
-			   "[a] " + draw + ",pad=640:480:0:280,split [t] [b]; "
-			   "[t] drawbox=c=black:t=fill [canvas]; "
-			   "[vid1] scale=640:480:force_original_aspect_ratio=decrease [cover]; "
-			   "[canvas] [cover] overlay=x=(W-w)/2:y=(H-h)/2:eof_action=repeat [base]; "
-			   "[b] colorkey=black:0.1 [vis]; "
-			   "[base] [vis] overlay,format=yuv420p [vo]";
+			   "[vid1] scale=640:480:force_original_aspect_ratio=decrease,pad=640:480:-1:-1:black,setsar=1,format=rgba,split [art1] [art2]; "
+			   "[art1] crop=640:280:0:0 [top]; "
+			   "[art2] crop=640:200:0:280 [under]; "
+			   "[a] " + draw + ",split [s1] [s2]; "
+			   "[s1] [under] overlay=eof_action=repeat:format=rgb [base]; "
+			   "[s2] colorkey=black:0.1 [k]; "
+			   "[base] [k] overlay=format=rgb,format=rgba [strip]; "
+			   "[top] [strip] vstack [vo]";
 	}
 
 	std::string blankGraph()

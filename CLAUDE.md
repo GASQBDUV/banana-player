@@ -71,6 +71,8 @@ docs/make-screenshots.sh <library>                   # the README's docs/img/scr
   has to be set by id. A graph's picture never ends, so mpv never ends a song that has one (every song without art):
   `checkSongEnd()` ends it, or restarts it for Loop one, once the clock passes the duration. Circle's graph reads
   two `remap` tables with `movie=` from the state folder (`graphFor()` writes them first; without them it's Bars).
+  In art + visualizer (Bars, Waves, Spectrum) the art is fitted once and only the 640×200 strip is drawn per frame; time any
+  new graph against Art+viz Bars (~0.85 ms/frame on the Mac), not only Visualizer Bars.
   Keep visualizers cheap: Circle was shaped by timing `ffmpeg -filter_complex_threads 1` against Bars per frame.
   A graph's still inputs must be single frames, never `loop=-1`: an endless source floods mpv past the song's end
   (its clock stops, so the song never ends, and memory grows by gigabytes; on the handheld, a freeze). Test such a
@@ -81,6 +83,12 @@ docs/make-screenshots.sh <library>                   # the README's docs/img/scr
   the chain (loadfile, lavfi-complex) needs `syncEq(true)` first. Setting the same af string again is a no-op. Reverb
   impulse responses are synthesized by bpcore (`soundfx`) and written to the state dir as `ir-<key>.wav`. Display
   changes are debounced 500 ms (`checkDisplay`).
+- **Playlists** play as a `PlaySource` (`Folder`, `NetFolder` or `Playlist`, in `player.h`): `openPlaylist` takes the paths in
+  play order (photos dropped as a guard), `updatePlaylist` swaps them in after an edit without reloading, `renameSource`
+  follows a rename. For a playlist only, `step()` skips local entries that fail `access(F_OK)`. A network item whose folder
+  isn't listed yet waits at most 1.5 s before its `loadfile` (`netWait`), so its subtitles and covers are found:
+  `netFolderWanted()` names the folder (the next network item's too, to prefetch), `netFolderListed()` takes the listing,
+  and `Ui::tick` drives both.
 - **Photos** play through mpv too (`isPhoto`): `PhotoView` (zoom over Fit or Fill, pan in mpv's `video-pan` units,
   a user turn) is applied as `video-zoom`/`video-pan-*`/`video-rotate`; the geometry is in `photo.cpp`. Fill is done
   by zoom, not `panscan`. Everything set for a photo at `load()` (vf, dscale, zoom/pan/rotate) is reset for a video.
@@ -112,6 +120,10 @@ docs/make-screenshots.sh <library>                   # the README's docs/img/scr
   `signature()` changes (or when forced), so any new state that affects drawing must be added to `signature()`.
   `press(Button)` and `pointer(Pointer)` return true for "leave", which `main` turns into closing the video (browser
   mode) or quitting.
+- **Playlists** (`PlaylistStore`, `playlists.*`) are browser pages: `PLROOT` (the Playlists tab) and `PLDIR` (`"\x01pl:"` plus
+  the m3u's path) are pseudo-dirs that `pseudoDir()` recognises, so a new path check must go through it. Select, add and
+  move are `selMode` states of the browser page, not pages of their own. Edits are debounced 1 s (a dirty flag checked in
+  `tick()`) and flushed on leaving and on quit (`flushPlaylist`).
 - **Updater** (`updater.*`, Ports installs; a Store install, under `/data/store`, is the Store's): a thread runs
   BananaOS's `curl` against GitHub's `/releases/latest` (`update.cpp` parses it), downloads the zip and its
   `.sha256`, checks the hash (SHA-256 in `update.cpp`), unpacks it (`unzip`, else `python3 -m zipfile`) and renames it
@@ -137,7 +149,7 @@ docs/make-screenshots.sh <library>                   # the README's docs/img/scr
   first.
 - **Library code with no window** (`aspect`, `tracks`, `format`, `substyle`, `settings`, `resume`, `history`,
   `playlist`, `browser`, `png`, `battery`, `photo`, `update`, `backlight`, `netpath`, `servers`, `secret`, `netstore`,
-  `sidecar`, `keyboard`, `ftplist`, `eq`, `soundfx`) builds as `bpcore` and is covered by `tests/core_test.cpp` (a hand-rolled `CHECK_EQ`).
+  `sidecar`, `keyboard`, `ftplist`, `eq`, `soundfx`, `playlists`) builds as `bpcore` and is covered by `tests/core_test.cpp` (a hand-rolled `CHECK_EQ`).
   Keep window/mpv-handle code out of these.
 - **Settings** are an INI-ish `key = value` file. New switches go in `Settings` plus the `REMEMBER` table in
   `settings.cpp`. In `ui.cpp`, the `REMEMBER`/`REMEMBER_LABELS` arrays, `TOGGLES` and the row ids (`TOGGLE_ROW`,

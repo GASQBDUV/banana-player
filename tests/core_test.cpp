@@ -10,6 +10,7 @@
 #include "update.h"
 #include "backlight.h"
 #include "playlist.h"
+#include "playlists.h"
 #include "keyboard.h"
 #include "netpath.h"
 #include "secret.h"
@@ -19,15 +20,18 @@
 #include "resume.h"
 #include "settings.h"
 #include "tracks.h"
+#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <fstream>
 #include <iterator>
 #include <sys/stat.h>
 #include <unistd.h>
 #include <map>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -317,6 +321,14 @@ static void testSettings()
 	CHECK_EQ(visualizerGraph(VIS_WAVES, false).rfind("[aid1] asplit [ao] [v]; [v] showwaves", 0), (size_t)0);
 	CHECK_EQ(visualizerGraph(VIS_SPECTRUM, true).find("[vid1]") != std::string::npos, true);
 	CHECK_EQ(visualizerGraph(VIS_SPECTRUM, true).find("showspectrum=s=640x200") != std::string::npos, true);
+	// art + visualizer: the art fitted once, only the 640x200 strip drawn each frame, and showfreqs timed by itself
+	CHECK_EQ(visualizerGraph(VIS_BARS, true),
+		std::string("[aid1] asplit [ao] [a]; [vid1] scale=640:480:force_original_aspect_ratio=decrease,pad=640:480:-1:-1:black,setsar=1,format=rgba,split [art1] [art2]; [art1] crop=640:280:0:0 [top]; [art2] crop=640:200:0:280 [under]; [a] showfreqs=s=640x200:mode=bar:cmode=combined:ascale=log:fscale=log:win_size=1024:rate=30:colors=0xC08A22|0xC08A22,split [s1] [s2]; [s1] [under] overlay=eof_action=repeat:format=rgb [base]; [s2] colorkey=black:0.1 [k]; [base] [k] overlay=format=rgb,format=rgba [strip]; [top] [strip] vstack [vo]"));
+	CHECK_EQ(visualizerGraph(VIS_SPECTRUM, true).find("showspectrum=s=640x200:slide=scroll:mode=combined:color=fire:scale=log,fps=30,format=rgba,split") != std::string::npos, true);
+	CHECK_EQ(visualizerGraph(VIS_WAVES, true).find("showwaves=s=640x200:mode=cline:split_channels=0:rate=30:colors=0xC08A22|0xC08A22,split") != std::string::npos, true);
+	CHECK_EQ(visualizerGraph(VIS_BARS, true).find("loop="), std::string::npos);
+	CHECK_EQ(visualizerGraph(VIS_BARS, false).find("rate=30:colors=0xC08A22|0xC08A22,format=yuv420p") != std::string::npos, true);
+	CHECK_EQ(visualizerGraph(VIS_BARS, false).find("fps="), std::string::npos);
 	// Circle: drawn from its tables; without them, as Bars
 	CHECK_EQ(visualizerGraph(VIS_CIRCLE, false).find("showfreqs") != std::string::npos, true);
 	CHECK_EQ(visualizerGraph(VIS_CIRCLE, false).find("remap"), std::string::npos);
@@ -1202,12 +1214,12 @@ static void testSoundFx()
 	CHECK_EQ(soundFxFilter(SoundFx::Headphones, ""), std::string("@bpfx:lavfi=[crossfeed]"));
 	CHECK_EQ(soundFxFilter(SoundFx::Wide, ""), std::string("@bpfx:lavfi=[volume=-2.5dB,extrastereo=m=1.6:c=0,alimiter=limit=0.98:level=0]"));
 	CHECK_EQ(soundFxFilter(SoundFx::Hall, "/s/ir-hall.wav"),
-		std::string("@bpfx:lavfi=[amovie=/s/ir-hall.wav[ir];[in][ir]afir=dry=7.3:wet=7.3,alimiter=limit=0.98:level=0]"));
+		std::string("@bpfx:lavfi=[amovie=/s/ir-hall.wav[ir];[in][ir]afir=minp=1024:dry=7.3:wet=7.3,alimiter=limit=0.98:level=0]"));
 	CHECK_EQ(soundFxFilter(SoundFx::Room, "/s/ir-room.wav"),
-		std::string("@bpfx:lavfi=[amovie=/s/ir-room.wav[ir];[in][ir]afir=dry=4.5:wet=4.5,alimiter=limit=0.98:level=0]"));
+		std::string("@bpfx:lavfi=[amovie=/s/ir-room.wav[ir];[in][ir]afir=minp=1024:dry=4.5:wet=4.5,alimiter=limit=0.98:level=0]"));
 	// a path with the graph's own characters, escaped as an option's value and then in the graph
 	CHECK_EQ(soundFxFilter(SoundFx::Cave, "/a b:c,d[e];f'g/ir.wav"),
-		std::string("@bpfx:lavfi=[amovie=/a b\\\\:c\\,d\\[e\\]\\;f\\\\\\'g/ir.wav[ir];[in][ir]afir=dry=7.6:wet=7.6,alimiter=limit=0.98:level=0]"));
+		std::string("@bpfx:lavfi=[amovie=/a b\\\\:c\\,d\\[e\\]\\;f\\\\\\'g/ir.wav[ir];[in][ir]afir=minp=1024:dry=7.6:wet=7.6,alimiter=limit=0.98:level=0]"));
 
 	// the setting: written, read back, none when absent or unknown
 	Settings s;
@@ -1217,6 +1229,307 @@ static void testSoundFx()
 	CHECK_EQ(parseSettings(serializeSettings(s)).soundFx == SoundFx::Church, true);
 	CHECK_EQ(parseSettings("eq = on\n").soundFx == SoundFx::None, true);
 	CHECK_EQ(parseSettings("sound-effect = bogus\n").soundFx == SoundFx::None, true);
+}
+
+static std::vector<PlaylistEntry> plv(const char* names)
+{
+	std::vector<PlaylistEntry> v;
+	for (const char* p = names; *p; p++)
+	{
+		PlaylistEntry e;
+		e.path = std::string("/m/") + *p + ".mp4";
+		e.title = std::string(1, *p);
+		v.push_back(e);
+	}
+	return v;
+}
+
+static std::string plj(const std::vector<PlaylistEntry>& v)
+{
+	std::string s;
+	for (const auto& e : v) s += e.title;
+	return s;
+}
+
+static std::string plr(const std::vector<int>& r)
+{
+	std::string s;
+	for (int i : r) s += std::to_string(i) + ",";
+	return s;
+}
+
+static void testPlaylists()
+{
+	// round trip, quoted commas
+	Playlist p;
+	p.name = "Road trip";
+	p.entries = {{"/m/a.mp4", "A, \"quoted, comma\"", 61}, {"bpnet://ab12cd34/Music/b.flac", "b", -1}, {"/m/a.mp4", "again", 3}};
+	Playlist q;
+	int sk = 0;
+	CHECK_EQ(parseM3u(serializeM3u(p), "/x", q, sk), true);
+	CHECK_EQ(sk, 0);
+	CHECK_EQ(q.name, std::string("Road trip"));
+	CHECK_EQ(q.entries.size(), size_t(3));
+	CHECK_EQ(q.entries[0].title, std::string("A, \"quoted, comma\""));
+	CHECK_EQ(q.entries[0].duration, 61.0);
+	CHECK_EQ(q.entries[1].path, std::string("bpnet://ab12cd34/Music/b.flac"));
+	CHECK_EQ(q.entries[1].duration, -1.0);
+	CHECK_EQ(q.entries[2].path, std::string("/m/a.mp4"));	// duplicates kept
+	CHECK_EQ(serializeM3u(q), serializeM3u(p));
+
+	// attribute-style EXTINF with a quoted comma
+	Playlist at;
+	parseM3u("#EXTINF:10 tvg-name=\"x,y\",Real title\n/m/a.mp4\n", "", at, sk);
+	CHECK_EQ(at.entries[0].title, std::string("Real title"));
+
+	// CRLF + BOM; comments and blanks; orphan #EXTINF applies to the next path only
+	Playlist c;
+	parseM3u("\xEF\xBB\xBF#EXTM3U\r\n#PLAYLIST:Crlf\r\n\r\n# a comment\r\n#EXTINF:5,Five\r\n/m/a.mp4\r\n/m/b.mp4\r\n", "", c, sk);
+	CHECK_EQ(c.name, std::string("Crlf"));
+	CHECK_EQ(c.entries.size(), size_t(2));
+	CHECK_EQ(c.entries[0].title, std::string("Five"));
+	CHECK_EQ(c.entries[1].title, std::string("b"));
+	CHECK_EQ(c.entries[1].duration, -1.0);
+	Playlist o;
+	parseM3u("#EXTINF:9,Orphan\n#EXTINF:7,Real\n/m/a.mp4\n/m/b.mp4\n", "", o, sk);
+	CHECK_EQ(o.entries[0].title, std::string("Real"));
+	CHECK_EQ(o.entries[1].title, std::string("b"));
+	CHECK_EQ(o.entries[1].duration, -1.0);
+
+	// relative, file://, stem as the name
+	Playlist r;
+	r.file = "/state/playlists/Weekend.m3u";
+	parseM3u("sub/c.mkv\n/abs/d.mp3\nfile:///sd/My%20Movies/e.mp4\nfile://localhost/sd/f.mp4\n", "/state/playlists", r, sk);
+	CHECK_EQ(r.name, std::string("Weekend"));
+	CHECK_EQ(r.entries.size(), size_t(4));
+	CHECK_EQ(r.entries[0].path, std::string("/state/playlists/sub/c.mkv"));
+	CHECK_EQ(r.entries[2].path, std::string("/sd/My Movies/e.mp4"));
+	CHECK_EQ(r.entries[3].path, std::string("/sd/f.mp4"));
+	CHECK_EQ(sk, 0);
+
+	// photos, .txt, http:// skipped and counted
+	Playlist s;
+	parseM3u("/m/a.jpg\n/m/b.txt\nhttp://x/y.mp4\n/m/ok.mp4\nbpnet://id/p.png\n", "", s, sk);
+	CHECK_EQ(s.entries.size(), size_t(1));
+	CHECK_EQ(sk, 4);
+
+	// limits
+	std::string big;
+	for (int i = 0; i < 2005; i++) big += "/m/" + std::to_string(i) + ".mp4\n";
+	Playlist capd;
+	parseM3u(big, "", capd, sk);
+	CHECK_EQ(capd.entries.size(), PL_MAX_ENTRIES);
+	CHECK_EQ(sk, 5);
+	CHECK_EQ(parseM3u(std::string(PL_MAX_FILE_BYTES + 1, '#'), "", capd, sk), false);
+	Playlist longl;
+	parseM3u("/" + std::string(5000, 'x') + ".mp4\n/m/a.mp4\n", "", longl, sk);
+	CHECK_EQ(longl.entries.size(), size_t(1));
+	CHECK_EQ(sk, 1);
+
+	// file names
+	CHECK_EQ(playlistFileName("Road trip"), std::string("Road trip.m3u"));
+	CHECK_EQ(playlistFileName("a/b"), std::string("a_b.m3u"));
+	CHECK_EQ(playlistFileName("..x"), std::string("x.m3u"));
+	CHECK_EQ(playlistFileName("x. ."), std::string("x.m3u"));
+	CHECK_EQ(playlistFileName("a:b*c?\"d<e>f|g\\h"), std::string("a_b_c__d_e_f_g_h.m3u"));
+	CHECK_EQ(playlistFileName(""), std::string("Playlist.m3u"));
+	CHECK_EQ(playlistFileName(" ... "), std::string("Playlist.m3u"));
+	std::string u8;
+	for (int i = 0; i < 30; i++) u8 += "\xC3\xA9";	// 60 bytes
+	CHECK_EQ(playlistFileName(u8 + "\xC3\xA9"), u8 + ".m3u");
+	CHECK_EQ(playlistFileName("a" + u8), "a" + u8.substr(0, 58) + ".m3u");	// cut before a half character
+
+	// name checks
+	std::vector<std::string> have = {"Road trip", "Gym"};
+	CHECK_EQ(checkPlaylistName("", have) == PlNameError::Empty, true);
+	CHECK_EQ(checkPlaylistName("  ", have) == PlNameError::Empty, true);
+	CHECK_EQ(checkPlaylistName(std::string(41, 'a'), have) == PlNameError::TooLong, true);
+	CHECK_EQ(checkPlaylistName(std::string(40, 'a'), have) == PlNameError::None, true);
+	CHECK_EQ(checkPlaylistName("a/b", have) == PlNameError::BadChar, true);
+	CHECK_EQ(checkPlaylistName("a\tb", have) == PlNameError::BadChar, true);
+	CHECK_EQ(checkPlaylistName("road TRIP", have) == PlNameError::Taken, true);
+	CHECK_EQ(checkPlaylistName("road TRIP", have, "Road trip") == PlNameError::None, true);
+	CHECK_EQ(checkPlaylistName("Gym", have, "Road trip") == PlNameError::Taken, true);
+	CHECK_EQ(checkPlaylistName("Road trip", have, "Road trip") == PlNameError::None, true);
+
+	// moves
+	auto v = plv("abcdef");
+	auto rm = moveSelection(v, {0, 1}, -1);	// a block at the top stays
+	CHECK_EQ(plj(v), std::string("abcdef"));
+	CHECK_EQ(plr(rm), std::string("0,1,2,3,4,5,"));
+	v = plv("abcdef");
+	rm = moveSelection(v, {0, 3}, -1);	// split: the top one stays, the other moves
+	CHECK_EQ(plj(v), std::string("abdcef"));
+	CHECK_EQ(plr(rm), std::string("0,1,3,2,4,5,"));
+	v = plv("abcdef");
+	rm = moveSelection(v, {1, 2, 4}, -1);
+	CHECK_EQ(plj(v), std::string("bcaedf"));
+	v = plv("abcdef");
+	rm = moveSelection(v, {1, 2, 4}, 1);
+	CHECK_EQ(plj(v), std::string("adbcfe"));
+	CHECK_EQ(plr(rm), std::string("0,2,3,1,5,4,"));
+	CHECK_EQ(remapSelection({1, 2, 4}, rm) == std::set<int>({2, 3, 5}), true);
+	v = plv("abcdef");
+	moveSelection(v, {4, 5}, 1);
+	CHECK_EQ(plj(v), std::string("abcdef"));
+
+	// gather
+	v = plv("abcdef");
+	rm = gatherSelection(v, {1, 3, 5});
+	CHECK_EQ(plj(v), std::string("abdfce"));
+	CHECK_EQ(plr(rm), std::string("0,1,4,2,5,3,"));
+	v = plv("abcdef");
+	gatherSelection(v, {4, 0});
+	CHECK_EQ(plj(v), std::string("aebcdf"));
+
+	// remove + remapIndex
+	v = plv("abcdef");
+	rm = removeEntries(v, {1, 2, 5});
+	CHECK_EQ(plj(v), std::string("ade"));
+	CHECK_EQ(plr(rm), std::string("0,-1,-1,1,2,-1,"));
+	CHECK_EQ(remapIndex(3, rm), 1);
+	CHECK_EQ(remapIndex(1, rm), 1);	// the next survivor
+	CHECK_EQ(remapIndex(5, rm), 2);	// none after: the last
+	CHECK_EQ(remapIndex(0, rm), 0);
+	CHECK_EQ(remapIndex(0, std::vector<int>{-1, -1}), -1);
+
+	// add, cap and dropped
+	v = plv("abc");
+	int dropped = 0;
+	rm = addEntries(v, plv("xy"), 1, 100, dropped);
+	CHECK_EQ(plj(v), std::string("axybc"));
+	CHECK_EQ(plr(rm), std::string("0,3,4,"));
+	CHECK_EQ(dropped, 0);
+	rm = addEntries(v, plv("123"), -1, 7, dropped);
+	CHECK_EQ(plj(v), std::string("axybc12"));
+	CHECK_EQ(dropped, 1);
+	rm = addEntries(v, plv("9"), -1, 7, dropped);
+	CHECK_EQ(plj(v), std::string("axybc12"));
+	CHECK_EQ(dropped, 1);
+
+	// duplicates
+	v = plv("abacbd");
+	int removed = 0;
+	rm = removeDuplicates(v, removed);
+	CHECK_EQ(plj(v), std::string("abcd"));
+	CHECK_EQ(removed, 2);
+	CHECK_EQ(plr(rm), std::string("0,1,-1,2,-1,3,"));
+	rm = removeDuplicates(v, removed);
+	CHECK_EQ(removed, 0);
+
+	// shuffle: a permutation, `first` first, the same for a seed
+	for (uint64_t seed : {1ull, 2ull, 99ull})
+	{
+		auto sh = shuffleOrder(20, 7, seed);
+		CHECK_EQ(sh.size(), size_t(20));
+		CHECK_EQ(sh[0], 7);
+		std::set<int> uniq(sh.begin(), sh.end());
+		CHECK_EQ(uniq.size(), size_t(20));
+		CHECK_EQ(*uniq.begin(), 0);
+		CHECK_EQ(*uniq.rbegin(), 19);
+		CHECK_EQ(shuffleOrder(20, 7, seed) == sh, true);
+	}
+	CHECK_EQ(shuffleOrder(20, 7, 1) == shuffleOrder(20, 7, 2), false);
+	CHECK_EQ(shuffleOrder(1, 0, 5).size(), size_t(1));
+	CHECK_EQ(shuffleOrder(0, 0, 5).size(), size_t(0));
+	CHECK_EQ(shuffleOrder(5, -1, 5).size(), size_t(5));
+
+	// folder entries
+	int photos = 0;
+	auto fe = folderEntries("/sd/Movies", {"10.mp4", ".hidden.mp4", "2.mp4", "a.jpg", "b.PNG", "n.txt", "song.mp3", "sub"}, photos);
+	CHECK_EQ(photos, 2);
+	CHECK_EQ(fe.size(), size_t(3));
+	CHECK_EQ(fe[0].path, std::string("/sd/Movies/2.mp4"));
+	CHECK_EQ(fe[1].path, std::string("/sd/Movies/10.mp4"));
+	CHECK_EQ(fe[2].title, std::string("song"));
+	auto fn = folderEntries(makeNetPath("ab12cd34", "/Media"), {"x.mkv"}, photos);
+	CHECK_EQ(fn[0].path, netJoin(makeNetPath("ab12cd34", "/Media"), "x.mkv"));
+	CHECK_EQ(entryTitle("/a/b/My Film.v2.mkv"), std::string("My Film.v2"));
+	CHECK_EQ(entryTitle(fn[0].path), std::string("x"));
+
+	// the store, on a temp dir
+	char tmpl[] = "/tmp/bp-plstore-XXXXXX";
+	std::string root = mkdtemp(tmpl);
+	std::string dir = root + "/playlists";
+	{
+		PlaylistStore st(dir);
+		CHECK_EQ(st.list().size(), size_t(0));
+		int ser = st.serial();
+		std::string f1, f2, f3, fx;
+		CHECK_EQ(st.create("beta 10", f1) == PlNameError::None, true);
+		CHECK_EQ(st.create("Beta 2", f2) == PlNameError::None, true);
+		CHECK_EQ(st.create("BETA 2", fx) == PlNameError::Taken, true);
+		CHECK_EQ(st.create("beta/2", fx) == PlNameError::BadChar, true);
+		CHECK_EQ(st.create("a:b", f3) == PlNameError::None, true);
+		std::string f4;
+		CHECK_EQ(st.create("a_b", f4) == PlNameError::None, true);	// same file name as "a:b": " (2)"
+		CHECK_EQ(f4 != f3, true);
+		CHECK_EQ(st.serial() > ser, true);
+		auto li = st.list();
+		CHECK_EQ(li.size(), size_t(4));
+		CHECK_EQ(li[0].name, std::string("a:b"));
+		CHECK_EQ(li[1].name, std::string("a_b"));
+		CHECK_EQ(li[2].name, std::string("Beta 2"));	// natural order: 2 before 10
+		CHECK_EQ(li[3].name, std::string("beta 10"));
+		CHECK_EQ(li[0].count, 0);
+
+		Playlist pl;
+		int skp;
+		CHECK_EQ(st.load(f2, pl, skp), true);
+		pl.entries = plv("abc");
+		CHECK_EQ(st.save(pl), true);
+		CHECK_EQ(st.list()[2].count, 3);
+		Playlist back;
+		CHECK_EQ(st.load(f2, back, skp), true);
+		CHECK_EQ(back.entries.size(), size_t(3));
+		CHECK_EQ(back.name, std::string("Beta 2"));
+
+		std::string nf;
+		CHECK_EQ(st.rename(f2, "beta 10", nf) == PlNameError::Taken, true);
+		CHECK_EQ(st.rename(f2, "BETA 2", nf) == PlNameError::None, true);	// itself, new case
+		CHECK_EQ(st.rename(nf, "Gamma", nf) == PlNameError::None, true);
+		CHECK_EQ(access(f2.c_str(), F_OK) != 0, true);	// the old file is gone
+		CHECK_EQ(access(nf.c_str(), F_OK) == 0, true);
+		CHECK_EQ(nf, dir + "/Gamma.m3u");
+		CHECK_EQ(st.load(nf, back, skp), true);
+		CHECK_EQ(back.entries.size(), size_t(3));
+		CHECK_EQ(back.name, std::string("Gamma"));
+		CHECK_EQ(st.list().size(), size_t(4));
+
+		// a stray .m3u8 and a non-playlist
+		writeFileAtomic(dir + "/Extra.m3u8", "#EXTM3U\n/m/a.mp4\n");
+		writeFileAtomic(dir + "/notes.txt", "x");
+		auto l2 = st.list();
+		CHECK_EQ(l2.size(), size_t(5));
+		bool seen = false;
+		for (const auto& i : l2)
+			if (i.name == "Extra" && i.count == 1) seen = true;
+		CHECK_EQ(seen, true);
+
+		int ser2 = st.serial();
+		CHECK_EQ(st.remove(nf), true);
+		CHECK_EQ(st.serial() > ser2, true);
+		CHECK_EQ(st.list().size(), size_t(4));
+		CHECK_EQ(st.remove(nf), false);
+	}
+	{
+		std::string cmd = "rm -rf '" + root + "'";
+		if (system(cmd.c_str()) != 0) fprintf(stderr, "could not remove %s\n", root.c_str());
+	}
+
+	// 1000 lines, timed
+	Playlist bigp;
+	bigp.name = "Big";
+	for (int i = 0; i < 1000; i++)
+		bigp.entries.push_back({"/media/cards/Movies/Some Folder/File number " + std::to_string(i) + ".mkv", "File number " + std::to_string(i), 120.0 + i});
+	auto t0 = std::chrono::steady_clock::now();
+	std::string text = serializeM3u(bigp);
+	Playlist bp2;
+	parseM3u(text, "/x", bp2, sk);
+	double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
+	CHECK_EQ(bp2.entries.size(), size_t(1000));
+	CHECK_EQ(ms < 50, true);
+	printf("playlists: parse+serialize of 1000 entries took %.2f ms\n", ms);
 }
 
 int main()
@@ -1229,6 +1542,7 @@ int main()
 	testSoundFx();
 	testResume();
 	testPlaylist();
+	testPlaylists();
 	testPhoto();
 	testUpdate();
 	testBacklight();

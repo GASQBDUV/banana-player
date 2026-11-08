@@ -8,6 +8,7 @@
 #include "tracks.h"
 #include <mpv/client.h>
 #include <mpv/render_gl.h>
+#include <map>
 #include <string>
 #include <vector>
 
@@ -24,6 +25,16 @@ namespace bp
 		NetStreams* net = nullptr;	// bpnet:// files (none: they don't open)
 	};
 
+	// where what plays comes from: a folder (its videos or songs, in name order), a network folder, or a playlist
+	enum class SourceKind { Folder, NetFolder, Playlist };
+	struct PlaySource
+	{
+		SourceKind kind = SourceKind::Folder;
+		std::string title;	// the folder's name, or the playlist's
+		std::string id;		// the folder, or the playlist's file
+		bool shuffled = false;	// the paths came in a shuffled order (Loop all replays the same one)
+	};
+
 	// libmpv: demuxing, decoding, A/V sync, tracks and subtitles; the playlist and what is remembered of each file.
 	// The window and the buttons are the caller's.
 	class Player
@@ -38,8 +49,19 @@ namespace bp
 		void shutdown();
 
 		// plays list[index], then the others in order with next() and prev(). folderNames: a network folder's file
-		// names (all of them), where its subtitles and cover are found (mpv can't look in it itself)
+		// names (all of them), where its subtitles and cover are found (mpv can't look in it itself). The source is the
+		// folder (Folder, or NetFolder for a bpnet:// one)
 		void open(const std::vector<std::string>& list, int index, const std::vector<std::string>& folderNames = {});
+		// a playlist's items (local and bpnet:// mixed, in its order: shuffled already for Shuffle play) from paths[index].
+		// Photos are dropped. A local item that isn't there is skipped, here and by next/prev/advance. A network item's
+		// subtitles and cover need its folder's listing, which the caller fetches: see netFolderWanted
+		void openPlaylist(const std::vector<std::string>& paths, int index, const PlaySource& source);
+		// the playlist that plays was edited: its new items, and the index of the one playing among them (where it
+		// was, if it was removed: it plays on, and Next goes to what followed it). Nothing is reloaded
+		void updatePlaylist(const std::vector<std::string>& paths, int current);
+		// the playlist that plays (id) was renamed; newId: its file, if that changed too
+		void renameSource(const std::string& id, const std::string& title, const std::string& newId = "");
+		const PlaySource& source() const { return src; }
 		bool next();	// false on the last one
 		bool prev();	// false on the first one
 		// at a file's end: the next one, or (Loop all, music) the first again; false when that's all
@@ -47,7 +69,17 @@ namespace bp
 		bool playingAudio() const { return isAudio && !playlist.empty(); }
 		bool playingPhoto() const { return isPhoto && !playlist.empty(); }
 		int index() const { return current; }
-		int count() const { return (int)playlist.size(); }
+		int count() const { return (int)playlist.size() - (ghost >= 0 ? 1 : 0); }
+
+		// A network folder's listing, for its files' subtitles and cover (mpv can't look beside a URL). A folder's
+		// open() has it; a playlist's items come from anywhere, so the caller lists their folders: each turn, a folder
+		// netFolderWanted() names ("" none) is listed (once: not again while that listing is under way) and the answer
+		// given to netFolderListed (ok false: it failed). The item about to open waits for its folder's listing, 1.5 s
+		// at most (then it opens without); the next network item's folder is asked for ahead of time
+		std::string netFolderWanted() const;
+		void netFolderListed(const std::string& dir, const std::vector<std::string>& names, bool ok);
+		// the item waits for its folder's listing (loading() is true meanwhile)
+		bool netWaiting() const { return !netWait.dir.empty(); }
 
 		// applies what mpv has sent since the last call
 		void pollEvents();
@@ -208,6 +240,27 @@ namespace bp
 
 	private:
 		void load();
+		// load()'s loadfile, with the network file's options (its folder's sidecars): at once, or once the folder's
+		// listing is in (or its wait is over)
+		void sendLoad();
+		// the index dir steps away from `from` (+1, -1), -1 when there's none. A playlist's local items that are gone
+		// are passed over (said on the top panel), and so is the ghost
+		int step(int from, int dir);
+		void moveTo(int index);	// saveResume, then that index loaded
+		PlaySource src;
+		// the playing item, removed from the playlist by an edit (updatePlaylist): kept in it at its place till
+		// something else plays, so that it plays on and Next goes on from there; -1 none
+		int ghost = -1;
+		std::string skipNote;	// step's "Skipped a missing file", shown as the file it went to is up
+		// a playlist's network item waiting for its folder's listing before its loadfile is sent; dir "" none
+		struct NetWait
+		{
+			std::string dir;
+			uint64_t deadline = 0;
+		} netWait;
+		std::string pendingOpts;	// the loadfile's options, but the network ones (sendLoad adds them)
+		const std::vector<std::string>& namesIn(const std::string& dir) const;
+		void keepNames(const std::string& dir, const std::vector<std::string>& names);
 		std::string netFileOptions(const std::string& path) const;	// loadfile's options for a network file
 		void refreshTracks(mpv_node* trackList);
 		void clearChapters();
@@ -279,7 +332,9 @@ namespace bp
 		PlayerOptions opts;
 		std::vector<std::string> playlist;
 		int current = 0;
-		std::vector<std::string> netNames;	// the network folder's names (open's folderNames)
+		// network folders' names (open's folderNames, netFolderListed's), by folder; 32 at most (netOrder: oldest first)
+		std::map<std::string, std::vector<std::string>> netNamesByDir;
+		std::vector<std::string> netOrder;
 		bool isNet = false;
 		bool pausedForCache = false;
 		uint64_t seekingSince = 0;	// mpv's seeking since then, 0 when it isn't

@@ -209,7 +209,8 @@ namespace bp
 			const Room& r = roomOf(fx);
 			// as the option's value (\ ' :), then in the graph (\ ' [ ] , ;)
 			std::string path = escapeOnce(escapeOnce(irPath, "\\':"), "\\'[],;");
-			return "@bpfx:lavfi=[amovie=" + path + "[ir];[in][ir]afir=dry=" + num(r.dry) + ":wet=" + num(r.wet) + ",alimiter=limit=0.98:level=0]";
+			// minp=1024: afir's default first block of 8192 samples (186 ms) made the visualizer's frames come in bursts
+			return "@bpfx:lavfi=[amovie=" + path + "[ir];[in][ir]afir=minp=1024:dry=" + num(r.dry) + ":wet=" + num(r.wet) + ",alimiter=limit=0.98:level=0]";
 		}
 		if (fx == SoundFx::Wide) return "@bpfx:lavfi=[volume=-2.5dB,extrastereo=m=1.6:c=0,alimiter=limit=0.98:level=0]";
 		if (fx == SoundFx::Headphones) return "@bpfx:lavfi=[crossfeed]";

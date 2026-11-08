@@ -176,10 +176,108 @@ namespace bp
 	void Player::open(const std::vector<std::string>& list, int index, const std::vector<std::string>& folderNames)
 	{
 		playlist = list;
-		netNames = folderNames;
 		current = index;
+		ghost = -1;
+		netNamesByDir.clear();
+		netOrder.clear();
+		src = PlaySource();
+		if (!list.empty())
+		{
+			const std::string& path = list[index];
+			bool net = isNetPath(path);
+			std::string dir = net ? netParent(path) : path.substr(0, path.rfind('/') == std::string::npos ? 0 : path.rfind('/'));
+			src.kind = net ? SourceKind::NetFolder : SourceKind::Folder;
+			src.id = dir;
+			src.title = net ? netBaseName(dir) : baseName(dir);
+			if (net) keepNames(dir, folderNames);
+		}
 		// a video picked plays, whatever the one before was left at
 		prop("pause", "no");
+		load();
+	}
+
+	void Player::openPlaylist(const std::vector<std::string>& paths, int index, const PlaySource& source)
+	{
+		// (a playlist has none, but one written by hand could: the photo player is another thing)
+		playlist.clear();
+		int start = -1;
+		for (int i = 0; i < (int)paths.size(); i++)
+		{
+			if (isPhotoFile(paths[i])) continue;
+			if (start < 0 && i >= index) start = (int)playlist.size();
+			playlist.push_back(paths[i]);
+		}
+		if (playlist.empty()) return;
+		ghost = -1;
+		netNamesByDir.clear();
+		netOrder.clear();
+		src = source;
+		src.kind = SourceKind::Playlist;
+		// past the end (the photos after it dropped): the last
+		if (start < 0) start = (int)playlist.size() - 1;
+		// the one picked gone (the card out): the next one there is, else the one before
+		int there = step(start - 1, 1);
+		if (there < 0) there = step(start, -1);
+		current = there < 0 ? start : there;	// none there at all: its error shows
+		prop("pause", "no");
+		load();
+	}
+
+	void Player::updatePlaylist(const std::vector<std::string>& paths, int now)
+	{
+		if (!playing() || src.kind != SourceKind::Playlist) return;
+		std::string path = currentPath();
+		playlist = paths;
+		now = std::clamp(now, 0, (int)playlist.size());
+		// the one playing removed: kept at its place (a ghost) till another plays
+		ghost = -1;
+		if (now >= (int)playlist.size() || playlist[now] != path)
+		{
+			playlist.insert(playlist.begin() + now, path);
+			ghost = now;
+		}
+		current = now;
+	}
+
+	void Player::renameSource(const std::string& id, const std::string& title, const std::string& newId)
+	{
+		if (src.kind != SourceKind::Playlist || src.id != id) return;
+		src.title = title;
+		if (!newId.empty()) src.id = newId;
+	}
+
+	int Player::step(int from, int dir)
+	{
+		int skipped = 0;
+		for (int i = from + dir; i >= 0 && i < (int)playlist.size(); i += dir)
+		{
+			if (i == ghost) continue;
+			// a playlist's local item that's gone (its card out, the file deleted): passed over, as a folder's never
+			// is (it was listed a moment ago). A network one opens and fails as it would anyway (no wait for a server
+			// here)
+			if (src.kind == SourceKind::Playlist && !isNetPath(playlist[i]) && access(playlist[i].c_str(), F_OK) != 0)
+			{
+				skipped++;
+				continue;
+			}
+			// (said once the file is up: a message sent before its loadfile is gone with the file before)
+			skipNote = !skipped ? "" : skipped == 1 ? "Skipped a missing file" : "Skipped " + std::to_string(skipped) + " missing files";
+			return i;
+		}
+		return -1;
+	}
+
+	void Player::moveTo(int index)
+	{
+		saveResume();
+		// the ghost leaves the list now that something else plays
+		if (ghost >= 0)
+		{
+			playlist.erase(playlist.begin() + ghost);
+			if (index > ghost) index--;
+			ghost = -1;
+		}
+		current = index;
 		load();
 	}
 
@@ -188,28 +286,73 @@ namespace bp
 		if (next()) return true;
 		// Loop all (music): from the last back to the first
 		if (!isAudio || settings.loop != LOOP_ALL || playlist.empty()) return false;
-		saveResume();
-		current = 0;
-		load();
+		int first = step(-1, 1);
+		if (first < 0) return false;
+		moveTo(first);
 		return true;
 	}
 
 	bool Player::next()
 	{
-		if (current + 1 >= count()) return false;
-		saveResume();
-		current++;
-		load();
+		int to = step(current, 1);
+		if (to < 0) return false;
+		moveTo(to);
 		return true;
 	}
 
 	bool Player::prev()
 	{
-		if (current <= 0) return false;
-		saveResume();
-		current--;
-		load();
+		int to = step(current, -1);
+		if (to < 0) return false;
+		moveTo(to);
 		return true;
+	}
+
+	const std::vector<std::string>& Player::namesIn(const std::string& dir) const
+	{
+		static const std::vector<std::string> none;
+		auto it = netNamesByDir.find(dir);
+		return it == netNamesByDir.end() ? none : it->second;
+	}
+
+	void Player::keepNames(const std::string& dir, const std::vector<std::string>& names)
+	{
+		if (!netNamesByDir.count(dir)) netOrder.push_back(dir);
+		netNamesByDir[dir] = names;
+		// 32 folders at most (a playlist of a whole server's worth): the oldest go, but the playing item's own
+		std::string keep = playing() && isNetPath(currentPath()) ? netParent(currentPath()) : "";
+		for (size_t i = 0; netOrder.size() > 32 && i < netOrder.size();)
+		{
+			if (netOrder[i] == keep || netOrder[i] == dir) i++;
+			else
+			{
+				netNamesByDir.erase(netOrder[i]);
+				netOrder.erase(netOrder.begin() + i);
+			}
+		}
+	}
+
+	std::string Player::netFolderWanted() const
+	{
+		if (!netWait.dir.empty()) return netWait.dir;
+		if (src.kind != SourceKind::Playlist || !playing()) return "";
+		// ahead of time: the next network item's, so that it needn't wait
+		for (int i = current + 1; i < (int)playlist.size(); i++)
+		{
+			if (i == ghost || !isNetPath(playlist[i])) continue;
+			std::string dir = netParent(playlist[i]);
+			return netNamesByDir.count(dir) ? "" : dir;
+		}
+		return "";
+	}
+
+	void Player::netFolderListed(const std::string& dir, const std::vector<std::string>& names, bool ok)
+	{
+		// a failed listing is kept as an empty one: its items open without sidecars, not after a wait each
+		keepNames(dir, ok ? names : std::vector<std::string>());
+		if (netWait.dir != dir) return;
+		netWait = NetWait();
+		sendLoad();
 	}
 
 	void Player::load()
@@ -229,6 +372,17 @@ namespace bp
 		seekingSince = 0;
 		// the last network file still connecting is given up: mpv waits on its open before it takes this one
 		if (opts.net) opts.net->cancelOpens();
+		netWait = NetWait();
+		// a playlist's network item whose folder isn't listed yet: its loadfile waits for the listing (the caller's),
+		// for its subtitles and cover. The file before it stopped meanwhile: it would play on under the new one's
+		// settings (graph, filters), and its end would read as this one's
+		if (isNet && opts.net && src.kind == SourceKind::Playlist && !netNamesByDir.count(netParent(path)))
+		{
+			netWait.dir = netParent(path);
+			netWait.deadline = ticks() + 1500;
+			const char* cmd[] = {"stop", nullptr};
+			mpv_command_async(mpv, 0, cmd);
+		}
 		loadSerial++;
 		loadAt = ticks();
 		readyPending = false;
@@ -253,7 +407,7 @@ namespace bp
 		{
 			size_t slash = path.rfind('/');
 			std::string dir = slash == std::string::npos ? "." : path.substr(0, slash);
-			bool cover = isNet ? !coverFileFor(netNames).empty() : folderHasCover(path), guessArt = cover || (dir == lastArtDir && lastArt);
+			bool cover = isNet ? !coverFileFor(namesIn(netParent(path))).empty() : folderHasCover(path), guessArt = cover || (dir == lastArtDir && lastArt);
 			if (settings.musicShow == SHOW_VIS) graph = graphFor(settings.visualizer, false);
 			else if (settings.musicShow == SHOW_NONE) graph = blankGraph();
 			else if (settings.musicShow == SHOW_BOTH) graph = graphFor(settings.visualizer, cover);
@@ -300,7 +454,6 @@ namespace bp
 		else if (settings.rememberSubs && !e && resume.lastSubOff) sid = "no";
 		if (graph.empty()) fileOpts += ",sid=" + sid;
 		else wantSid = 0;
-		if (isNet) fileOpts += netFileOptions(path);
 		std::string slang = opts.lang;
 		if (settings.rememberSubs && !resume.lastSubLang.empty()) slang = resume.lastSubLang + (slang.empty() ? "" : "," + slang);
 		prop("slang", slang);
@@ -350,6 +503,15 @@ namespace bp
 			if (!opts.stateDir.empty()) writeFile(opts.stateDir + "/history.tsv", played.serialize());
 		}
 
+		pendingOpts = fileOpts;
+		if (netWait.dir.empty()) sendLoad();
+	}
+
+	void Player::sendLoad()
+	{
+		const std::string& path = playlist[current];
+		std::string fileOpts = pendingOpts;
+		if (isNet) fileOpts += netFileOptions(path);
 		// (the file's options take loadfile's index argument before them: -1, "replace" has no place)
 		const char* cmd[] = {"loadfile", path.c_str(), "replace", "-1", fileOpts.c_str(), nullptr};
 		mpv_command_async(mpv, 0, cmd);
@@ -365,6 +527,14 @@ namespace bp
 
 	void Player::checkNet()
 	{
+		// the folder's listing didn't come in time (a slow or gone server): the file opens without its sidecars
+		if (!netWait.dir.empty() && ticks() >= netWait.deadline)
+		{
+			fprintf(stderr, "net: no listing of %s in time: opened without its subtitles and cover\n", netWait.dir.c_str());
+			netWait = NetWait();
+			sendLoad();
+			return;
+		}
 		if (!isNet || !opts.net || !playing() || !error.empty() || !buffering()) return;
 		NetResult f = opts.net->failure(currentPath());
 		if (f.ok()) return;
@@ -394,12 +564,12 @@ namespace bp
 		std::vector<std::string> extra;
 		if (isAudio)
 		{
-			std::string cover = coverFileFor(netNames);
+			std::string cover = coverFileFor(namesIn(dir));
 			if (!cover.empty()) o += ",cover-art-files=" + list({netJoin(dir, cover)});
 		}
 		else if (!isPhoto)
 		{
-			for (auto& n : subtitleFilesFor(netBaseName(path), netNames)) extra.push_back(netJoin(dir, n));
+			for (auto& n : subtitleFilesFor(netBaseName(path), namesIn(dir))) extra.push_back(netJoin(dir, n));
 			if (!extra.empty()) o += ",sub-files=" + list(extra);
 		}
 		return o;
@@ -471,6 +641,7 @@ namespace bp
 			}
 			case MPV_EVENT_FILE_LOADED:
 			{
+				if (!netWait.dir.empty()) break;	// the file before (a quick Next), not the one waiting
 				loaded = true;
 				loadedAt = ticks();
 				audioChecks = 0;
@@ -515,6 +686,8 @@ namespace bp
 					wakeLoads--;	// wakeOutput's empty load, not a file of the person's
 					break;
 				}
+				// the file before one waiting for its folder's listing, stopped (or ended): not the one to come
+				if (!netWait.dir.empty()) break;
 				auto* e = (mpv_event_end_file*)ev->data;
 				// a network file: a read that failed is an end of file to mpv; the connection's error, kept by the
 				// stream, says it wasn't
@@ -526,7 +699,7 @@ namespace bp
 			}
 			case MPV_EVENT_PLAYBACK_RESTART:
 				// this file's (it comes after its FILE_LOADED): one left over from the last file's seek isn't
-				if (loaded && !started)
+				if (loaded && !started && netWait.dir.empty())
 				{
 					started = true;
 					prop("initial-audio-sync", "yes");	// for this file's seeks (see load())
@@ -567,6 +740,8 @@ namespace bp
 		if (wantSid > 0 && missing(TrackType::Sub, wantSid)) prop("sid", "auto");
 		if (isAudio && (settings.musicShow == SHOW_ART || settings.musicShow == SHOW_BOTH)) applyAudioDisplay();
 		updateOverlay();
+		if (!skipNote.empty()) osd(skipNote, 2000);
+		skipNote.clear();
 		// a photo's name and its place in the folder, for a moment
 		if (isPhoto) osd(baseName(playlist[current]) + (count() > 1 ? "   " + std::to_string(current + 1) + " / " + std::to_string(count()) : ""), 2000);
 	}
@@ -1391,6 +1566,10 @@ namespace bp
 		pausedForCache = false;
 		seekingSince = 0;
 		if (opts.net) opts.net->cancelOpens();
+		netWait = NetWait();	// (its loadfile never sent: nothing of it to end)
+		ghost = -1;
+		src = PlaySource();
+		skipNote.clear();
 		checkLoading();	// the spinner down
 		applyPhotoView();
 		updateOverlay();	// the title off the top panel

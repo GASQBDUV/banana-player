@@ -4,6 +4,7 @@ Everything Banana Player does, button by button. For installing it, see the [REA
 
 - [What it plays](#what-it-plays)
 - [Finding something to play](#finding-something-to-play)
+- [Playlists](#playlists)
 - [Controls](#controls): [while playing](#while-playing), [photos](#looking-at-a-photo), [the file list](#in-the-file-list), [the menu](#the-menu-start)
 - [Photos](#photos)
 - [Picture size](#picture-size)
@@ -41,13 +42,78 @@ song, photo), and each file shows its size. Anything you stopped part-way throug
 under the tabs shows where you are (`share / Movies`), and the bottom line shows what each button does there: the
 button's name in yellow, then what it does.
 
-The **Local** and **Network** tabs at the top switch between your cards and your network folders (**L/R**, or tap a
-tab).
+The **Local**, **Playlists** and **Network** tabs at the top switch between your cards, your playlists and your network
+folders (**L/R**, or tap a tab). See [Playlists](#playlists).
 
 Everything in a folder plays as one playlist: **L/R** go to the previous or next file, and the next one starts when
 the current one ends. Folders can mix videos and music. Photos are a list of their own: from a photo you step through
 the folder's photos, and from a video or a song through its videos and songs. When you close something, you're back in
 its folder on that file.
+
+## Playlists
+
+A playlist is a list of your videos and songs, in the order you set. It can mix files from your cards and from network
+folders. Playlists have a tab of their own, between Local and Network.
+
+- **Make one:** on the **Playlists** tab, **X** → **New playlist…** (or **A** on the empty page), then name it on the
+  keyboard. A name is 40 characters at most, can't have a **/** in it, and can't match one you already have (capitals
+  don't count).
+- **Open one:** **A** on it shows its items, in order. The tab lists the playlists by name, each with its number of items.
+- **Its menu:** **Y** on a playlist (or hold it) gives **Play**, **Shuffle play**, **Rename…** and **Delete playlist**
+  (press it twice). Deleting a playlist leaves its files where they are.
+
+### Playing
+
+- **A** on an item plays the playlist from there. **Play all** (the playlist's **X** menu) starts at the top, and
+  **Play from here** (an item's **Y** menu) starts at that item.
+- **Shuffle play** plays the items in a random order, once. Nothing is saved: the next Shuffle play is shuffled again.
+  With **Loop all**, the same shuffled order plays again.
+- **L / R** go to the previous or next item, as in a folder. For music on **Loop all**, the playlist starts again after
+  its last item. Videos never loop.
+
+### Adding items
+
+- On **Local** or **Network**, **X** → **Select files**, tick the files you want (**A**, or a tap), then **X** →
+  **Add to…** and pick a playlist (or **New playlist…**). On the touch screen, a hold on a file starts this with that
+  file ticked.
+- Inside a playlist, **X** → **Add files…** opens the file list, and the files you tick are added to that playlist.
+  **Add folder…** adds a whole folder instead.
+- On any folder, **Y** (or a hold) → **Add to playlist…** comes first, and adds that folder's files.
+- A folder adds only the files directly in it, not those in its subfolders. Photos are skipped, and the note says how
+  many. Files are added in the folder's order.
+- The same file can be in a playlist twice. **X** → **Remove duplicates** (in the playlist's **X** menu) keeps the first
+  of each.
+- A playlist holds 2,000 items at most. An add that goes past that adds what fits, and says so.
+
+### Select, remove and move
+
+In a playlist, **X** → **Select** (or a hold on an item) turns on select mode:
+
+- **A** ticks an item (a tap does too). **SELECT** ticks them all, or clears them all.
+- **X** → **Remove** takes the ticked items out of the playlist. Press it twice. The files stay where they are, and
+  select mode ends.
+- **Y** → **Move** rearranges them (below). **B** leaves select mode.
+
+To move items: tick them, then press **Y** (**Move**). The ticked items gather into one block. **UP / DOWN** moves it a
+row at a time, **LEFT / RIGHT** a page at a time. **A** drops it where it is, and **B** puts it back. On the touch
+screen, drag the grip on the right of a row instead. **Move** in an item's **Y** menu starts a move too, and after it
+you're back in the normal list.
+
+Single items: an item's **Y** menu has **Play from here**, **Move**, **Remove from playlist** and **Show in folder** (which
+opens the item's folder, with the file under the cursor).
+
+### Missing items
+
+If a file is gone (its card is out, or it was deleted), its row reads **[Gone]** before its name. A network item whose
+connection was deleted shows the same. While a playlist plays, Next and Previous skip the local files that are gone,
+with a note. **Y** on a gone item offers **Remove from playlist**.
+
+Network items keep their subtitles and covers, as they do in a network folder. The first one may take a moment longer to
+start, while its folder is read for them.
+
+Each playlist is saved on the card as an `.m3u` text file (the usual playlist format), in
+`home/.config/banana-player/playlists/`. A change is saved about a second after you make it, and when you leave the
+Playlists tab.
 
 ## Controls
 
@@ -84,6 +150,11 @@ its folder on that file.
 
 Under the progress bar you'll see the time played, the time left (at the current speed) and the total length.
 
+The top line of the Main page shows what's playing from: the folder (`Videos / Movies`), or a playlist (its name, with a
+list icon), then the card or the server it's on: **Local** or the server's name. For a shuffled playlist the status line
+says **Playing · Shuffle**. On the right of the status line, `3 / 12` is the file's place in its folder or playlist (in a
+shuffled playlist, its place in the shuffled order).
+
 ### Looking at a photo
 
 | Button | What it does |
@@ -102,13 +173,14 @@ See [Photos](#photos) for the touch screen.
 
 | Button | What it does |
 |---|---|
-| **A** (or tap it) | Open the folder or play the file |
+| **A** (or tap it) | Open the folder, play the file, or open the playlist |
 | **B** or **Back** | Up one folder (twice at the top to quit) |
 | **UP / DOWN** | Move |
 | **LEFT / RIGHT** | Page up / down |
-| **L / R** | Local / Network tab |
-| **X** | Options: **Refresh** (read the folder again), and on a folder **Hide folder** / **Unhide folder** (or hold the folder on the touch screen). On the Network tab: **Add connection**, **Find on the network**, **Refresh** |
-| **Y** | On a network connection: **Edit connection**, **Test connection**, **Delete connection** (press twice) (or hold it on the touch screen) |
+| **L / R** | Previous / next tab: Local, Playlists, Network |
+| **X** | Options: **Refresh** (read the folder again), and on a folder **Hide folder** / **Unhide folder** (or hold the folder on the touch screen). On the Local and Network tabs: **Select files**, to tick files and add them to a playlist. On the Network tab: **Add connection**, **Find on the network**, **Refresh**. On the Playlists tab: **New playlist…** |
+| **Hold** (touch screen) | On a file in Local or Network: starts selecting, with that file ticked |
+| **Y** | On a folder: **Add to playlist…** (first). On a network connection: **Edit connection**, **Test connection**, **Delete connection** (press twice) (or hold it on the touch screen). On a playlist or its item: see [Playlists](#playlists) |
 | **START** | Menu |
 
 ### The menu (START)

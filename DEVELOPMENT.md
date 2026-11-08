@@ -44,7 +44,7 @@ tested and laid out.
 | `src/touch.*` | The bottom touchscreen from evdev, one finger |
 | `src/sleepwatch.*` | Pause on the lid's `SW_LID` and on `SIGCONT` |
 | `src/panel.*` | The bottom backlight on/off, restored on quit and on a crash |
-| `src/aspect.*`, `tracks.*`, `format.*`, `substyle.*`, `settings.*`, `resume.*`, `history.*`, `playlist.*`, `browser.*`, `photo.*` | No window code; covered by `tests/core_test.cpp` |
+| `src/aspect.*`, `tracks.*`, `format.*`, `substyle.*`, `settings.*`, `resume.*`, `history.*`, `playlist.*`, `playlists.*`, `browser.*`, `photo.*` | No window code; covered by `tests/core_test.cpp` |
 
 ### BananaOS integration
 
@@ -198,6 +198,10 @@ build/bp-net cancel-ls|cancel-cat ...                      # with the server `do
       live band edits by `af-command`, and the Sound page's Effects tab: Room, Concert hall, Church and Cave (afir
       reverbs with impulse responses synthesized in `soundfx.*`, no recordings), Wide stereo and Headphones (crossfeed).
       The Display popup merges the art and visualizer choices under SELECT.
+- [x] **Playlists** (`playlists.*`, `Player`'s `PlaySource`): a Playlists tab between Local and Network; extended M3U files
+      in the state folder's `playlists/`, local and network items mixed, Shuffle play, select, add, move and remove, missing
+      items skipped while playing. A network item waits up to 1.5 s for its folder's listing (subtitles and covers).
+      The file format and edits are unit-tested in `tests/core_test.cpp`.
 - [ ] **On the handheld (needs the hardware):**
   - [ ] Does SDL2's KMSDRM give both panels as two displays, with a GLES window on one and a renderer on the other?
         If not, the bottom panel falls back to raw KMS, as banana-ui uses.
