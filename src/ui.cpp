@@ -4606,10 +4606,11 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 		static const char* FREQS[EQ_BANDS] = {"31", "62", "125", "250", "500", "1k", "2k", "4k", "8k", "16k"};
 		const Settings& st = p.settings;
 		bool on = st.eqOn, custom = eqCustom(p);
-		// the switch: a pill, its knob right when on
+		// the switch: a dark track, the knob lit yellow on the right when on, grey on the left when off (the colour
+		// sits where the switch points, as a phone's does)
 		fill(buttonRect(EQ_SWITCH), pressedBtn == EQ_SWITCH ? PRESSED : TEAL);
-		fill({30, 84, 48, 24}, on ? YELLOW : SCREEN);
-		fill({on ? 56 : 32, 86, 20, 20}, on ? BG : DIM);
+		fill({30, 84, 48, 24}, SCREEN);
+		fill({on ? 54 : 32, 86, 22, 20}, on ? YELLOW : DIM);
 		drawTextMid(on ? "On" : "Off", 1, on ? CREAM : DIM, 92, 96);
 		// the preset: Y and X either side of its name, what it is under it
 		fill({160, 70, 464, 52}, TEAL);
