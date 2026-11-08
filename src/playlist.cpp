@@ -30,6 +30,11 @@ namespace bp
 			"wv", "mka"});
 	}
 
+	bool isAviFile(const std::string& name)
+	{
+		return hasExtension(name, {"avi", "divx"});
+	}
+
 	bool isMediaFile(const std::string& name)
 	{
 		return isVideoFile(name) || isAudioFile(name) || isPhotoFile(name);

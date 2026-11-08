@@ -479,6 +479,9 @@ static void testPlaylist()
 		CHECK_EQ(isMediaFile(a), true);
 	}
 	CHECK_EQ(isAudioFile("a.mkv"), false);
+	CHECK_EQ(isAviFile("My Film.AVI"), true);
+	CHECK_EQ(isAviFile("bpnet://3a3cff8c/Media/a.divx"), true);
+	CHECK_EQ(isAviFile("a.mkv"), false);
 	CHECK_EQ(isMediaFile("a.txt"), false);
 	CHECK_EQ(naturalLess("ep2.mkv", "ep10.mkv"), true);
 	CHECK_EQ(naturalLess("ep10.mkv", "ep2.mkv"), false);

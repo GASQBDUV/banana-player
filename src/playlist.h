@@ -8,6 +8,8 @@ namespace bp
 	bool isVideoFile(const std::string& name);
 	// mp3, flac, ogg, wav, m4a, opus...
 	bool isAudioFile(const std::string& name);
+	// avi, divx: a container whose streams all start at 0 (no start offset of their own)
+	bool isAviFile(const std::string& name);
 	// what the player plays: any of them, photos too (photo.h)
 	bool isMediaFile(const std::string& name);
 

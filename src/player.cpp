@@ -257,6 +257,12 @@ namespace bp
 		// a song always from its start (an album plays through; music isn't a film to come back to)
 		if (settings.rememberPosition && !isAudio && e && e->position >= 0) snprintf(start, sizeof start, "%.3f", e->position);
 		std::string fileOpts = std::string("start=") + start;
+		// an AVI from its start: the sound starts at once, not when the picture's second frame is due. One that holds
+		// its first frame for seconds (MEncoder's, with a still opening: frames at 0, then 7 s) was silent till then.
+		// AVI only: its streams all start at 0, so mpv's start trim has nothing to do there, while an MKV or TS whose
+		// sound starts later or earlier than its picture needs it (without, out of step for seconds). Back on at the
+		// first PLAYBACK_RESTART: after a seek (a resume too) the trim keeps the sound in step
+		if (!strcmp(start, "none") && isAviFile(path)) fileOpts += ",initial-audio-sync=no";
 
 		// (a graph takes the song's first audio track itself: no track to choose)
 		wantAid = graph.empty() && settings.rememberAudio && e && e->aid > 0 ? e->aid : 0;
@@ -475,6 +481,7 @@ namespace bp
 				if (loaded && !started)
 				{
 					started = true;
+					prop("initial-audio-sync", "yes");	// for this file's seeks (see load())
 					// in the log: how long a file takes to start, from the press (the handheld's numbers)
 					fprintf(stderr, "timing: %s started in %llu ms (opened in %llu)\n", baseName(currentPath()).c_str(),
 						(unsigned long long)(ticks() - loadAt), (unsigned long long)(loadedAt - loadAt));
