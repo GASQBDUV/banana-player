@@ -8,6 +8,7 @@ Everything Banana Player does, button by button. For installing it, see the [REA
 - [Photos](#photos)
 - [Picture size](#picture-size)
 - [Music](#music)
+- [Sound: equalizer and effects](#sound-equalizer-and-effects)
 - [Chapters](#chapters)
 - [Settings](#settings)
 - [Quick settings](#quick-settings)
@@ -60,8 +61,8 @@ its folder on that file.
 | **L2 / R2** | Previous / next chapter (**F + L2** is still the screenshot) |
 | **UP / DOWN** | Faster / slower (0.5x, 1x, 1.5x, 2x, 2.5x) |
 | **X** | Video: audio and subtitles (one page, two tabs: **Y** / **X** or **L / R** switch them) · Music: No loop → Loop all → Loop one |
-| **Y** | Video: chapters · Music: Bars → Waves → Spectrum → Circle, or chapters for a song or audiobook that has them (the visualizer is still in Settings › Music) |
-| **SELECT** | Video: Fit → Fill → Stretch · Music: Album art → Art + visualizer → Visualizer → None |
+| **Y** | Video: chapters · Music: chapters, for a song or audiobook that has them (on other songs it does nothing) |
+| **SELECT** | Video: Fit → Fill → Stretch · Music: the Display popup (what's shown, and the visualizer's style) |
 | **START** | Menu: Recent, Settings, About, Quit |
 | **B** (or **Back**) **twice** | Close the video (back to the list) |
 | **F + L2** | Screenshot of both screens (saved in the card's `screenshots` folder) |
@@ -72,6 +73,8 @@ its folder on that file.
 - **Progress bar:** touch it to jump there. Hold and drag to scrub, and the picture follows your finger.
 - **Buttons:** they act when you lift your finger, so slide off one to cancel.
 - **Audio and subtitles:** on a video, tap the audio or subtitle line under the buttons to change that track.
+- **Sound:** on a song, tap the line under the buttons (it shows the preset and effect) to open the Sound page. On a
+  song without chapters, the **Sound** button does the same.
 - **Chapters:** tap the chapter line above the progress bar to see the chapters.
 - **Lists:** tap to choose, drag to scroll.
 - **Close:** tap **<** (top left) once, or Close (bottom right, marked **B×2**) twice.
@@ -163,17 +166,54 @@ Recent. **Info** shows the photo's size, format, and when and with which camera 
 
 ## Music
 
-Songs show their title, artist and album on the top screen. While a song plays, three buttons change how:
+Songs show their title, artist and album on the top screen. While a song plays:
 
-- **SELECT: what's shown.** **Album art** (default), **Art + visualizer** (the visualizer over the bottom of the art),
-  **Visualizer**, or **None** (just the title: the lightest on the battery). A song without art shows its title alone
-  on Album art, and the visualizer on Art + visualizer. Album art can be inside the song file or a `cover.jpg` in the
-  same folder.
-- **Y: the visualizer.** **Bars**, **Waves**, **Spectrum** or **Circle** (bars round a glowing ring, cyan to pink;
-  with Art + visualizer, the album art sits inside the ring). A song or audiobook with chapters has **Y** for its
-  chapters instead; the visualizer is still in Settings › Music.
+- **SELECT: Display.** A popup on the bottom screen with two rows. **Show** is **Album art** (default),
+  **Art + visualizer** (the visualizer over the bottom of the art), **Visualizer**, or **None** (just the title: the
+  lightest on the battery). **Style** is the visualizer's look: **Bars**, **Waves**, **Spectrum** or **Circle** (bars
+  round a glowing ring, cyan to pink; with Art + visualizer, the album art sits inside the ring). The top screen
+  changes as you choose. In the popup, the **D-pad** changes a setting, **SELECT** goes to the next Show mode, and
+  **B** closes it. The Style row is greyed out for Album art and None, which don't show a visualizer, but it can still
+  be changed. A song without art shows its title alone on Album art, and the visualizer on Art + visualizer. Album art
+  can be inside the song file or a `cover.jpg` in the same folder.
+- **Y: chapters.** A song or audiobook with chapters opens its **Chapters** page, as on a video. On other songs **Y**
+  does nothing.
 - **X: looping.** **No loop**, **Loop all** (the folder starts again after its last song) or **Loop one** (the same
   song again). Videos never loop.
+
+Settings › Music has the same two choices as **Music display** and **Visualizer**.
+
+## Sound: equalizer and effects
+
+The equalizer and the sound effects change the sound of music: songs and audiobooks. Videos are never changed. Open the
+**Sound** page from the **Sound** button, the line under the buttons (see **By touch** under [Controls](#controls)), or
+Settings › Music › **Sound**. It has two tabs: switch them with **L / R**, or tap a tab.
+
+**Equalizer** shapes the sound with ten bands, from 31 Hz to 16 kHz, each boosted or cut by up to 12 dB.
+
+- **LEFT / RIGHT** picks a band and **UP / DOWN** changes it. On the touch screen, drag a band's slider, and double-tap
+  a band to set it back to 0 dB. Every change is heard at once.
+- **Y / X** step through the presets, **SELECT** turns the equalizer on or off, **A** saves, and **START** opens
+  Options.
+- Built-in presets: **Flat**, **Bass Boost**, **Bass Cut**, **Treble Boost**, **Loudness**, **Vocal**, **Spoken Word**,
+  **Rock**, **Pop**, **Jazz**, **Classical** and **Electronic**. The loud ones are turned down a little on their own,
+  so they don't distort.
+- Change any preset and it becomes **Custom**. It keeps playing, and it's remembered after a restart. **A** saves it:
+  over your own preset if that's where it came from, or as a new preset of yours after a built-in, named on the
+  on-screen keyboard (24 characters at most, and not a built-in's name). **Reset** (tap it, or Options › Reset)
+  brings back the preset's own settings.
+- Options holds **All presets**, **Save as new preset**, **Rename** and **Delete** for your own presets (Delete asks
+  you to confirm), and Reset.
+
+**Effects** puts a room around the music. Pick one with **UP / DOWN** and **A**, and you hear it at once.
+
+- **None** turns the effect off. **Room**, **Concert hall**, **Church** and **Cave** are reverbs: the sound of a room,
+  a hall, a church or a cave. **Wide stereo** spreads the sound wider than the speakers. **Headphones** (crossfeed)
+  mixes a little of each side into the other, so it's easier on the ears.
+- The effect is separate from the equalizer's switch: an effect plays with the equalizer off.
+- The reverbs use a little more of the handheld's processor than the rest.
+
+The top screen shows a small card when the preset, the effect, or the equalizer's on or off changes.
 
 ## Chapters
 
@@ -206,7 +246,7 @@ goes back to the list.
 | Group | Setting | Default | |
 |---|---|---|---|
 | **Subtitles** | Font, size, colour, border, border colour | Inter, Medium, White, Normal, Black | How plain subtitles (SRT, VTT…) look, with a live preview. Styled subtitles (ASS/SSA) keep their own look. |
-| **Music** | Music display, Visualizer | Album art, Bars | What the top screen shows for music (also on SELECT and Y while a song plays) |
+| **Music** | Music display, Visualizer, Sound | Album art, Bars, Off | What the top screen shows for music (also on SELECT while a song plays). **Sound** opens the [Sound page](#sound-equalizer-and-effects): the equalizer and the effects |
 | **Photos** | Keep zoom between photos | On | The next photo opens at the same zoom and place. Off: each opens whole |
 | | Pan area | Left | Which side of the bottom screen the photo's pan area is on |
 | | Drag moves | The box | A drag in the pan area moves the box over the small photo, or the photo itself (like a phone) |

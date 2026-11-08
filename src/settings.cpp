@@ -179,6 +179,11 @@ namespace bp
 		for (auto& r : REMEMBER) out += std::string(r.key) + " = " + (s.*r.field ? "yes" : "no") + "\n";
 		out += std::string("pan-area = ") + (s.panRight ? "right" : "left") + "\n";
 		out += std::string("pan-drag = ") + (s.dragBox ? "box" : "photo") + "\n";
+		out += std::string("eq = ") + (s.eqOn ? "on" : "off") + "\n";
+		out += "eq-preset = " + s.eqPreset + "\n";
+		out += "eq-origin = " + s.eqOrigin + "\n";
+		out += "eq-gains = " + formatEqGains(s.eqGains) + "\n";
+		out += std::string("sound-effect = ") + soundFxKey(s.soundFx) + "\n";
 		if (s.updateRemindAfter > 0) out += "update-remind-after = " + std::to_string(s.updateRemindAfter) + "\n";
 		return out;
 	}
@@ -208,6 +213,11 @@ namespace bp
 				if (key == "loop" && value == LOOP_IDS[v]) s.loop = v;
 			if (key == "pan-area" && (value == "left" || value == "right")) s.panRight = value == "right";
 			if (key == "pan-drag" && (value == "photo" || value == "box")) s.dragBox = value == "box";
+			if (key == "eq" && (value == "on" || value == "off")) s.eqOn = value == "on";
+			if (key == "eq-preset") s.eqPreset = value;
+			if (key == "eq-origin") s.eqOrigin = value;
+			if (key == "eq-gains") parseEqGains(value, s.eqGains);
+			if (key == "sound-effect") s.soundFx = soundFxFromKey(value);
 			if (key == "update-remind-after") s.updateRemindAfter = atoll(value.c_str());
 			// the one setting before 0.1.1, kept: auto, cover-bars, bars, waves, spectrum, cover
 			if (key == "audio-display")

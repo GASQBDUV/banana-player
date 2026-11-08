@@ -84,6 +84,10 @@ X, Y, S (START), Tab (SELECT).
 Options: `--windowed`, `--aspect fit|fill|stretch`, `--lang eng,en`, `--state-dir DIR`, `--font TTF`, `-v` (mpv's
 log), `--press LIST` (below).
 
+To check the equalizer by numbers, run a sine at a band's centre through the `lavfi=[...]` part of the `af` string
+(`ffmpeg -f lavfi -i sine=f=1000:d=2 -af "<that>,astats" -f null -`) and compare its RMS level with a flat run: the
+difference is the gain at that frequency, which `eqResponseDb` gives.
+
 ### Scripted runs
 
 `--press` runs steps 0.8 s apart, prints the state after each, then quits. Real keyboard, mouse and touch input is
@@ -190,6 +194,10 @@ build/bp-net cancel-ls|cancel-cat ...                      # with the server `do
 - [x] **Chapters:** the file's own chapter markers (`chapter-list`, `chapter`): L2/R2 jump (`chapterTarget` in bpcore),
       a Chapters page, the chapter line on Main, bar marks, and the top-panel card (`osd-overlay` id 2). Audiobooks
       (M4B) play as music, with the chapter under the title.
+- [x] **Equalizer and sound effects** (music only): a ten-band equalizer (`eq.*`) with built-in and your own presets,
+      live band edits by `af-command`, and the Sound page's Effects tab: Room, Concert hall, Church and Cave (afir
+      reverbs with impulse responses synthesized in `soundfx.*`, no recordings), Wide stereo and Headphones (crossfeed).
+      The Display popup merges the art and visualizer choices under SELECT.
 - [ ] **On the handheld (needs the hardware):**
   - [ ] Does SDL2's KMSDRM give both panels as two displays, with a GLES window on one and a renderer on the other?
         If not, the bottom panel falls back to raw KMS, as banana-ui uses.

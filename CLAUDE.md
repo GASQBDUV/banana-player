@@ -75,6 +75,12 @@ docs/make-screenshots.sh <library>                   # the README's docs/img/scr
   A graph's still inputs must be single frames, never `loop=-1`: an endless source floods mpv past the song's end
   (its clock stops, so the song never ends, and memory grows by gigabytes; on the handheld, a freeze). Test such a
   graph in mpv with a memory watchdog: the ffmpeg CLI keeps running endless sources even after the output ends.
+  Music's equalizer and effect are one `af`, after the lavfi-complex graph (so the visualizer sees the original sound):
+  `@bpeq` (10 equalizer biquads plus a pre-gain from bpcore's `eqPeakDb`), then `@bpfx` (the effect), built by `syncEq`
+  and `fxPart`. Band edits go live by `af-command` (`syncEq`), which `prop:af` doesn't show. Anything that rebuilds
+  the chain (loadfile, lavfi-complex) needs `syncEq(true)` first. Setting the same af string again is a no-op. Reverb
+  impulse responses are synthesized by bpcore (`soundfx`) and written to the state dir as `ir-<key>.wav`. Display
+  changes are debounced 500 ms (`checkDisplay`).
 - **Photos** play through mpv too (`isPhoto`): `PhotoView` (zoom over Fit or Fill, pan in mpv's `video-pan` units,
   a user turn) is applied as `video-zoom`/`video-pan-*`/`video-rotate`; the geometry is in `photo.cpp`. Fill is done
   by zoom, not `panscan`. Everything set for a photo at `load()` (vf, dscale, zoom/pan/rotate) is reset for a video.
@@ -92,7 +98,7 @@ docs/make-screenshots.sh <library>                   # the README's docs/img/scr
   `video-out-params` of the last file (or the idle window) can't tell.
 - **Chapters** come by `observe_property` (`chapter-list`, `chapter`), as the track list does; `chapterTarget` in bpcore
   computes each L2/R2 jump, a pending chapter covers quick repeated presses, and the L2/R2 card shares `osd-overlay` id 2 with the volume card.
-- **`Ui`** is the whole bottom panel: pages (Main, Tracks (Audio & Subtitles tabs), Chapters, Settings, Browse, Info, About, Exit), START's tabbed
+- **`Ui`** is the whole bottom panel: pages (Main, Tracks (Audio & Subtitles tabs), Chapters, Settings, Browse, Info, About, Exit, Sound (Equalizer & Effects tabs)), START's tabbed
   menu (`inMenu`: Recent, Settings, About, Quit), the Options menu (X), Lock, Screen off. Main over a photo is
   `drawPhoto` (the pan area and `photoBtn`s, ids from `PHOTO_BTN`; `photoPointer`, a flick's glide in `tick()`; a
   drag moves the photo or, `dragBox`, the box). `BACK_ICON` ("<", top left of every page) is B by touch, except
@@ -131,7 +137,7 @@ docs/make-screenshots.sh <library>                   # the README's docs/img/scr
   first.
 - **Library code with no window** (`aspect`, `tracks`, `format`, `substyle`, `settings`, `resume`, `history`,
   `playlist`, `browser`, `png`, `battery`, `photo`, `update`, `backlight`, `netpath`, `servers`, `secret`, `netstore`,
-  `sidecar`, `keyboard`, `ftplist`) builds as `bpcore` and is covered by `tests/core_test.cpp` (a hand-rolled `CHECK_EQ`).
+  `sidecar`, `keyboard`, `ftplist`, `eq`, `soundfx`) builds as `bpcore` and is covered by `tests/core_test.cpp` (a hand-rolled `CHECK_EQ`).
   Keep window/mpv-handle code out of these.
 - **Settings** are an INI-ish `key = value` file. New switches go in `Settings` plus the `REMEMBER` table in
   `settings.cpp`. In `ui.cpp`, the `REMEMBER`/`REMEMBER_LABELS` arrays, `TOGGLES` and the row ids (`TOGGLE_ROW`,

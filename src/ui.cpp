@@ -95,6 +95,20 @@ namespace bp
 	GLYPH(G_BACK, "....##", "...##.", "..##..", ".##...", "##....", ".##...", "..##..", "...##.", "....##")
 GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "###.#####..", "...........",
 		"###.######.", "###.######.")
+	// music: the equalizer (Sound), Loop, and the Display popup's (title only, art + visualizer, the styles)
+	GLYPH(G_EQ, ".#...#...#.", ".#..###..#.", ".#..###..#.", "###..#...#.", "###..#...#.", ".#...#..###", ".#...#..###",
+		".#...#...#.", ".#...#...#.")
+	GLYPH(G_LOOP, ".......#...", ".########..", "#......#...", "#.........#", "#.........#", "...#......#", "..########.",
+		"...#.......")
+	GLYPH(G_TITLE_ONLY, "#########", "#########", ".........", ".#######.", ".........", "..#####..")
+	GLYPH(G_ARTVIZ, "###########", "#.........#", "#......##.#", "#......##.#", "#.........#", "#.....#...#", "#.#...#.#.#",
+		"#.#.#.#.#.#", "#.#.#.#.#.#", "###########")
+	GLYPH(G_VIS_BARS, ".........##", "...##....##", "...##.##.##", "...##.##.##", "##.##.##.##", "##.##.##.##", "##.##.##.##",
+		"##.##.##.##")
+	GLYPH(G_VIS_WAVES, "..##.......", ".#..#......", "#....#.....", ".....#....#", "......#..#.", ".......##..")
+	GLYPH(G_VIS_SPECTRUM, "...#.......", "..###...#..", "..####.###.", ".#########.", ".##########", "###########")
+	GLYPH(G_VIS_CIRCLE, ".....#.....", ".#...#...#.", "..#.....#..", "....###....", "...#...#...", "##.#...#.##", "...#...#...",
+		"....###....", "..#.....#..", ".#...#...#.", ".....#.....")
 #undef GLYPH
 
 	// the two rows of buttons: what each does is the button it stands for
@@ -113,7 +127,7 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 		&Settings::keepNetHistory};
 	static const struct { const char* name; const char* about; } GROUP_NAMES[] = {
 		{"Subtitles", "Font, size, colour"},
-		{"Music", "Display, visualizer"},
+		{"Music", "Display, visualizer, sound"},
 		{"Photos", "Zoom, pan area, drag"},
 		{"Remember", "Position, tracks"},
 		{"Files", "Folders, play history"},
@@ -141,7 +155,31 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 		struct stat st;
 		return stat(path.c_str(), &st) == 0 && S_ISREG(st.st_mode) ? (long long)st.st_size : -1;
 	}
-	static const char* SHOW_SHORT[SHOWS] = {"Art", "Art+Viz", "Viz", "None"};	// MusicShow on a button	// the browser's recent videos: not a folder
+	static const char* SHOW_SHORT[SHOWS] = {"Art", "Both", "Viz", "None"};	// MusicShow on a button
+	static const char* LOOP_SHORT[LOOPS] = {"Off", "All", "One"};		// Loop on a button (beside its mark)
+	static const Ui::Glyph* const VIS_GLYPHS[VISUALIZERS] = {&G_VIS_BARS, &G_VIS_WAVES, &G_VIS_SPECTRUM, &G_VIS_CIRCLE};
+	// a show mode's mark: the visualizer ones take the style's
+	static const Ui::Glyph* showGlyph(int show, int vis)
+	{
+		return show == SHOW_ART ? &G_PICTURE : show == SHOW_NONE ? &G_TITLE_ONLY : VIS_GLYPHS[vis >= 0 && vis < VISUALIZERS ? vis : 0];
+	}
+	// the effects' short names (the song's line, Settings' value), and what each is (the Effects tab)
+	static const char* FX_SHORT[SOUNDFX_COUNT] = {"None", "Room", "Hall", "Church", "Cave", "Wide", "Phones"};
+	static const char* FX_ABOUT[SOUNDFX_COUNT] = {"Just the music", "A small, lively room", "A big hall, a long warm tail",
+		"Stone walls, a very long tail", "Rock walls and echoes", "Wider than the speakers", "Less tiring in headphones"};
+	static const char* CUSTOM_NAME = "Custom";	// an edited curve, not saved (eqPreset "")
+	// the keyboard's field for a preset's name (apart from the form's and the found servers' ids)
+	static const int EQ_NAME = 60;
+	static const char* const LQ = "\xE2\x80\x9C", *const RQ = "\xE2\x80\x9D";	// “ ”
+	static std::string quoted(const std::string& s) { return LQ + s + RQ; }
+	// "Rock", "Custom", "Rock · Hall", "EQ off · Hall", "Off": the sound as one line (Settings' value)
+	static std::string soundSummary(const Settings& s)
+	{
+		std::string preset = s.eqPreset.empty() ? CUSTOM_NAME : s.eqPreset;
+		bool fx = s.soundFx != SoundFx::None;
+		if (!s.eqOn) return fx ? std::string("EQ off \xC2\xB7 ") + FX_SHORT[(int)s.soundFx] : "Off";
+		return fx ? preset + " \xC2\xB7 " + FX_SHORT[(int)s.soundFx] : preset;
+	}
 
 	static std::string baseName(const std::string& p)
 	{
@@ -827,7 +865,7 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 			for (int k = 0; k < STYLE_KEYS; k++) out.push_back(STYLE_ROW0 + k);
 			return out;
 		}
-		case GROUP_MUSIC: return {MUSIC_ROW, VIS_ROW};
+		case GROUP_MUSIC: return {MUSIC_ROW, VIS_ROW, SOUND_ROW};
 		case GROUP_PHOTOS: return {T + 8, PAN_ROW, DRAG_ROW};
 		case GROUP_REMEMBER: return {T + 0, T + 1, T + 2};
 		case GROUP_FILES: return {T + 3, T + 6, T + 4, T + 11, CLEAR_ROW};
@@ -862,8 +900,9 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 	{
 		const int T = TOGGLE_ROW;
 		if (row >= STYLE_ROW0 && row < STYLE_ROW0 + STYLE_KEYS) return "How plain subtitles (SRT, VTT...) look. Styled ones (ASS) keep theirs.";
-		if (row == MUSIC_ROW) return "What the top screen shows while a song plays (SELECT changes it while playing).";
-		if (row == VIS_ROW) return "How the music is drawn: Bars, Waves, Spectrum or Circle (Y while playing).";
+		if (row == MUSIC_ROW) return "What the top screen shows while a song plays (SELECT while playing).";
+		if (row == VIS_ROW) return "How the music is drawn: Bars, Waves, Spectrum or Circle (SELECT while playing).";
+		if (row == SOUND_ROW) return "Equalizer and effects for music (not videos). A opens it";
 		if (row == PAN_ROW) return "Which side the pan area (the small photo) is on.";
 		if (row == DRAG_ROW) return "The box: a drag moves the frame over the small photo. The photo: a drag moves the photo, as on a phone.";
 		if (row == CLEAR_ROW) return "Empties Recent. Press A twice. The places you stopped at are kept.";
@@ -1164,6 +1203,7 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 		if (page == Page::Main && !inMenu && p.playingPhoto())
 			return b == Button::Left || b == Button::Right || b == Button::L || b == Button::R || b == Button::Up || b == Button::Down;
 		if (b == Button::L2 || b == Button::R2) return false;
+		if (displayShown(p)) return false;	// a held key would spin the chips round
 		if (b == Button::Left || b == Button::Right) return page != Page::Tracks && page != Page::Chapters;
 		if (b == Button::L || b == Button::R) return false;	// (the browser's tabs)
 		return page != Page::Main && (b == Button::Up || b == Button::Down);
@@ -1182,27 +1222,19 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 	bool Ui::musicKey(Button b, Player& p)
 	{
 		if (!p.playingAudio()) return false;
+		// Y: a song with chapters, its chapters (as a video's); one without, nothing (its slot is Sound's, by touch)
+		if (b == Button::Y) return p.chapters.empty();
+		if (b == Button::Select)
+		{
+			displayOpen = true;
+			displayRow = 0;
+			return true;
+		}
+		if (b != Button::X) return false;
 		Settings s = p.settings;
-		std::string said;
-		if (b == Button::X)
-		{
-			s.loop = (s.loop + 1) % LOOPS;
-			said = loopLabel(s.loop);
-		}
-		else if (b == Button::Y && p.chapters.empty())
-		{
-			// (a song or audiobook with chapters: Y is its chapters, the visualizer stays in Settings)
-			s.visualizer = (s.visualizer + 1) % VISUALIZERS;
-			said = std::string("Visualizer: ") + visualizerLabel(s.visualizer);
-		}
-		else if (b == Button::Select)
-		{
-			s.musicShow = (s.musicShow + 1) % SHOWS;
-			said = std::string("Show: ") + musicShowLabel(s.musicShow);
-		}
-		else return false;
+		s.loop = (s.loop + 1) % LOOPS;
 		p.setSettings(s);
-		p.osd(said);
+		p.osd(loopLabel(s.loop));
 		return true;
 	}
 
@@ -1210,7 +1242,14 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 	{
 		sameBrightness = p.settings.sameBrightness;
 		if (quickOpen) return quickKey(b, p);
-		if (kbOpen) { kbPress(b); return false; }
+		if (kbOpen)
+		{
+			kbPress(b);
+			if (eqNameSubmit) eqNameDone(p);
+			return false;
+		}
+		displayOpen = displayOpen && displayShown(p);	// (the song gone under it: closed)
+		if (displayOpen) return displayKey(b, p);
 		// Button hotkeys off: the buttons do nothing over a playing video (touch does it all); the pages opened from
 		// there by touch still take them
 		if (page == Page::Main && !p.settings.buttonHotkeys) return false;
@@ -1255,6 +1294,7 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 			}
 			// the tab's page takes the rest (Recent's list, the settings' rows, About's scrolling)
 		}
+		if (page == Page::Sound) return soundKey(b, p);
 		if (page == Page::Settings)
 		{
 			auto rows = settingRows();
@@ -1279,9 +1319,10 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 			{
 			case Button::Up: cursor = (cursor + n - 1) % n; break;
 			case Button::Down: cursor = (cursor + 1) % n; break;
-			case Button::Left: if (setGroup >= 0) changeSetting(rows[cursor], -1, p); break;
+			case Button::Left: if (setGroup >= 0 && rows[cursor] != SOUND_ROW) changeSetting(rows[cursor], -1, p); break;
 			case Button::Right: case Button::A:
 				if (setGroup < 0) openGroup(cursor);
+				else if (rows[cursor] == SOUND_ROW) { openSound(p, true); return false; }
 				else changeSetting(rows[cursor], 1, p);
 				break;
 			case Button::B:
@@ -1561,6 +1602,14 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 		if (id == LINE1_BTN) return {24, LINE1_Y - 12, 592, 24};
 		if (id == LINE2_BTN) return {24, LINE2_Y - 12, 592, 24};
 		if (id == CHAPTER_BTN) return {24, CHAPTER_Y - 14, 592, 24};
+		// Sound's
+		if (id == SOUND_TAB0 || id == SOUND_TAB1) return soundTabRect(id - SOUND_TAB0);
+		if (id == EQ_SWITCH) return {16, 70, 136, 52};
+		if (id == EQ_PREV) return {160, 70, 56, 52};
+		if (id == EQ_NEXT) return {568, 70, 56, 52};
+		if (id == EQ_NAME_ZONE) return {216, 70, 352, 52};
+		if (id == EQ_RESET || id == EQ_SAVE || id == EQ_OPTIONS) return {16 + (id - EQ_RESET) * 206, 400, 196, 32};
+		if (id >= FX_ROW && id < FX_ROW + SOUNDFX_COUNT) return {16, ROW_Y + (id - FX_ROW) * ROW_H, 608, ROW_H - 4};
 		if (id >= PHOTO_BTN) return {0, 0, 0, 0};	// photoBtn's: they move with the pan area
 		if (id == QUIT_BTN) return {468, 428, 148, 44};
 		if (id == EMPTY_BTN) return {200, 300, 240, 52};
@@ -1582,6 +1631,12 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 		if (id == BACK_ICON && (inMenu || (page != Page::Browse && page != Page::Main))) return pressAnyway(Button::B, p);
 		if (id == QUIT_BTN || id == BACK_ICON) return pressAnyway(Button::B, p);
 		if (id == EMPTY_BTN) { openForm(nullptr, nullptr, p); return false; }
+		// a song's line under the buttons, and its Sound button (Y's place, a song with no chapters): the Sound page
+		if (page == Page::Main && p.playingAudio() && (id == LINE1_BTN || (id == 6 && p.chapters.empty() && p.error.empty())))
+		{
+			openSound(p, false);
+			return false;
+		}
 		if (id == LINE1_BTN || id == LINE2_BTN) { openTracks(id == LINE1_BTN ? TRACKS_AUDIO : TRACKS_SUBS, p); return false; }
 		if (id == CHAPTER_BTN) { openChapters(p); return false; }
 		if (id == GROUP_PREV || id == GROUP_NEXT) { stepGroup(id == GROUP_NEXT ? 1 : -1); return false; }
@@ -1621,7 +1676,12 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 	bool Ui::pointer(const Pointer& pt, Player& p)
 	{
 		int x = (int)(pt.x * W), y = (int)(pt.y * H);
-		if (kbOpen && panel.on()) { kbPointer(pt, x, y); return false; }
+		if (kbOpen && panel.on())
+		{
+			kbPointer(pt, x, y);
+			if (eqNameSubmit) eqNameDone(p);
+			return false;
+		}
 		// dark: a touch anywhere brings the panel back, and does nothing else (the finger can't see what's there)
 		if (!panel.on())
 		{
@@ -1640,6 +1700,9 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 		auto barFraction = [&] { return std::clamp((x - BAR.x) / (double)BAR.w, 0.0, 1.0); };
 
 		if (quickOpen) return quickPointer(pt, x, y, p);
+		displayOpen = displayOpen && displayShown(p);
+		if (displayOpen) return displayPointer(pt, x, y, p);
+		if (page == Page::Sound) return soundPointer(pt, x, y, p);
 		// locked, over a video: Screen off goes through; a hold on the lock (draw() times it) releases it; nothing else
 		if (touchLocked && p.playing() && !p.playingPhoto() && page == Page::Main && pressedBtn != SCREEN_BTN)
 		{
@@ -1732,6 +1795,7 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 				if (listScrolled || info) return false;	// the info page only scrolls
 				// a setting: the left of its value (its arrow) steps back, the rest of the row on
 				if (set && setGroup < 0) openGroup(cursor);
+				else if (set && settingRows()[cursor] == SOUND_ROW) openSound(p, true);	// a page, not a value: either side opens it
 				else if (set) changeSetting(settingRows()[cursor], touchX >= SET_ARROW_X - 12 && touchX < 490 ? -1 : 1, p);
 				else choose(cursor, p);
 			}
@@ -1853,6 +1917,8 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 		if (!p.playingAudio() && p.error.empty())
 			for (int id : {LINE1_BTN, LINE2_BTN})
 				if (buttonRect(id).hit(x, y)) { pressedBtn = id; return false; }
+		// a song's: its first line opens Sound
+		if (p.playingAudio() && p.error.empty() && buttonRect(LINE1_BTN).hit(x, y)) { pressedBtn = LINE1_BTN; return false; }
 		// the bar is easier to hit with some room around it
 		if (Rect{BAR.x - 8, BAR.y - 20, BAR.w + 16, BAR.h + 40}.hit(x, y) && p.duration > 0)
 		{
@@ -1898,10 +1964,18 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 		// the chapters: the list, the one playing (the Chapters page's progress goes by the position, above), the tab
 		photo += "|ch" + std::to_string(p.chapterSerial) + " " + std::to_string(p.chapters.size()) + " " +
 			std::to_string(p.currentChapter()) + " t" + std::to_string(tracksTab);
+		// Sound: its tab, the band, the effect under the cursor, its dialogs and the presets' list; the Display popup
+		if (page == Page::Sound || displayOpen)
+		{
+			char sb[160];
+			snprintf(sb, sizeof sb, "|snd%d %d %d %d %d %d %d %d %d %d %d", soundTab, fxCursor, eqBand, eqDialog, eqDlgCursor, eqListScroll,
+				displayShown(p) ? displayRow : -1, p.eqPresetSerial(), p.playingAudio(), stashOn, eqTouch);
+			photo += sb;
+		}
 		// the dots of "Loading..." go round
 		if (p.loading() || p.thumbPending()) photo += "|loading" + std::to_string(SDL_GetTicks() / 400 % 4);
 		return buf + photo + p.title + "|" + p.error + "|" + serializeSettings(p.settings) + "|bat" + std::to_string(battery.percent) + (battery.charging ? "c" : "") + (inMenu ? "|menu" + std::to_string(menuTab) : "") + (ctxOpen ? "|ctx" + std::to_string(ctxCursor) + std::to_string(pressedBtn) + ctxStatus + (ctxArmed ? "!" : "") : "") + upd
-			+ (kbOpen ? "|kb" + std::to_string(kbCursor) + "," + std::to_string(kbPressed) + "," + std::to_string((int)kbShift) + (kbSymbols ? "s" : "") + std::to_string(kbEdit.caret) + kbEdit.text + (kbCaretShown() ? "|" : "") : "");
+			+ (kbOpen ? "|kb" + eqNameNote + std::to_string(kbCursor) + "," + std::to_string(kbPressed) + "," + std::to_string((int)kbShift) + (kbSymbols ? "s" : "") + std::to_string(kbEdit.caret) + kbEdit.text + (kbCaretShown() ? "|" : "") : "");
 	}
 
 	SDL_Texture* Ui::text(const std::string& s, int size, SDL_Color c)
@@ -2077,8 +2151,10 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 		else if (page == Page::Exit) drawExit(p);
 		else if (page == Page::Settings) drawSettings(p);
 		else if (page == Page::Chapters) drawChapters(p);
+		else if (page == Page::Sound) drawSound(p);
 		else if (page != Page::Main) drawTracks(p);
 		else drawMain(p);
+		if (displayShown(p)) drawDisplay(p);
 		if (inMenu) drawTabs();
 		if (ctxOpen && page == Page::Browse) drawBrowseMenu();
 		if (popupShown(p)) drawUpdatePopup();
@@ -2883,6 +2959,15 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 				drawTextMid(value, 1, at ? YELLOW : DIM_TEAL, 608, mid, 260, 1);
 				continue;
 			}
+			if (row == SOUND_ROW)
+			{
+				// a page of its own: what it's set to, and a chevron (no arrows: nothing to step)
+				drawTextMid("Sound", 1, at ? YELLOW : CREAM, 32, mid, 320);
+				drawTextMid(soundSummary(p.settings), 1, at ? YELLOW : p.settings.eqOn || p.settings.soundFx != SoundFx::None ? CREAM : DIM,
+					584, mid, 240, 1);
+				drawGlyphMid(G_RIGHT, 604, mid, at ? YELLOW : DIM);
+				continue;
+			}
 			if (row == CLEAR_ROW)
 			{
 				// an action, not a value: no arrows
@@ -2959,8 +3044,11 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 		}
 		auto lines = wrapText(help, 0, 592, 2);
 		for (size_t i = 0; i < lines.size(); i++) drawTextMid(lines[i], 0, helpInk, 24, HELP_Y + (int)i * 22, 592);
-		bool action = cursor < (int)rows.size() && (rows[cursor] == CHECK_ROW || rows[cursor] == INSTALL_ROW || rows[cursor] == CLEAR_ROW);
-		if (action) drawHints({{"A", rows[cursor] == CLEAR_ROW ? "Clear" : rows[cursor] == CHECK_ROW ? "Check" : "Update"}, {"UP/DOWN", "Choose"}, {"Y/X", "Group"}, {"B", "Back"}});
+		bool action = cursor < (int)rows.size() && (rows[cursor] == CHECK_ROW || rows[cursor] == INSTALL_ROW || rows[cursor] == CLEAR_ROW ||
+			rows[cursor] == SOUND_ROW);
+		if (action)
+			drawHints({{"A", rows[cursor] == CLEAR_ROW ? "Clear" : rows[cursor] == CHECK_ROW ? "Check" : rows[cursor] == SOUND_ROW ? "Open" : "Update"},
+				{"UP/DOWN", "Choose"}, {"Y/X", "Group"}, {"B", "Back"}});
 		else drawHints({{"UP/DOWN", "Choose"}, {"LEFT/RIGHT", "Change"}, {"Y/X", "Group"}, {"B", "Back"}});
 	}
 
@@ -3243,10 +3331,15 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 				case Button::A: label = p.paused || err ? "Play" : "Pause"; g = p.paused || err ? &G_PLAY : &G_PAUSE; break;
 				case Button::Right: label = "+10s"; break;
 				case Button::R: label = "Next"; g = &G_NEXT; off = p.index() + 1 >= p.count(); break;
-				// music: loop, visualizer, what's shown; a video: audio, subtitles, picture size
-				case Button::X: label = p.playingAudio() ? loopLabel(p.settings.loop) : ""; break;
-				case Button::Y: label = p.playingAudio() && p.chapters.empty() ? visualizerLabel(p.settings.visualizer) : ""; break;
-				case Button::Select: label = p.playingAudio() ? SHOW_SHORT[p.settings.musicShow] : aspectName(p.aspect); break;
+				// music: loop, Sound (or chapters), the Display popup; a video: audio, subtitles, picture size
+				case Button::X:
+					if (p.playingAudio()) { label = LOOP_SHORT[std::clamp(p.settings.loop, 0, LOOPS - 1)]; g = &G_LOOP; }
+					break;
+				case Button::Select:
+					if (!p.playingAudio()) { label = aspectName(p.aspect); break; }
+					label = SHOW_SHORT[std::clamp(p.settings.musicShow, 0, SHOWS - 1)];
+					g = showGlyph(p.settings.musicShow, p.settings.visualizer);
+					break;
 				case Button::Up: label = speedLabel(p.speed); break;
 				default: label = "Menu"; break;
 				}
@@ -3275,6 +3368,14 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 					}
 					drawButton(b, &G_CHAPTERS, num, key, off || n == 0, 1);
 				}
+				else if (which == Button::Y)
+				{
+					// a song with no chapters: Sound, by touch only (no key: Y does nothing here). "On" while the
+					// equalizer or an effect is; both off, all of it dim
+					bool on = (p.settings.eqOn || p.settings.soundFx != SoundFx::None) && !off;
+					drawButton({b.x, b.y, b.w, b.h * 4 / 5}, &G_EQ, on ? "On" : "Off", nullptr, !on, 1);
+					drawTextMid("Sound", 0, on ? DIM_TEAL : DIM, b.x + b.w / 2, b.y + b.h * 4 / 5 - 2, b.w - 6, 2);
+				}
 				// the button it stands for, while the buttons work here (Button hotkeys); else the name alone, centred
 				else drawButton(b, g, label, key, off, 1);
 			}
@@ -3298,9 +3399,47 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 		};
 		if (!err)
 		{
-			if (video) lineEnd(LINE1_BTN, LINE1_Y);
+			lineEnd(LINE1_BTN, LINE1_Y);
+			int trackW = 540;
+			if (!video)
+			{
+				// a song's line opens Sound: on its right what it's set to ("Rock", "Rock · Hall", "EQ off · Hall",
+				// "EQ off"), the effect drawn first and the preset cut to what's left of 180
+				const Settings& st = p.settings;
+				bool fx = st.soundFx != SoundFx::None;
+				auto w = [&](const std::string& t, int maxW) { return std::min(maxW, (int)std::lround(textWidth(t, 0) / sx)); };
+				int x = 592;
+				if (!st.eqOn && !fx)
+				{
+					drawTextMid("EQ off", 0, DIM, x, LINE1_Y, 0, 1);
+					x -= w("EQ off", 180);
+				}
+				else
+				{
+					if (fx)
+					{
+						std::string tail = std::string(st.eqOn ? " \xC2\xB7 " : "") + FX_SHORT[(int)st.soundFx];
+						drawTextMid(tail, 0, CREAM, x, LINE1_Y, 0, 1);
+						x -= w(tail, 180);
+					}
+					if (!st.eqOn)
+					{
+						drawTextMid("EQ off \xC2\xB7 ", 0, DIM, x, LINE1_Y, 0, 1);
+						x -= w("EQ off \xC2\xB7 ", 180);
+					}
+					else
+					{
+						std::string preset = st.eqPreset.empty() ? CUSTOM_NAME : st.eqPreset;
+						int room = std::max(40, 180 - (592 - x));
+						drawTextMid(preset, 0, CREAM, x, LINE1_Y, room, 1);
+						x -= w(preset, room);
+					}
+				}
+				drawGlyphMid(G_EQ, x - 8 - glyphW(G_EQ) / 2, LINE1_Y, DIM);
+				trackW = x - 8 - glyphW(G_EQ) - 12 - 52;
+			}
 			drawGlyphMid(G_SPEAKER, 33, LINE1_Y, DIM);
-			drawTextMid(label(a, TrackType::Audio), 0, CREAM, 52, LINE1_Y, video ? 540 : 564);
+			drawTextMid(label(a, TrackType::Audio), 0, CREAM, 52, LINE1_Y, trackW);
 		}
 		if (err) {}
 		else if (p.playingAudio())
@@ -3384,6 +3523,7 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 		case FORM_FOLDER: return "Folder";
 		case FORM_USER: return "User";
 		case FORM_PASS: return "Password";
+		case EQ_NAME: return "Preset name";
 		default: return "";
 		}
 	}
@@ -3598,6 +3738,12 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 
 	void Ui::kbClose(bool keep)
 	{
+		if (kbField == EQ_NAME)
+		{
+			// Done: checked by the player first (eqNameDone), which closes it or says what's wrong
+			if (keep) { eqNameSubmit = true; return; }
+			eqNameNote.clear();
+		}
 		kbOpen = false;
 		kbPressed = -1;
 		if (!keep) { browseVersion++; return; }
@@ -3733,6 +3879,7 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 		if (!before.empty()) drawTextMid(before, 1, CREAM, 32, 124, 580);
 		if (kbCaretShown()) fill({caretX, 108, 3, 32}, YELLOW);
 		if (!after.empty()) drawTextMid(after, 1, CREAM, caretX + 5, 124, std::max(0, 580 - (caretX + 5 - 32)));
+		if (kbField == EQ_NAME && !eqNameNote.empty()) drawTextMid(eqNameNote, 0, YELLOW, 24, 176, 592);
 		drawHints({{"A", "Type"}, {"B", "Delete"}, {"X", "Space"}, {"Y", "Shift"}, {"L/R", "Move"}, {"START", "Done"}});
 		auto keys = kbKeys();
 		for (int i = 0; i < (int)keys.size(); i++)
@@ -3743,6 +3890,869 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 			bool special = k.action != KeyAction::Text;
 			fill(r, kbPressed == i ? PRESSED : at ? YELLOW : special ? SDL_Color{0x1E, 0x33, 0x37, 255} : TEAL);
 			drawTextMid(k.label, 1, at ? BG : on ? YELLOW : CREAM, r.x + r.w / 2, r.y + r.h / 2, r.w - 4, 2);
+		}
+	}
+
+	// ---- music: the Display popup (SELECT over a song) ----
+
+	void Ui::displaySet(int row, int value, Player& p)
+	{
+		Settings s = p.settings;
+		if (row == 0) s.musicShow = (value % SHOWS + SHOWS) % SHOWS;
+		else s.visualizer = (value % VISUALIZERS + VISUALIZERS) % VISUALIZERS;
+		if (s.musicShow != p.settings.musicShow || s.visualizer != p.settings.visualizer) p.setSettings(s);
+	}
+
+	bool Ui::displayKey(Button b, Player& p)
+	{
+		int now = displayRow ? p.settings.visualizer : p.settings.musicShow;
+		switch (b)
+		{
+		case Button::Up: case Button::Down: displayRow = 1 - displayRow; break;
+		case Button::Left: case Button::Right: displaySet(displayRow, now + (b == Button::Right ? 1 : -1), p); break;
+		case Button::Select: displaySet(0, p.settings.musicShow + 1, p); break;
+		case Button::A: case Button::B: displayOpen = false; break;
+		default: break;
+		}
+		return false;
+	}
+
+	bool Ui::displayPointer(const Pointer& pt, int x, int y, Player& p)
+	{
+		if (pt.kind == Pointer::Down)
+		{
+			pressedBtn = -1;
+			// outside: closed ("<" too), the finger lifting presses nothing
+			if (!Rect{32, 84, 576, 300}.hit(x, y))
+			{
+				displayOpen = false;
+				swallowTouch = true;
+				return false;
+			}
+			for (int r = 0; r < 2; r++)
+				for (int i = 0; i < 4; i++)
+					if (displayChip(r, i).hit(x, y))
+					{
+						pressedBtn = CHIP_BTN + r * 4 + i;
+						displayRow = r;
+					}
+			return false;
+		}
+		if (pt.kind == Pointer::Up && pressedBtn >= CHIP_BTN && pressedBtn < CHIP_BTN + 8)
+		{
+			int id = pressedBtn - CHIP_BTN;
+			pressedBtn = -1;
+			if (displayChip(id / 4, id % 4).hit(x, y)) displaySet(id / 4, id % 4, p);
+		}
+		return false;
+	}
+
+	void Ui::drawDisplay(const Player& p)
+	{
+		static const char* SHOW_NAMES[SHOWS] = {"Album art", "Art + viz", "Visualizer", "None"};
+		static const char* STYLE_NAMES[VISUALIZERS] = {"Bars", "Waves", "Spectrum", "Circle"};
+		drawDialog({32, 84, 576, 300}, "Display");
+		int show = std::clamp(p.settings.musicShow, 0, SHOWS - 1), vis = std::clamp(p.settings.visualizer, 0, VISUALIZERS - 1);
+		// the art alone, or the title alone: no visualizer, its style muted (still changeable, for later)
+		bool muted = show == SHOW_ART || show == SHOW_NONE;
+		for (int r = 0; r < 2; r++)
+		{
+			int rowY = displayChip(r, 0).y;
+			bool focus = r == displayRow;
+			drawTextMid(r ? "Style" : "Show", 0, focus ? YELLOW : CREAM, 52, rowY - 14, 200);
+			if (focus) fill({36, rowY, 4, 64}, YELLOW);
+			for (int i = 0; i < 4; i++)
+			{
+				Rect c = displayChip(r, i);
+				bool sel = i == (r ? vis : show), dim = r && muted;
+				SDL_Color bg = pressedBtn == CHIP_BTN + r * 4 + i ? PRESSED : sel ? (dim ? DIM : YELLOW) : dim ? SDL_Color{0x2A, 0x29, 0x33, 255} : TEAL;
+				SDL_Color ink = sel ? BG : dim ? DIM : CREAM;
+				fill(c, bg);
+				const Glyph* g = r ? VIS_GLYPHS[i] : i == SHOW_BOTH ? &G_ARTVIZ : showGlyph(i, vis);
+				drawGlyphMid(*g, c.x + c.w / 2, c.y + 20, ink);
+				drawTextMid(r ? STYLE_NAMES[i] : SHOW_NAMES[i], 0, ink, c.x + c.w / 2, c.y + 46, 122, 2);
+			}
+		}
+		const char* help = show == SHOW_ART ? "The style shows with Art + viz or Visualizer"
+			: show == SHOW_BOTH ? (vis == VIS_CIRCLE ? "Bars round a ring, the art inside it" : "The visualizer over the bottom of the art")
+			: show == SHOW_VIS ? "The visualizer alone" : "Just the title: the lightest on the battery";
+		drawTextMid(help, 0, DIM, W / 2, 352, 544, 2);
+		drawHints({{"D-PAD", "Change"}, {"SELECT", "Show"}, {"B", "Done"}});
+	}
+
+	// ---- music: the Sound page (Equalizer, Effects) ----
+
+	void Ui::openSound(Player& p, bool fromSettings)
+	{
+		// from Settings (START's menu or not): B goes back there; the page has tabs of its own, so the menu's are put away
+		soundFromSettings = fromSettings;
+		soundFromMenu = fromSettings && inMenu;
+		inMenu = false;
+		styleFromSubs = false;
+		page = Page::Sound;
+		eqDialog = EQD_NONE;
+		eqTouch = eqListTouch = false;
+		pressedBtn = -1;
+		fxCursor = std::clamp((int)p.settings.soundFx, 0, SOUNDFX_COUNT - 1);
+	}
+
+	void Ui::closeSound(Player& p)
+	{
+		// the curve as it stands made what mpv keeps, and written
+		p.commitEq();
+		eqDialog = EQD_NONE;
+		eqTouch = false;
+		if (!soundFromSettings)
+		{
+			page = home(p);
+			return;
+		}
+		page = Page::Settings;
+		inMenu = soundFromMenu;
+		if (inMenu) menuTab = TAB_SETTINGS;
+		setGroup = GROUP_MUSIC;
+		cursor = std::max(0, rowsIndexOf(settingRows(), SOUND_ROW));
+		scroll = 0;
+	}
+
+	bool Ui::eqIsUser(const Player& p, const std::string& name) const
+	{
+		for (auto& u : p.eqUserPresets())
+			if (u.name == name) return true;
+		return false;
+	}
+
+	bool Ui::eqOriginIsUser(const Player& p) const
+	{
+		return eqCustom(p) && !p.settings.eqOrigin.empty() && eqIsUser(p, p.settings.eqOrigin);
+	}
+
+	bool Ui::eqCanReset(const Player& p) const
+	{
+		if (!eqCustom(p) || p.settings.eqOrigin.empty()) return false;
+		for (auto& e : p.eqPresets())
+			if (e.name == p.settings.eqOrigin) return true;
+		return false;
+	}
+
+	std::vector<std::string> Ui::eqCycle(const Player& p) const
+	{
+		std::vector<std::string> out;
+		for (auto& e : p.eqPresets()) out.push_back(e.name);
+		if (eqCustom(p) || stashOn) out.push_back(CUSTOM_NAME);
+		return out;
+	}
+
+	void Ui::eqPick(const std::string& name, Player& p)
+	{
+		Settings s = p.settings;
+		if (name == CUSTOM_NAME)
+		{
+			// Custom back as it was put aside
+			if (!eqCustom(p) && stashOn)
+			{
+				s.eqPreset.clear();
+				s.eqOrigin = stashOrigin;
+				s.eqGains = stashGains;
+				stashOn = false;
+			}
+		}
+		else
+		{
+			const EqPreset* pr = nullptr;
+			for (auto& e : p.eqPresets())
+				if (e.name == name) pr = &e;
+			if (!pr) return;
+			// Custom put aside, not lost: still in the cycle and the list
+			if (eqCustom(p))
+			{
+				stashOn = true;
+				stashOrigin = s.eqOrigin;
+				stashGains = s.eqGains;
+			}
+			s.eqPreset = pr->name;
+			s.eqOrigin.clear();
+			s.eqGains = pr->gains;
+		}
+		s.eqOn = true;	// picking one is wanting it on
+		p.setSettings(s);
+		p.showEqCard();
+	}
+
+	void Ui::eqStep(int dir, Player& p)
+	{
+		auto c = eqCycle(p);
+		int n = (int)c.size(), at = -1;
+		if (eqCustom(p)) at = n - 1;
+		else
+			for (int i = 0; i < n; i++)
+				if (c[i] == p.settings.eqPreset) at = i;
+		if (n == 0) return;
+		eqPick(c[at < 0 ? (dir > 0 ? 0 : n - 1) : (at + dir + n) % n], p);
+	}
+
+	void Ui::eqSetBand(int band, double gain, Player& p)
+	{
+		if (band < 0 || band >= EQ_BANDS) return;
+		gain = clampEqGain(gain);
+		Settings s = p.settings;
+		if (s.eqGains[band] == gain) return;
+		// the first edit of a preset: Custom, made from it (a Custom put aside before is replaced: there's one)
+		if (!eqCustom(p))
+		{
+			s.eqOrigin = s.eqPreset;
+			s.eqPreset.clear();
+			stashOn = false;
+		}
+		s.eqOn = true;
+		s.eqGains[band] = gain;
+		// heard at once, written when the page closes (commitEq): a drag is many of these
+		p.setSettings(s, false);
+	}
+
+	void Ui::eqReset(Player& p)
+	{
+		if (!eqCanReset(p)) return;
+		Settings s = p.settings;
+		for (auto& e : p.eqPresets())
+			if (e.name == s.eqOrigin) s.eqGains = e.gains;
+		s.eqPreset = s.eqOrigin;
+		s.eqOrigin.clear();
+		stashOn = false;
+		p.setSettings(s);
+		p.showEqCard();
+	}
+
+	void Ui::eqToggle(Player& p)
+	{
+		Settings s = p.settings;
+		s.eqOn = !s.eqOn;
+		p.setSettings(s);
+		p.showEqCard();
+	}
+
+	void Ui::eqSave(Player& p)
+	{
+		if (!eqCustom(p)) return;	// Saved: nothing to save
+		if (eqOriginIsUser(p))
+		{
+			// over the preset of yours it came from: Custom goes, that one plays
+			std::string name = p.settings.eqOrigin;
+			if (p.saveEqPreset(name, p.settings.eqGains, true) == EqNameError::None) p.osd("Saved " + quoted(name));
+			return;
+		}
+		eqNameOpen(false, p);
+	}
+
+	void Ui::eqNameOpen(bool rename, Player& p)
+	{
+		eqRenaming = rename;
+		eqNameNote.clear();
+		eqNameSubmit = false;
+		std::string text;
+		if (rename)
+		{
+			eqRenameFrom = p.settings.eqPreset;
+			text = eqRenameFrom;
+		}
+		else
+		{
+			// "Rock 2" (or the first number free); a curve from nowhere, "My preset"
+			std::string base = eqCustom(p) ? p.settings.eqOrigin : p.settings.eqPreset;
+			bool none = base.empty();
+			if (none) base = "My preset";
+			text = none ? base : base + " 2";
+			for (int n = 2; n < 100 && checkEqPresetName(text, p.eqUserPresets()) == EqNameError::Taken; n++)
+				text = base + " " + std::to_string(none ? n : n + 1);
+		}
+		openKeyboard(EQ_NAME, text);
+	}
+
+	void Ui::eqNameDone(Player& p)
+	{
+		eqNameSubmit = false;
+		std::string name = trimmed(kbEdit.text);
+		EqNameError e = eqRenaming ? p.renameEqPreset(eqRenameFrom, name) : p.saveEqPreset(name, p.settings.eqGains, false);
+		switch (e)
+		{
+		case EqNameError::None:
+			eqNameNote.clear();
+			kbOpen = false;
+			kbPressed = -1;
+			if (eqRenaming && stashOrigin == eqRenameFrom) stashOrigin = name;
+			p.osd(eqRenaming ? "Renamed to " + quoted(name) : "Saved " + quoted(name));
+			return;
+		// what's wrong, under the field; the keyboard stays up to put it right
+		case EqNameError::Empty: eqNameNote = "Type a name"; break;
+		case EqNameError::TooLong: eqNameNote = "24 characters at most"; break;
+		case EqNameError::Builtin: eqNameNote = quoted(name) + " is a built-in name"; break;
+		case EqNameError::Taken: eqNameNote = "You have one called " + quoted(name); break;
+		default: eqNameNote = "That name can't be used"; break;
+		}
+		kbActiveAt = SDL_GetTicks();
+	}
+
+	std::vector<int> Ui::eqOptions(const Player& p) const
+	{
+		if (eqCustom(p))
+		{
+			std::vector<int> o = {EQO_LIST};
+			if (eqOriginIsUser(p)) o.push_back(EQO_SAVE_TO);
+			o.push_back(EQO_SAVE_AS);
+			if (eqCanReset(p)) o.push_back(EQO_RESET);
+			o.push_back(EQO_CANCEL);
+			return o;
+		}
+		if (eqIsUser(p, p.settings.eqPreset)) return {EQO_LIST, EQO_SAVE_AS, EQO_RENAME, EQO_DELETE, EQO_CANCEL};
+		return {EQO_LIST, EQO_SAVE_AS, EQO_CANCEL};
+	}
+
+	void Ui::eqChooseOption(int item, Player& p)
+	{
+		auto items = eqOptions(p);
+		int what = item >= 0 && item < (int)items.size() ? items[item] : EQO_CANCEL;
+		eqDialog = EQD_NONE;
+		switch (what)
+		{
+		case EQO_LIST: openEqList(p); break;
+		case EQO_SAVE_TO: eqSave(p); break;
+		case EQO_SAVE_AS: eqNameOpen(false, p); break;
+		case EQO_RENAME: eqNameOpen(true, p); break;
+		case EQO_DELETE:
+			eqDialog = EQD_DELETE;
+			eqDlgCursor = 1;	// on Cancel: a preset gone for good wants a step more
+			break;
+		case EQO_RESET: eqReset(p); break;
+		default: break;
+		}
+	}
+
+	std::vector<Ui::EqEntry> Ui::eqEntries(const Player& p) const
+	{
+		std::vector<EqEntry> e;
+		e.push_back({0, "Built-in"});
+		for (auto& pr : p.eqPresets())
+			if (pr.builtin) e.push_back({1, pr.name});
+		if (!p.eqUserPresets().empty())
+		{
+			e.push_back({0, "Yours"});
+			for (auto& pr : p.eqUserPresets()) e.push_back({1, pr.name});
+		}
+		if (eqCustom(p) || stashOn)
+		{
+			e.push_back({0, "Unsaved"});
+			e.push_back({2, CUSTOM_NAME});
+		}
+		return e;
+	}
+
+	// the list's room: y 84 to 404, a header 28 tall, a preset 38
+	static const int EQ_LIST_TOP = 84, EQ_LIST_END = 404;
+
+	int Ui::eqListBottom(const std::vector<EqEntry>& e, int first) const
+	{
+		int y = EQ_LIST_TOP, i = first;
+		for (; i < (int)e.size(); i++)
+		{
+			int h = e[i].kind ? 38 : 28;
+			if (y + h > EQ_LIST_END) break;
+			y += h;
+		}
+		return i;
+	}
+
+	void Ui::eqListFit(const Player& p)
+	{
+		auto e = eqEntries(p);
+		int n = (int)e.size(), c = std::clamp(eqDlgCursor, 0, std::max(0, n - 1));
+		int maxScroll = 0;
+		while (maxScroll < n && eqListBottom(e, maxScroll) < n) maxScroll++;
+		// its section's header in view with it, where it can be
+		if (c < eqListScroll + 1) eqListScroll = c > 0 && e[c - 1].kind == 0 ? c - 1 : c;
+		while (eqListScroll < c && eqListBottom(e, eqListScroll) <= c) eqListScroll++;
+		eqListScroll = std::clamp(eqListScroll, 0, maxScroll);
+	}
+
+	void Ui::eqListMove(int dir, const Player& p)
+	{
+		auto e = eqEntries(p);
+		int n = (int)e.size();
+		for (int k = 0, c = eqDlgCursor; k < n; k++)
+		{
+			c = (c + dir + n) % n;
+			if (e[c].kind) { eqDlgCursor = c; break; }
+		}
+		eqListFit(p);
+	}
+
+	void Ui::openEqList(const Player& p)
+	{
+		eqDialog = EQD_LIST;
+		eqListScroll = 0;
+		eqDlgCursor = 1;
+		auto e = eqEntries(p);
+		for (int i = 0; i < (int)e.size(); i++)
+			if ((e[i].kind == 2 && eqCustom(p)) || (e[i].kind == 1 && !eqCustom(p) && e[i].name == p.settings.eqPreset)) eqDlgCursor = i;
+		eqListFit(p);
+	}
+
+	void Ui::fxChoose(int i, Player& p)
+	{
+		if (i < 0 || i >= SOUNDFX_COUNT) return;
+		fxCursor = i;
+		Settings s = p.settings;
+		if (s.soundFx != (SoundFx)i)
+		{
+			s.soundFx = (SoundFx)i;
+			p.setSettings(s);
+		}
+		p.showEqCard();
+	}
+
+	bool Ui::soundKey(Button b, Player& p)
+	{
+		if (eqDialog == EQD_OPTIONS || eqDialog == EQD_DELETE)
+		{
+			int n = eqDialog == EQD_OPTIONS ? (int)eqOptions(p).size() : 2;
+			eqDlgCursor = std::clamp(eqDlgCursor, 0, n - 1);
+			switch (b)
+			{
+			case Button::Up: eqDlgCursor = (eqDlgCursor + n - 1) % n; break;
+			case Button::Down: eqDlgCursor = (eqDlgCursor + 1) % n; break;
+			case Button::A:
+				if (eqDialog == EQD_OPTIONS) eqChooseOption(eqDlgCursor, p);
+				else
+				{
+					eqDialog = EQD_NONE;
+					if (eqDlgCursor == 0)
+					{
+						// the one playing: Custom now, the same curve (nothing heard changes)
+						std::string name = p.settings.eqPreset;
+						if (p.deleteEqPreset(name))
+						{
+							if (stashOrigin == name) stashOrigin.clear();
+							p.showEqCard();
+							p.osd("Deleted " + quoted(name));
+						}
+					}
+				}
+				break;
+			case Button::B: case Button::Start: eqDialog = EQD_NONE; break;
+			default: break;
+			}
+			return false;
+		}
+		if (eqDialog == EQD_LIST)
+		{
+			switch (b)
+			{
+			case Button::Up: case Button::Down: eqListMove(b == Button::Down ? 1 : -1, p); break;
+			case Button::A:
+			{
+				auto e = eqEntries(p);
+				eqDialog = EQD_NONE;
+				if (eqDlgCursor >= 0 && eqDlgCursor < (int)e.size() && e[eqDlgCursor].kind) eqPick(e[eqDlgCursor].name, p);
+				break;
+			}
+			case Button::B: case Button::Start: eqDialog = EQD_NONE; break;
+			default: break;
+			}
+			return false;
+		}
+		// L/R: the tabs (L the left one, R the right one), on either tab
+		if (b == Button::L || b == Button::R)
+		{
+			soundTab = b == Button::R ? SOUND_FX : SOUND_EQ;
+			return false;
+		}
+		if (b == Button::B)
+		{
+			closeSound(p);
+			return false;
+		}
+		if (soundTab == SOUND_FX)
+		{
+			switch (b)
+			{
+			case Button::Up: fxCursor = (fxCursor + SOUNDFX_COUNT - 1) % SOUNDFX_COUNT; break;
+			case Button::Down: fxCursor = (fxCursor + 1) % SOUNDFX_COUNT; break;
+			case Button::A: fxChoose(fxCursor, p); break;
+			default: break;
+			}
+			return false;
+		}
+		switch (b)
+		{
+		case Button::Left: eqBand = std::max(0, eqBand - 1); break;
+		case Button::Right: eqBand = std::min(EQ_BANDS - 1, eqBand + 1); break;
+		case Button::Up: case Button::Down: eqSetBand(eqBand, p.settings.eqGains[eqBand] + (b == Button::Up ? 1 : -1), p); break;
+		// Y (west) the preset before, X the one after
+		case Button::Y: case Button::X: eqStep(b == Button::X ? 1 : -1, p); break;
+		case Button::Select: eqToggle(p); break;
+		case Button::A: eqSave(p); break;
+		case Button::Start:
+			eqDialog = EQD_OPTIONS;
+			eqDlgCursor = 0;
+			break;
+		default: break;
+		}
+		return false;
+	}
+
+	bool Ui::soundPointer(const Pointer& pt, int x, int y, Player& p)
+	{
+		Uint32 now = SDL_GetTicks();
+		auto offBox = [&](Rect box) {
+			// a finger outside a dialog closes it (and its lift presses nothing)
+			if (box.hit(x, y)) return false;
+			eqDialog = EQD_NONE;
+			pressedBtn = -1;
+			swallowTouch = true;
+			return true;
+		};
+		if (eqDialog == EQD_LIST)
+		{
+			auto e = eqEntries(p);
+			auto entryAt = [&](int py) {
+				int ey = EQ_LIST_TOP, end = eqListBottom(e, eqListScroll);
+				for (int i = eqListScroll; i < end; i++)
+				{
+					int h = e[i].kind ? 38 : 28;
+					if (py >= ey && py < ey + h) return e[i].kind ? i : -1;
+					ey += h;
+				}
+				return -1;
+			};
+			if (pt.kind == Pointer::Down)
+			{
+				if (offBox({96, 22, 448, 392})) return false;
+				pressedBtn = -1;
+				eqListTouch = true;
+				listScrolled = false;
+				touchStartY = y;
+				scrollStart = eqListScroll;
+				int i = entryAt(y);
+				if (i >= 0) pressedBtn = DLG_ROW + i;
+				return false;
+			}
+			if (!eqListTouch) return false;
+			if (pt.kind == Pointer::Move && (listScrolled || std::abs(y - touchStartY) > 12))
+			{
+				// a drag scrolls it
+				listScrolled = true;
+				pressedBtn = -1;
+				int maxScroll = 0, n = (int)e.size();
+				while (maxScroll < n && eqListBottom(e, maxScroll) < n) maxScroll++;
+				eqListScroll = std::clamp(scrollStart + (int)std::lround((touchStartY - y) / 38.0), 0, maxScroll);
+			}
+			else if (pt.kind == Pointer::Up)
+			{
+				eqListTouch = false;
+				int i = pressedBtn - DLG_ROW;
+				pressedBtn = -1;
+				if (!listScrolled && i >= 0 && entryAt(y) == i)
+				{
+					eqDlgCursor = i;
+					eqDialog = EQD_NONE;
+					eqPick(e[i].name, p);
+				}
+			}
+			return false;
+		}
+		if (eqDialog == EQD_OPTIONS || eqDialog == EQD_DELETE)
+		{
+			bool opts = eqDialog == EQD_OPTIONS;
+			int n = opts ? (int)eqOptions(p).size() : 2;
+			auto row = [&](int i) { return opts ? eqOptRow(i, p) : Rect{128, 196 + i * 52, 384, 46}; };
+			if (pt.kind == Pointer::Down)
+			{
+				if (offBox(opts ? eqOptBox(p) : Rect{112, 116, 416, 204})) return false;
+				pressedBtn = -1;
+				for (int i = 0; i < n; i++)
+					if (row(i).hit(x, y)) pressedBtn = DLG_ROW + i;
+			}
+			else if (pt.kind == Pointer::Up && pressedBtn >= DLG_ROW)
+			{
+				int i = pressedBtn - DLG_ROW;
+				pressedBtn = -1;
+				if (i < n && row(i).hit(x, y))
+				{
+					eqDlgCursor = i;
+					soundKey(Button::A, p);
+				}
+			}
+			return false;
+		}
+		if (eqTouch)
+		{
+			// a finger on a band: the gain follows it
+			if (pt.kind == Pointer::Move)
+			{
+				if (std::abs(y - eqDownY) > 8) eqMoved = true;
+				eqSetBand(eqBand, std::round((264 - y) / 8.0), p);
+			}
+			else if (pt.kind == Pointer::Up)
+			{
+				eqTouch = false;
+				// two taps on it, no drag: back to 0 dB
+				if (!eqMoved && eqTapAt && now - eqTapAt < 350 && eqTapBand == eqBand)
+				{
+					eqSetBand(eqBand, 0, p);
+					eqTapAt = 0;
+				}
+				else
+				{
+					eqTapAt = eqMoved ? 0 : now;
+					eqTapBand = eqBand;
+				}
+			}
+			return false;
+		}
+		if (pressedBtn >= 0)
+		{
+			// a button acts as the finger lifts on it
+			if (pt.kind != Pointer::Up) return false;
+			int id = pressedBtn;
+			pressedBtn = -1;
+			if (!buttonRect(id).hit(x, y)) return false;
+			if (id == BACK_ICON) closeSound(p);
+			else if (id == SOUND_TAB0 || id == SOUND_TAB1) soundTab = id - SOUND_TAB0;
+			else if (id >= FX_ROW && id < FX_ROW + SOUNDFX_COUNT) fxChoose(id - FX_ROW, p);
+			else if (id == EQ_SWITCH) eqToggle(p);
+			else if (id == EQ_PREV || id == EQ_NEXT) eqStep(id == EQ_NEXT ? 1 : -1, p);
+			else if (id == EQ_NAME_ZONE) openEqList(p);
+			else if (id == EQ_RESET) eqReset(p);
+			else if (id == EQ_SAVE) eqSave(p);
+			else if (id == EQ_OPTIONS)
+			{
+				eqDialog = EQD_OPTIONS;
+				eqDlgCursor = 0;
+			}
+			return false;
+		}
+		if (pt.kind != Pointer::Down) return false;
+		if (buttonRect(BACK_ICON).hit(x, y)) { pressedBtn = BACK_ICON; return false; }
+		for (int t = 0; t < 2; t++)
+			if (t != soundTab && soundTabRect(t).hit(x, y)) { pressedBtn = SOUND_TAB0 + t; return false; }
+		if (soundTab == SOUND_FX)
+		{
+			for (int i = 0; i < SOUNDFX_COUNT; i++)
+				if (buttonRect(FX_ROW + i).hit(x, y))
+				{
+					fxCursor = i;
+					pressedBtn = FX_ROW + i;
+				}
+			return false;
+		}
+		for (int id : {EQ_SWITCH, EQ_PREV, EQ_NEXT, EQ_NAME_ZONE, EQ_RESET, EQ_SAVE, EQ_OPTIONS})
+			if (buttonRect(id).hit(x, y)) { pressedBtn = id; return false; }
+		// a band's column: focused, its gain where the finger is (and follows it)
+		if (y >= 134 && y < 396)
+			for (int i = 0; i < EQ_BANDS; i++)
+			{
+				int cx = 88 + 56 * i;
+				if (x < cx - 28 || x >= cx + 28) continue;
+				if (eqTapBand != i) eqTapAt = 0;
+				eqBand = i;
+				eqTouch = true;
+				eqMoved = false;
+				eqDownY = y;
+				eqSetBand(i, std::round((264 - y) / 8.0), p);
+			}
+		return false;
+	}
+
+	void Ui::drawSoundHeader(const Player& p)
+	{
+		drawBackIcon();
+		// as Audio & Subtitles' tabs: the open one lit; the other with its key on its outer side (L left, R right)
+		static const char* NAMES[2] = {"Equalizer", "Effects"};
+		for (int t = 0; t < 2; t++)
+		{
+			Rect r = soundTabRect(t);
+			if (t == soundTab) { drawTab(r, NAMES[t], true); continue; }
+			fill(r, pressedBtn == SOUND_TAB0 + t ? PRESSED : TEAL);
+			const char* key = t == SOUND_EQ ? "L" : "R";
+			int kw = (int)std::lround(textWidth(key, 0) / sx), mid = r.y + r.h / 2;
+			int left = r.x, right = r.x + r.w;
+			if (t == SOUND_EQ)
+			{
+				drawTextMid(key, 0, YELLOW, r.x + 14, mid);
+				left = r.x + 14 + kw;
+			}
+			else
+			{
+				drawTextMid(key, 0, YELLOW, r.x + r.w - 14, mid, 0, 1);
+				right = r.x + r.w - 14 - kw;
+			}
+			drawTextMid(NAMES[t], 1, CREAM, (left + right) / 2, mid, right - left - 8, 2);
+		}
+		drawBattery(616, 24, p);
+	}
+
+	// a band's gain as its label: "+3", "0", "-4" ("+2.5" between whole ones)
+	static std::string gainText(double g)
+	{
+		char b[16];
+		int whole = (int)std::lround(g);
+		if (std::fabs(g - whole) >= 0.05) snprintf(b, sizeof b, "%+.1f", g);
+		else if (whole) snprintf(b, sizeof b, "%+d", whole);
+		else return "0";
+		return b;
+	}
+
+	void Ui::drawEqualizer(const Player& p)
+	{
+		static const char* FREQS[EQ_BANDS] = {"31", "62", "125", "250", "500", "1k", "2k", "4k", "8k", "16k"};
+		const Settings& st = p.settings;
+		bool on = st.eqOn, custom = eqCustom(p);
+		// the switch: a pill, its knob right when on
+		fill(buttonRect(EQ_SWITCH), pressedBtn == EQ_SWITCH ? PRESSED : TEAL);
+		fill({30, 84, 48, 24}, on ? YELLOW : SCREEN);
+		fill({on ? 56 : 32, 86, 20, 20}, on ? BG : DIM);
+		drawTextMid(on ? "On" : "Off", 1, on ? CREAM : DIM, 92, 96);
+		// the preset: Y and X either side of its name, what it is under it
+		fill({160, 70, 464, 52}, TEAL);
+		for (int id : {EQ_PREV, EQ_NEXT, EQ_NAME_ZONE})
+			if (pressedBtn == id) fill(buttonRect(id), PRESSED);
+		drawTextMid("Y", 0, YELLOW, 174, 96);
+		drawGlyphMid(G_LEFT, 196, 96, CREAM);
+		drawGlyphMid(G_RIGHT, 588, 96, CREAM);
+		drawTextMid("X", 0, YELLOW, 610, 96);
+		drawTextMid(custom ? CUSTOM_NAME : st.eqPreset, 1, on ? CREAM : DIM, 392, 88, 340, 2);
+		if (custom)
+			drawTextMid(st.eqOrigin.empty() ? std::string("Unsaved") : "Unsaved \xC2\xB7 from " + st.eqOrigin, 0, YELLOW, 392, 110, 340, 2);
+		else drawTextMid(eqIsUser(p, st.eqPreset) ? "Yours" : "Built-in", 0, DIM_TEAL, 392, 110, 340, 2);
+		// the scale, and the band the cursor is on lit behind it
+		int fx = 88 + 56 * eqBand;
+		fill({fx - 27, 134, 54, 262}, SURFACE);
+		fill({fx - 27, 394, 54, 3}, YELLOW);
+		drawTextMid("dB", 0, DIM, 54, 148, 0, 1);
+		drawTextMid("Hz", 0, DIM, 54, 382, 0, 1);
+		static const struct { const char* label; int y; } SCALE[] = {{"+12", 168}, {"+6", 216}, {"0", 264}, {"-6", 312}, {"-12", 360}};
+		for (auto& m : SCALE)
+		{
+			drawTextMid(m.label, 0, DIM, 54, m.y, 0, 1);
+			if (m.y != 264) fill({60, m.y, 560, 1}, {0x2A, 0x28, 0x33, 255});
+		}
+		fill({60, 263, 560, 2}, SCREEN);
+		for (int i = 0; i < EQ_BANDS; i++)
+		{
+			int cx = 88 + 56 * i;
+			double g = st.eqGains[i];
+			int ky = 264 - (int)std::lround(g * 8);
+			bool focus = i == eqBand;
+			fill({cx - 2, 168, 4, 192}, SCREEN);
+			// from 0 dB to the gain
+			SDL_Color bar = !on ? DIM : focus ? YELLOW : PRESSED;
+			if (ky < 264) fill({cx - 4, ky, 8, 264 - ky}, bar);
+			else if (ky > 264) fill({cx - 4, 264, 8, ky - 264}, bar);
+			fill({cx - 16, ky - 6, 32, 12}, !on ? DIM : focus ? YELLOW : CREAM);
+			fill({cx - 10, ky - 1, 20, 2}, BG);
+			drawTextMid(gainText(g), 0, focus ? YELLOW : std::fabs(g) >= 0.05 ? CREAM : DIM, cx, 148, 0, 2);
+			drawTextMid(FREQS[i], 0, focus ? YELLOW : DIM, cx, 382, 0, 2);
+		}
+		// Reset (touch, or Options), Save, Options: each its key on its right
+		auto action = [&](int id, const Glyph& g, const std::string& label, const char* key, bool dim) {
+			Rect r = buttonRect(id);
+			fill(r, pressedBtn == id && !dim ? PRESSED : TEAL);
+			SDL_Color ink = dim ? DIM : CREAM;
+			int gw = glyphW(g), kw = key ? (int)std::lround(textWidth(key, 0) / sx) : 0, mid = r.y + r.h / 2;
+			drawGlyphMid(g, r.x + 14 + gw / 2, mid, ink);
+			drawTextMid(label, 0, ink, r.x + 14 + gw + 8, mid, r.w - 14 - gw - 8 - (key ? kw + 20 : 10));
+			if (key) drawTextMid(key, 0, dim ? DIM : YELLOW, r.x + r.w - 12, mid, 0, 1);
+		};
+		action(EQ_RESET, G_REFRESH, "Reset", nullptr, !eqCanReset(p));
+		action(EQ_SAVE, G_CHECK, !custom ? "Saved" : eqOriginIsUser(p) ? "Save" : "Save as...", "A", !custom);
+		action(EQ_OPTIONS, G_GEAR, "Options", "START", false);
+		drawHints({{"D-PAD", "Adjust"}, {"Y/X", "Preset"}, {"SELECT", "On/Off"}, {"R", "Effects"}, {"B", "Back"}});
+	}
+
+	void Ui::drawEffects(const Player& p)
+	{
+		int inUse = (int)p.settings.soundFx;
+		for (int i = 0; i < SOUNDFX_COUNT; i++)
+		{
+			Rect r = buttonRect(FX_ROW + i);
+			int mid = r.y + r.h / 2;
+			bool at = i == fxCursor;
+			if (pressedBtn == FX_ROW + i) fill(r, PRESSED);
+			else if (at) drawFocus(r);
+			// the one in use: a filled ring (the cursor is only where it is)
+			drawGlyphMid(i == inUse ? G_RADIO_ON : G_RADIO, 41, mid, i == inUse ? YELLOW : at ? CREAM : DIM);
+			drawTextMid(soundFxName((SoundFx)i), 1, at ? YELLOW : CREAM, 66, mid, 270);
+			drawTextMid(FX_ABOUT[i], 0, at ? DIM_TEAL : DIM, 608, mid, 260, 1);
+		}
+		if (!p.playingAudio()) drawTextMid("Plays on music, not videos", 0, DIM, W / 2, 436, 0, 2);
+		drawHints({{"A", "Choose"}, {"L", "Equalizer"}, {"B", "Back"}});
+	}
+
+	void Ui::drawSound(const Player& p)
+	{
+		drawSoundHeader(p);
+		if (soundTab == SOUND_FX) drawEffects(p);
+		else drawEqualizer(p);
+		const Settings& st = p.settings;
+		std::string name = eqCustom(p) ? CUSTOM_NAME : st.eqPreset;
+		if (eqDialog == EQD_OPTIONS)
+		{
+			// as the browser's menu: its rows, the preset's name over them
+			drawDialog(eqOptBox(p), name);
+			auto items = eqOptions(p);
+			for (int i = 0; i < (int)items.size(); i++)
+			{
+				int it = items[i];
+				std::string label = it == EQO_LIST ? "All presets..." : it == EQO_SAVE_TO ? "Save to " + quoted(st.eqOrigin)
+					: it == EQO_SAVE_AS ? "Save as new preset..." : it == EQO_RENAME ? "Rename..." : it == EQO_DELETE ? "Delete..."
+					: it == EQO_RESET ? "Reset to " + quoted(st.eqOrigin) : "Cancel";
+				const Glyph* g = it == EQO_LIST ? &G_NOTE : it == EQO_SAVE_TO ? &G_CHECK : it == EQO_SAVE_AS ? &G_PLUS
+					: it == EQO_RENAME ? &G_PENCIL : it == EQO_DELETE ? &G_TRASH : it == EQO_RESET ? &G_REFRESH : &G_CROSS;
+				drawDialogRow(eqOptRow(i, p), g, label, i == eqDlgCursor, pressedBtn == DLG_ROW + i,
+					it == EQO_DELETE ? RED : it == EQO_CANCEL ? DIM : CREAM);
+			}
+			drawHints({{"A", "Choose"}, {"B", "Close"}});
+		}
+		else if (eqDialog == EQD_DELETE)
+		{
+			drawDialog({112, 116, 416, 204}, "Delete " + quoted(name) + "?");
+			drawTextMid("Your preset goes for good", 0, DIM, W / 2, 176, 380, 2);
+			drawDialogRow({128, 196, 384, 46}, &G_TRASH, "Delete", eqDlgCursor == 0, pressedBtn == DLG_ROW, RED);
+			drawDialogRow({128, 248, 384, 46}, &G_CROSS, "Cancel", eqDlgCursor == 1, pressedBtn == DLG_ROW + 1, DIM);
+			drawHints({{"A", "Choose"}, {"B", "Cancel"}});
+		}
+		else if (eqDialog == EQD_LIST)
+		{
+			drawDialog({96, 22, 448, 392}, "Presets");
+			auto e = eqEntries(p);
+			int y = EQ_LIST_TOP, end = eqListBottom(e, eqListScroll);
+			for (int i = eqListScroll; i < end; i++)
+			{
+				if (!e[i].kind)
+				{
+					// a section's name: not a row to choose
+					drawTextMid(e[i].name, 0, DIM, 120, y + 14);
+					y += 28;
+					continue;
+				}
+				Rect r{112, y, 416, 38};
+				bool at = i == eqDlgCursor;
+				bool active = e[i].kind == 2 ? eqCustom(p) : !eqCustom(p) && e[i].name == st.eqPreset;
+				if (pressedBtn == DLG_ROW + i) fill(r, PRESSED);
+				else if (at) drawFocus(r);
+				drawGlyphMid(active ? G_RADIO_ON : G_RADIO, 132, r.y + r.h / 2, active ? YELLOW : at ? CREAM : DIM);
+				drawTextMid(e[i].name, 1, at ? YELLOW : CREAM, 156, r.y + r.h / 2, 356);
+				y += 38;
+			}
+			// a long list: where its window is
+			int n = (int)e.size(), maxScroll = 0;
+			while (maxScroll < n && eqListBottom(e, maxScroll) < n) maxScroll++;
+			if (maxScroll > 0)
+			{
+				fill({532, EQ_LIST_TOP, 4, EQ_LIST_END - EQ_LIST_TOP}, SCREEN);
+				int shown = end - eqListScroll, h = std::max(16, (EQ_LIST_END - EQ_LIST_TOP) * shown / n);
+				fill({532, EQ_LIST_TOP + (EQ_LIST_END - EQ_LIST_TOP - h) * eqListScroll / maxScroll, 4, h}, DIM);
+			}
+			drawHints({{"A", "Choose"}, {"B", "Close"}});
 		}
 	}
 }

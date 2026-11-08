@@ -2,6 +2,7 @@
 #include "aspect.h"
 #include "battery.h"
 #include "browser.h"
+#include "eq.h"
 #include "format.h"
 #include "ftplist.h"
 #include "history.h"
@@ -14,9 +15,12 @@
 #include "secret.h"
 #include "servers.h"
 #include "sidecar.h"
+#include "soundfx.h"
 #include "resume.h"
 #include "settings.h"
 #include "tracks.h"
+#include <cmath>
+#include <cstdint>
 #include <cstdio>
 #include <cstring>
 #include <fstream>
@@ -987,12 +991,242 @@ static void testKeyboard()
 	CHECK_EQ(t.text, std::string(""));
 }
 
+static void testEq()
+{
+	// gains round-trip
+	const EqGains& bass = builtinEqPresets()[1].gains;
+	CHECK_EQ(builtinEqPresets()[1].name, std::string("Bass Boost"));
+	CHECK_EQ(builtinEqPresets().size(), (size_t)12);
+	CHECK_EQ(formatEqGains(bass), std::string("3,5,5,3,1,0,0,0,0,0"));
+	EqGains g;
+	CHECK_EQ(parseEqGains("3,5,5,3,1,0,0,0,0,0", g), true);
+	CHECK_EQ(g == bass, true);
+	EqGains frac{-3.5, 0.5, 12, -12, 0.1, 0, 0, 0, 0, 7.3};
+	EqGains back;
+	CHECK_EQ(parseEqGains(formatEqGains(frac), back), true);
+	CHECK_EQ(back == frac, true);
+	// bad strings leave the gains alone
+	EqGains keep = bass, bad = bass;
+	const char* BAD[] = {"1,2,3,4,5,6,7,8,9", "1,2,3,4,5,6,7,8,9,10,11", "abc", "1,,2,3,4,5,6,7,8,9", "nan,0,0,0,0,0,0,0,0,0",
+		"1,2,3,4,5,6,7,8,9,x", "1,2,3,4,5,6,7,8,9,10,", "", "inf,0,0,0,0,0,0,0,0,0"};
+	for (const char* b : BAD)
+	{
+		CHECK_EQ(parseEqGains(b, bad), false);
+		CHECK_EQ(bad == keep, true);
+	}
+	// clamping
+	CHECK_EQ(clampEqGain(20), 12.0);
+	CHECK_EQ(clampEqGain(-20), -12.0);
+	CHECK_EQ(clampEqGain(1.26), 1.3);
+	CHECK_EQ(clampEqGain(0.04), 0.0);
+	CHECK_EQ(parseEqGains("99,-99,0,0,0,0,0,0,0,0", g), true);
+	CHECK_EQ(g[0] == 12 && g[1] == -12, true);
+	// the filter
+	CHECK_EQ(eqFlat(EqGains{}), true);
+	CHECK_EQ(eqFilterString(EqGains{}), std::string(""));
+	CHECK_EQ(eqFlat(bass), false);
+	CHECK_EQ(eqBandTarget(3), std::string("equalizer@b3"));
+	std::string pre = eqPreGainArg(bass);
+	CHECK_EQ(pre.size() > 3 && pre[0] == '-' && pre.substr(pre.size() - 2) == "dB", true);
+	std::string want = "@bpeq:lavfi=[aformat=sample_fmts=fltp,volume@pre=volume=" + pre + ":precision=float"
+		",equalizer@b0=f=31:t=o:w=1:g=3.0:precision=f64,equalizer@b1=f=62:t=o:w=1:g=5.0:precision=f64"
+		",equalizer@b2=f=125:t=o:w=1:g=5.0:precision=f64,equalizer@b3=f=250:t=o:w=1:g=3.0:precision=f64"
+		",equalizer@b4=f=500:t=o:w=1:g=1.0:precision=f64,equalizer@b5=f=1000:t=o:w=1:g=0.0:precision=f64"
+		",equalizer@b6=f=2000:t=o:w=1:g=0.0:precision=f64,equalizer@b7=f=4000:t=o:w=1:g=0.0:precision=f64"
+		",equalizer@b8=f=8000:t=o:w=1:g=0.0:precision=f64,equalizer@b9=f=16000:t=o:w=1:g=0.0:precision=f64]";
+	CHECK_EQ(eqFilterString(bass), want);
+	EqGains cut = builtinEqPresets()[2].gains;
+	CHECK_EQ(eqPreGainArg(cut), std::string("0.0dB"));	// a cut only: nothing to take off (and no "-0.0")
+	// a lone band: the response at its centre is its gain
+	for (int i = 0; i < EQ_BANDS; i++)
+		for (double gain : {-12.0, -6.0, 3.0, 12.0})
+		{
+			EqGains one{};
+			one[i] = gain;
+			CHECK_EQ(std::fabs(eqResponseDb(one, EQ_FREQS[i]) - gain) < 0.01, true);
+		}
+	EqGains none{};
+	CHECK_EQ(eqResponseDb(none, 1000), 0.0);
+	// far from the band it hardly acts
+	EqGains lone{};
+	lone[5] = 6;
+	CHECK_EQ(std::fabs(eqResponseDb(lone, 31)) < 0.3, true);
+	double peak = eqPeakDb(bass);
+	CHECK_EQ(peak > 6 && peak < 7, true);
+	// the pre-gain takes the peak off
+	CHECK_EQ(std::fabs(atof(pre.c_str()) + peak) < 0.1, true);
+	// names
+	std::vector<EqPreset> user;
+	EqPreset mine;
+	mine.name = "My car";
+	user.push_back(mine);
+	CHECK_EQ((int)checkEqPresetName("Road trip", user), (int)EqNameError::None);
+	CHECK_EQ((int)checkEqPresetName("  Road trip  ", user), (int)EqNameError::None);
+	CHECK_EQ((int)checkEqPresetName("", user), (int)EqNameError::Empty);
+	CHECK_EQ((int)checkEqPresetName("   ", user), (int)EqNameError::Empty);
+	CHECK_EQ((int)checkEqPresetName(std::string(24, 'a'), user), (int)EqNameError::None);
+	CHECK_EQ((int)checkEqPresetName(std::string(25, 'a'), user), (int)EqNameError::TooLong);
+	CHECK_EQ((int)checkEqPresetName("a\x01" "b", user), (int)EqNameError::BadChar);
+	CHECK_EQ((int)checkEqPresetName("Rock", user), (int)EqNameError::Builtin);
+	CHECK_EQ((int)checkEqPresetName("rOCK", user), (int)EqNameError::Builtin);
+	CHECK_EQ((int)checkEqPresetName("Custom", user), (int)EqNameError::Builtin);
+	CHECK_EQ((int)checkEqPresetName("my CAR", user), (int)EqNameError::Taken);
+	CHECK_EQ((int)checkEqPresetName("My car", user, "My car"), (int)EqNameError::None);	// rename to itself
+	CHECK_EQ((int)checkEqPresetName("MY CAR", user, "My car"), (int)EqNameError::None);	// or its case
+	CHECK_EQ((int)checkEqPresetName("Rock", user, "My car"), (int)EqNameError::Builtin);
+	user.push_back(EqPreset{"Other", {}, false});
+	CHECK_EQ((int)checkEqPresetName("other", user, "My car"), (int)EqNameError::Taken);
+	CHECK_EQ((int)checkEqPresetName("Caf\xc3\xa9", user), (int)EqNameError::None);
+	// the store
+	EqPresetStore st;
+	st.parse("# banana-player: presets\r\n"
+		"1\t2\t3\t4\t5\t6\t7\t8\t9\t10\tZed\r\n"
+		"# a comment\n"
+		"1\t2\t3\tshort line\n"
+		"0\t0\t0\t0\t0\t0\t0\t0\t0\tx\tnine gains\n"
+		"20\t-20\t0\t0\t0\t0\t0\t0\t0\t0\tClamped\n"
+		"1\t1\t1\t1\t1\t1\t1\t1\t1\t1\tzed\n"
+		"2\t2\t2\t2\t2\t2\t2\t2\t2\t2\tRock\n"
+		"0\t0\t0\t0\t0\t0\t0\t0\t0\t0\tbad\x01name\n"
+		"0\t0\t0\t0\t0\t0\t0\t0\t0\t3\tCaf\xc3\xa9\n"
+		"0\t0\t0\t0\t0\t0\t0\t0\t0\t4\ta=b # c\n");
+	CHECK_EQ(st.user().size(), (size_t)5);
+	CHECK_EQ(st.all().size(), builtinEqPresets().size() + 5);
+	CHECK_EQ(st.all()[0].name, std::string("Flat"));	// built-ins first
+	CHECK_EQ(st.all()[0].builtin, true);
+	CHECK_EQ(st.find("Zed") != nullptr && st.find("Zed")->gains[9] == 10, true);	// the first duplicate stays
+	CHECK_EQ(st.find("Zed")->builtin, false);
+	CHECK_EQ(st.find("Clamped") != nullptr && st.find("Clamped")->gains[0] == 12 && st.find("Clamped")->gains[1] == -12, true);
+	CHECK_EQ(st.find("Rock (2)") != nullptr && st.find("Rock (2)")->gains[0] == 2, true);
+	CHECK_EQ(st.find("Rock")->builtin, true);
+	CHECK_EQ(st.find("Caf\xc3\xa9") != nullptr, true);
+	CHECK_EQ(st.find("a=b # c") != nullptr, true);
+	CHECK_EQ(st.find("badname") == nullptr, true);
+	std::vector<std::string> order;
+	for (auto& p : st.user()) order.push_back(p.name);
+	CHECK_EQ(order == std::vector<std::string>({"a=b # c", "Caf\xc3\xa9", "Clamped", "Rock (2)", "Zed"}), true);	// alphabetical
+	EqPresetStore again;
+	again.parse(st.serialize());
+	CHECK_EQ(again.user().size(), st.user().size());
+	bool same = again.user().size() == st.user().size();
+	for (size_t i = 0; same && i < st.user().size(); i++)
+		same = again.user()[i].name == st.user()[i].name && again.user()[i].gains == st.user()[i].gains;
+	CHECK_EQ(same, true);
+	CHECK_EQ(st.serialize().rfind("# banana-player:", 0), (size_t)0);
+	// put / rename / remove
+	EqPresetStore ps;
+	CHECK_EQ((int)ps.put("Rock", bass), (int)EqNameError::Builtin);
+	CHECK_EQ((int)ps.put("  My car ", bass), (int)EqNameError::None);
+	CHECK_EQ(ps.find("My car") != nullptr, true);
+	CHECK_EQ((int)ps.put("My car", cut), (int)EqNameError::None);	// overwrites
+	CHECK_EQ(ps.user().size(), (size_t)1);
+	CHECK_EQ(ps.find("My car")->gains == cut, true);
+	CHECK_EQ((int)ps.put("Alpha", bass), (int)EqNameError::None);
+	CHECK_EQ(ps.user()[0].name, std::string("Alpha"));
+	CHECK_EQ((int)ps.rename("My car", "alpha"), (int)EqNameError::Taken);
+	CHECK_EQ((int)ps.rename("My car", "MY CAR"), (int)EqNameError::None);
+	CHECK_EQ((int)ps.rename("MY CAR", "Rock"), (int)EqNameError::Builtin);
+	CHECK_EQ((int)ps.rename("MY CAR", "Car"), (int)EqNameError::None);
+	CHECK_EQ(ps.find("Car") != nullptr && ps.find("MY CAR") == nullptr, true);
+	CHECK_EQ(ps.remove("Car"), true);
+	CHECK_EQ(ps.remove("Car"), false);
+	CHECK_EQ(ps.remove("Rock"), false);
+	CHECK_EQ(ps.all().size(), builtinEqPresets().size() + 1);
+	// settings
+	Settings ed = parseSettings("");
+	CHECK_EQ(ed.eqOn, false);
+	CHECK_EQ(ed.eqPreset, std::string("Flat"));
+	CHECK_EQ(ed.eqOrigin, std::string(""));
+	CHECK_EQ(eqFlat(ed.eqGains), true);
+	Settings es;
+	es.eqOn = true;
+	es.eqPreset = "";	// Custom
+	es.eqOrigin = "Bass Boost";
+	es.eqGains = frac;
+	Settings eb = parseSettings(serializeSettings(es));
+	CHECK_EQ(eb.eqOn, true);
+	CHECK_EQ(eb.eqPreset, std::string(""));
+	CHECK_EQ(eb.eqOrigin, std::string("Bass Boost"));
+	CHECK_EQ(eb.eqGains == frac, true);
+	es.eqPreset = "a=b # c";
+	CHECK_EQ(parseSettings(serializeSettings(es)).eqPreset, std::string("a=b # c"));
+	CHECK_EQ(parseSettings("eq-gains = 1,2,3\n").eqGains == EqGains{}, true);	// a bad curve: flat
+	CHECK_EQ(parseSettings("eq = maybe\n").eqOn, false);
+}
+
+static double wavRms(const std::string& w, size_t from, size_t to)
+{
+	// 16-bit stereo: frames of 4 bytes after the 44-byte header
+	double sum = 0;
+	for (size_t i = from; i < to; i++)
+	{
+		const unsigned char* p = (const unsigned char*)w.data() + 44 + i * 4;
+		for (int c = 0; c < 2; c++) sum += (double)(int16_t)(p[c * 2] | p[c * 2 + 1] << 8) * (int16_t)(p[c * 2] | p[c * 2 + 1] << 8);
+	}
+	return std::sqrt(sum / ((to - from) * 2));
+}
+
+static void testSoundFx()
+{
+	// names and keys round-trip
+	CHECK_EQ(std::string(soundFxName(SoundFx::Hall)), std::string("Concert hall"));
+	CHECK_EQ(std::string(soundFxName(SoundFx::Wide)), std::string("Wide stereo"));
+	for (int i = 0; i < SOUNDFX_COUNT; i++) CHECK_EQ(soundFxFromKey(soundFxKey((SoundFx)i)) == (SoundFx)i, true);
+	CHECK_EQ(soundFxFromKey("nonsense") == SoundFx::None, true);
+	CHECK_EQ(std::string(soundFxKey(SoundFx::Headphones)), std::string("headphones"));
+
+	// the impulse responses: a RIFF header that says what it holds, the same bytes every time
+	for (SoundFx fx : {SoundFx::Room, SoundFx::Hall, SoundFx::Church, SoundFx::Cave})
+	{
+		std::string w = soundFxIrWav(fx);
+		CHECK_EQ(w.size() > 44, true);
+		CHECK_EQ(w.size() < 1000000, true);
+		CHECK_EQ(w.substr(0, 4), std::string("RIFF"));
+		CHECK_EQ(w.substr(8, 8), std::string("WAVEfmt "));
+		auto u32 = [&](size_t at) { return (uint32_t)((unsigned char)w[at] | (unsigned char)w[at + 1] << 8 | (unsigned char)w[at + 2] << 16 | (uint32_t)(unsigned char)w[at + 3] << 24); };
+		CHECK_EQ(u32(4), (uint32_t)(w.size() - 8));
+		CHECK_EQ(u32(24), (uint32_t)48000);
+		CHECK_EQ(u32(40), (uint32_t)(w.size() - 44));
+		CHECK_EQ(w == soundFxIrWav(fx), true);
+		// it dies away: the last tenth far below the first
+		size_t frames = (w.size() - 44) / 4;
+		double first = wavRms(w, 0, frames / 10), last = wavRms(w, frames - frames / 10, frames);
+		CHECK_EQ(last * 30 < first, true);
+	}
+	CHECK_EQ(soundFxIrWav(SoundFx::Room) == soundFxIrWav(SoundFx::Hall), false);
+	CHECK_EQ(soundFxIrWav(SoundFx::Room).size() < soundFxIrWav(SoundFx::Hall).size(), true);
+	for (SoundFx fx : {SoundFx::None, SoundFx::Wide, SoundFx::Headphones}) CHECK_EQ(soundFxIrWav(fx), std::string(""));
+
+	// the filters
+	CHECK_EQ(soundFxFilter(SoundFx::None, "/x/ir.wav"), std::string(""));
+	CHECK_EQ(soundFxFilter(SoundFx::Headphones, ""), std::string("@bpfx:lavfi=[crossfeed]"));
+	CHECK_EQ(soundFxFilter(SoundFx::Wide, ""), std::string("@bpfx:lavfi=[volume=-2.5dB,extrastereo=m=1.6:c=0,alimiter=limit=0.98:level=0]"));
+	CHECK_EQ(soundFxFilter(SoundFx::Hall, "/s/ir-hall.wav"),
+		std::string("@bpfx:lavfi=[amovie=/s/ir-hall.wav[ir];[in][ir]afir=dry=7.3:wet=7.3,alimiter=limit=0.98:level=0]"));
+	CHECK_EQ(soundFxFilter(SoundFx::Room, "/s/ir-room.wav"),
+		std::string("@bpfx:lavfi=[amovie=/s/ir-room.wav[ir];[in][ir]afir=dry=4.5:wet=4.5,alimiter=limit=0.98:level=0]"));
+	// a path with the graph's own characters, escaped as an option's value and then in the graph
+	CHECK_EQ(soundFxFilter(SoundFx::Cave, "/a b:c,d[e];f'g/ir.wav"),
+		std::string("@bpfx:lavfi=[amovie=/a b\\\\:c\\,d\\[e\\]\\;f\\\\\\'g/ir.wav[ir];[in][ir]afir=dry=7.6:wet=7.6,alimiter=limit=0.98:level=0]"));
+
+	// the setting: written, read back, none when absent or unknown
+	Settings s;
+	CHECK_EQ(s.soundFx == SoundFx::None, true);
+	s.soundFx = SoundFx::Church;
+	CHECK_EQ(serializeSettings(s).find("sound-effect = church\n") != std::string::npos, true);
+	CHECK_EQ(parseSettings(serializeSettings(s)).soundFx == SoundFx::Church, true);
+	CHECK_EQ(parseSettings("eq = on\n").soundFx == SoundFx::None, true);
+	CHECK_EQ(parseSettings("sound-effect = bogus\n").soundFx == SoundFx::None, true);
+}
+
 int main()
 {
 	testChapters();
 	testSpeed();
 	testSubStyle();
 	testSettings();
+	testEq();
+	testSoundFx();
 	testResume();
 	testPlaylist();
 	testPhoto();

@@ -129,7 +129,7 @@ namespace bp
 		SDL_Surface* capture(const Player& p);
 
 	private:
-		enum class Page { Main, Tracks, Chapters, Settings, Browse, Info, About, Exit };
+		enum class Page { Main, Tracks, Chapters, Settings, Browse, Info, About, Exit, Sound };
 		struct Rect { int x, y, w, h; bool hit(int px, int py) const { return px >= x && py >= y && px < x + w && py < y + h; } };
 		struct Row { int64_t id; std::string label; bool selected; std::string note = ""; };
 
@@ -269,8 +269,76 @@ namespace bp
 		bool clearHistory(Player& p);	// true when it cleared (the second time)
 		bool act(int id, Player& p);	// a touch button let go of on it
 		bool pressAnyway(Button b, Player& p);
-		// music playing: X loop, Y visualizer, SELECT what's shown (a video: audio, subtitles, picture size)
+		// music playing: X loop, Y chapters (none: nothing), SELECT the Display popup (a video: audio, subtitles,
+		// picture size)
 		bool musicKey(Button b, Player& p);
+		// Display, over a song's page (SELECT): what the top panel shows, and the visualizer's style; each change
+		// applied at once (the player rebuilds the graph once the changes stop)
+		bool displayOpen = false;
+		int displayRow = 0;	// 0 Show, 1 Style
+		bool displayShown(const Player& p) const { return displayOpen && page == Page::Main && !inMenu && p.playingAudio(); }
+		bool displayKey(Button b, Player& p);
+		bool displayPointer(const Pointer& pt, int x, int y, Player& p);
+		void drawDisplay(const Player& p);
+		Rect displayChip(int row, int i) const { return {48 + i * 138, row ? 260 : 160, 130, 64}; }
+		void displaySet(int row, int value, Player& p);
+		// Sound (music's): two tabs, Equalizer and Effects (L/R), opened from the song's Sound button, its line, or
+		// Settings › Music (B goes back there, on its row); the tab last open kept for the run
+		enum SoundTab { SOUND_EQ, SOUND_FX };
+		int soundTab = SOUND_EQ;
+		bool soundFromSettings = false, soundFromMenu = false;
+		void openSound(Player& p, bool fromSettings);
+		void closeSound(Player& p);
+		bool soundKey(Button b, Player& p);
+		bool soundPointer(const Pointer& pt, int x, int y, Player& p);
+		void drawSound(const Player& p);
+		void drawSoundHeader(const Player& p);
+		void drawEqualizer(const Player& p);
+		void drawEffects(const Player& p);
+		Rect soundTabRect(int t) const { return {t == SOUND_EQ ? 72 : 248, 10, 168, 44}; }
+		// the equalizer: the band the cursor (or a finger) is on; a finger on a column sets its gain, a double-tap 0 dB
+		int eqBand = 0;
+		bool eqTouch = false, eqMoved = false;
+		int eqDownY = 0, eqTapBand = -1;
+		Uint32 eqTapAt = 0;
+		void eqSetBand(int band, double gain, Player& p);	// an edit: Custom from the first one
+		void eqPick(const std::string& name, Player& p);	// a preset (CUSTOM_NAME: Custom back)
+		void eqStep(int dir, Player& p);					// the preset before or after, round (Y/X)
+		std::vector<std::string> eqCycle(const Player& p) const;	// the presets, then Custom while there is one
+		bool eqCustom(const Player& p) const { return p.settings.eqPreset.empty(); }
+		bool eqCanReset(const Player& p) const;
+		bool eqOriginIsUser(const Player& p) const;
+		void eqReset(Player& p);
+		void eqSave(Player& p);	// A: over the user preset it came from, or a new one named on the keyboard
+		void eqToggle(Player& p);
+		// Custom put aside when another preset is picked (Y/X, the list): still in the cycle for the run
+		bool stashOn = false;
+		std::string stashOrigin;
+		EqGains stashGains{};
+		// its dialogs: Options (START), the preset list, Delete's question
+		enum EqDialog { EQD_NONE, EQD_OPTIONS, EQD_LIST, EQD_DELETE };
+		int eqDialog = EQD_NONE, eqDlgCursor = 0, eqListScroll = 0;
+		bool eqListTouch = false;
+		enum EqOption { EQO_LIST, EQO_SAVE_TO, EQO_SAVE_AS, EQO_RENAME, EQO_DELETE, EQO_RESET, EQO_CANCEL };
+		std::vector<int> eqOptions(const Player& p) const;
+		Rect eqOptBox(const Player& p) const { int h = 80 + (int)eqOptions(p).size() * 52; return {112, (436 - h) / 2, 416, h}; }
+		Rect eqOptRow(int i, const Player& p) const { return {128, eqOptBox(p).y + 62 + i * 52, 384, 46}; }
+		void eqChooseOption(int item, Player& p);
+		// the preset list's entries: section headers (not chosen) and presets, each its height
+		struct EqEntry { int kind; std::string name; };	// kind 0 header, 1 preset, 2 Custom
+		std::vector<EqEntry> eqEntries(const Player& p) const;
+		void eqListFit(const Player& p);	// the cursor's entry in view
+		int eqListBottom(const std::vector<EqEntry>& e, int first) const;	// the last entry shown from first
+		void eqListMove(int dir, const Player& p);
+		void openEqList(const Player& p);
+		// naming a preset on the keyboard: Save as (a new one) or Rename (eqRenameFrom); a name refused keeps it up
+		bool eqRenaming = false, eqNameSubmit = false;
+		std::string eqRenameFrom, eqNameNote;
+		void eqNameDone(Player& p);
+		void eqNameOpen(bool rename, Player& p);
+		bool eqIsUser(const Player& p, const std::string& name) const;	// one of yours (not a built-in, not Custom)
+		int fxCursor = 0;
+		void fxChoose(int i, Player& p);
 		// a photo: the pan area (its thumbnail, the part on the top panel boxed: a finger drags the photo as on a
 		// phone, a flick glides, a double-tap zooms; no swipe to the next: Prev/Next do that) beside its buttons
 		bool photoKey(Button b, Player& p);	// true: it was a photo's
@@ -384,11 +452,12 @@ namespace bp
 		static constexpr int BTN_W = 108, BTN_H = 60, BTN_STEP = 121, ROW1_Y = 228, ROW2_Y = 300;
 		static constexpr int ROW_Y = 84, ROW_H = 48, ROWS_SHOWN = 7;
 		// the settings' rows by id: the subtitle style's, Music display, Visualizer, the switches (REMEMBER), Pan area,
-		// Clear play history. Shown a group at a time (settingRows), after a list of the groups
+		// Clear play history, ..., Sound (it opens the Sound page). Shown a group at a time (settingRows), after a list
+		// of the groups
 		static constexpr int STYLE_ROW0 = 0, MUSIC_ROW = STYLE_KEYS, VIS_ROW = STYLE_KEYS + 1, TOGGLE_ROW = STYLE_KEYS + 2,
 			TOGGLES = 12, PAN_ROW = TOGGLE_ROW + TOGGLES, DRAG_ROW = PAN_ROW + 1, CLEAR_ROW = DRAG_ROW + 1,
 			CHECK_ROW = CLEAR_ROW + 1, INSTALL_ROW = CHECK_ROW + 1, TOP_LIGHT_ROW = INSTALL_ROW + 1,
-			BOTTOM_LIGHT_ROW = TOP_LIGHT_ROW + 1;
+			BOTTOM_LIGHT_ROW = TOP_LIGHT_ROW + 1, SOUND_ROW = BOTTOM_LIGHT_ROW + 1;
 		// the panels' backlights (BananaOS's own levels: changed here as its menu changes them)
 		Backlight backlight;
 		bool sameBrightness = true;	// the setting's, kept here for settingRows (no Player there)
@@ -419,6 +488,10 @@ namespace bp
 			BACK_ICON = 16,	// "<" at the top left of every page: B
 			EMPTY_BTN = 17,	// an empty page's button (no connections: Add connection)
 			GROUP_PREV = 18, GROUP_NEXT = 19;	// a settings group's neighbours, either side of its title (Y, X)
+		// Sound's touch buttons, apart from the grid's and the photo's; its dialogs' rows from DLG_ROW, the Display
+		// popup's chips from CHIP_BTN (row * 4 + chip)
+		static constexpr int SOUND_TAB0 = 510, SOUND_TAB1 = 511, EQ_SWITCH = 520, EQ_PREV = 521, EQ_NEXT = 522, EQ_NAME_ZONE = 523,
+			EQ_RESET = 524, EQ_SAVE = 525, EQ_OPTIONS = 526, DLG_ROW = 700, CHIP_BTN = 600, FX_ROW = 800;
 		void stepGroup(int dir);	// to the settings group before (-1) or after (1), round
 		bool styleFromSubs = false;	// the subtitle style opened from the Subtitles list: B goes back to it
 		void drawBackIcon();

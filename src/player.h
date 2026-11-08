@@ -1,5 +1,6 @@
 #pragma once
 #include "aspect.h"
+#include "eq.h"
 #include "history.h"
 #include "photo.h"
 #include "resume.h"
@@ -85,8 +86,33 @@ namespace bp
 		// a choice of the player's: also the language a file opened for the first time starts with
 		void selectTrack(TrackType type, int64_t id);
 		void setAspect(AspectMode m);
-		// applies at once and keeps them in settings.conf
-		void setSettings(const Settings& s);
+		// applies at once and keeps them in settings.conf (persist false: not yet, as the equalizer's bands move;
+		// commitEq writes them). A change of the music display updates the title at once and the filter graph 0.5 s
+		// later (checkDisplay), so quick presses rebuild it once
+		void setSettings(const Settings& s, bool persist = true);
+		// called each turn of the loop: the music display's graph, once its changes have settled
+		void checkDisplay();
+		// called each turn of the loop: with BP_CPU_LOG=1, the player's CPU use in the log every 30 s while playing
+		void checkCpu();
+
+		// The equalizer (music only; settings.eqOn, eqPreset, eqOrigin, eqGains). Its curve plays as soon as
+		// setSettings has it (each band's change sent alone, nothing rebuilt); commitEq makes it the af mpv keeps and
+		// writes settings.conf: as the Equalizer page closes (and at saveResume, quitting)
+		void commitEq();
+		// the built-in presets, then yours (alphabetical); eqPresetSerial changes with the list
+		const std::vector<EqPreset>& eqPresets() const { return eqStore.all(); }
+		const std::vector<EqPreset>& eqUserPresets() const { return eqStore.user(); }
+		int eqPresetSerial() const { return eqSerial; }
+		// a preset of yours from these gains, then the one playing (eqPreset = its name, no origin). overwrite false:
+		// a name you already have is Taken; true: that one's gains replaced. Built-in names are refused
+		EqNameError saveEqPreset(const std::string& name, const EqGains& gains, bool overwrite);
+		// one of yours renamed (the settings follow, if it's the one playing or Custom's origin)
+		EqNameError renameEqPreset(const std::string& from, const std::string& to);
+		// one of yours gone. The one playing becomes Custom with the same gains (nothing heard changes), and Custom
+		// made from it has no origin any more
+		bool deleteEqPreset(const std::string& name);
+		// the card over the top panel: "Equalizer · Rock" and the curve, or "Equalizer off" (1.5 s, see takeCardShown)
+		void showEqCard();
 		void osd(const std::string& text, int ms = 1500);
 		// the volume/brightness card over the top panel ("Volume", 85), till hideLevel
 		void showLevel(const std::string& label, int percent);
@@ -107,8 +133,8 @@ namespace bp
 		int stepChapter(int dir);
 		// the card over the top panel for chapter `index`; edge < 0: "This is the first chapter", > 0: "...last"
 		void showChapterCard(int index, int edge = 0);
-		// true once after a card was shown: the caller keeps it up for 2 s (its levelUntil), then hideLevel()
-		bool takeCardShown() { bool b = cardShown; cardShown = false; return b; }
+		// once after a card was shown: how long the caller keeps it up (its levelUntil), then hideLevel(); 0: none
+		int takeCardShown() { int ms = cardMs; cardMs = 0; return ms; }
 		// the top panel with nothing playing: the icon, the name, where to pick something
 		void showIdle(bool on);
 		// the top panel's output made with nothing playing: mpv 0.40 makes force-window's only as it goes idle, and
@@ -185,7 +211,7 @@ namespace bp
 		std::string netFileOptions(const std::string& path) const;	// loadfile's options for a network file
 		void refreshTracks(mpv_node* trackList);
 		void clearChapters();
-		bool cardShown = false;
+		int cardMs = 0;
 		bool pendingOn = false;		// a chapter jump made, mpv's answer not in yet
 		int pendingChapter = -1;
 		uint64_t pendingAt = 0;
@@ -199,6 +225,30 @@ namespace bp
 		std::string graphFor(int vis, bool overCover);	// visualizerGraph, with Circle's tables made first
 		std::string circleMaps;	// where they are, once made
 		std::string graphSet;	// lavfi-complex as last set (prop)
+		uint64_t displayDueAt = 0;	// the display changed: its graph applied then (checkDisplay)
+		// The equalizer and the sound effect as mpv has them: af = the EQ's entry (@bpeq), then the effect's (@bpfx),
+		// either left out when off. afSet: the af last set (prop; af-command's changes don't show in mpv's af);
+		// afFxSet: its effect entry; eqLive: the gains playing. syncEq brings mpv to the settings: a band's change by
+		// af-command (heard at once, no gap), unless the chain is about to be rebuilt anyway (rebuilding: a loadfile,
+		// a graph or track change, which rebuild it from the af string and lose af-command's gains) or the filters
+		// themselves change (EQ in or out, another effect): then af as a whole
+		std::string afSet, afFxSet;
+		EqGains eqLive{};
+		void syncEq(bool rebuilding);
+		std::string eqPart() const;	// the EQ's entry for this file ("" off, flat, or not a song)
+		std::string fxPart();		// the effect's, its impulse response written first ("" none)
+		std::string afWant() { return joinAf(eqPart(), fxPart()); }
+		static std::string joinAf(const std::string& eq, const std::string& fx) { return eq.empty() ? fx : fx.empty() ? eq : eq + "," + fx; }
+		std::string irWritten;		// the impulse responses known to be on disk this run (" key" each)
+		void sendEqCommand(const char* command, const std::string& arg, const std::string& target);
+		int eqInFlight = 0;			// af-commands not answered yet
+		bool eqFailed = false;		// one of them failed: af set once they're all in
+		bool eqDirty = false;		// settings changed and not written (setSettings with persist false)
+		EqPresetStore eqStore;
+		int eqSerial = 0;
+		void writeEqPresets();
+		uint64_t cpuAt = 0;
+		double cpuSeconds = 0;
 		std::string tagArtist, tagAlbum;	// the file's tags, as mpv sent them
 		// whether the last song (in lastArtDir) had art: the next one's guess
 		bool lastArt = false;

@@ -5,6 +5,7 @@
 #include "netstore.h"
 #include "netstream.h"
 #include "sidecar.h"
+#include "soundfx.h"
 #include "playlist.h"
 #include <algorithm>
 #include <chrono>
@@ -15,6 +16,7 @@
 #include <fstream>
 #include <sstream>
 #include <string>
+#include <sys/resource.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -23,6 +25,8 @@ namespace bp
 	enum Observed : uint64_t { TIME_POS = 1, DURATION, PAUSE, TRACK_LIST, MEDIA_TITLE, AID, SID, SPEED, METADATA, PAUSED_FOR_CACHE, SEEKING, CHAPTER_LIST, CHAPTER };
 	// screenshot-raw's answers for the photo's thumbnail: this plus the load they were asked in
 	static const uint64_t THUMB_REPLY = 1000;
+	// af-command's answers (the equalizer's bands): far above THUMB_REPLY's, which grow with each file
+	static const uint64_t EQ_REPLY = 1ull << 40;
 	// the panels' shape (both are 4:3)
 	static const double PANEL_ASPECT = 4.0 / 3;
 	// the thumbnail's largest size: the pan area's on the Plus's 1024x768 panel
@@ -104,6 +108,8 @@ namespace bp
 			resume.parse(readFile(o.stateDir + "/resume.tsv"));
 			if (settings.keepHistory) played.parse(readFile(o.stateDir + "/history.tsv"));
 		}
+		// (parsed even with no file: the list of built-ins is made there)
+		eqStore.parse(o.stateDir.empty() ? "" : readFile(o.stateDir + "/eq-presets.tsv"));
 
 		mpv_observe_property(mpv, TIME_POS, "time-pos", MPV_FORMAT_DOUBLE);
 		mpv_observe_property(mpv, DURATION, "duration", MPV_FORMAT_DOUBLE);
@@ -159,6 +165,12 @@ namespace bp
 		const char* v = value.c_str();
 		mpv_set_property_async(mpv, 0, name, MPV_FORMAT_STRING, &v);
 		if (!strcmp(name, "lavfi-complex")) graphSet = value;	// known here, not asked of mpv (a read waits)
+		else if (!strcmp(name, "af"))
+		{
+			afSet = value;
+			size_t fx = value.find("@bpfx:");	// (the effect's entry is the last)
+			afFxSet = fx == std::string::npos ? "" : value.substr(fx);
+		}
 	}
 
 	void Player::open(const std::vector<std::string>& list, int index, const std::vector<std::string>& folderNames)
@@ -228,6 +240,7 @@ namespace bp
 		thumbTries = 0;
 		thumbAsked = thumbTurnedByMpv = false;
 		photoW = photoH = fileTurn = exifTurn = 0;
+		displayDueAt = 0;	// the graph below is the display's as it is now
 
 		showIdle(false);
 		// A song's picture is chosen before it opens, as far as it can be known: a filter graph changed (or taken off
@@ -249,6 +262,9 @@ namespace bp
 		// the same graph as the last song's: kept. Else the last file's off first: under a graph mpv's tracks can't
 		// be chosen (aid, sid below)
 		bool keepGraph = !graph.empty() && graphSet == graph;
+		// the equalizer and effect for this file (none on a video), before the loadfile rebuilds the chain from af: a
+		// song after a song with the same ones, nothing sent
+		syncEq(true);
 		if (!keepGraph) prop("lavfi-complex", "");
 
 		// what this file is remembered with, as the file's own options (loadfile's last argument: they hold for this
@@ -467,6 +483,25 @@ namespace bp
 			}
 			case MPV_EVENT_COMMAND_REPLY:
 			{
+				if (ev->reply_userdata == EQ_REPLY)
+				{
+					if (ev->error < 0)
+					{
+						fprintf(stderr, "banana-player: af-command failed (%s): the equalizer set as a whole instead\n", mpv_error_string(ev->error));
+						eqFailed = true;
+					}
+					// the whole af once the last answer is in (one change, not one per band)
+					if (eqInFlight > 0 && --eqInFlight == 0 && eqFailed)
+					{
+						eqFailed = false;
+						std::string want = afWant();
+						// af set to what it already is does nothing: off and on again then
+						if (want == afSet && !want.empty()) prop("af", "");
+						prop("af", want);
+						eqLive = settings.eqGains;
+					}
+					break;
+				}
 				if (ev->reply_userdata != THUMB_REPLY + (uint64_t)loadSerial) break;	// an earlier photo's
 				thumbAsked = false;
 				if (ev->error < 0) thumbAt = ticks() + 250;	// no frame up yet: again soon
@@ -591,6 +626,7 @@ namespace bp
 			if (audioChecks >= 3) return;
 			audioChecks++;
 			fprintf(stderr, "banana-player: no audio track chosen; choosing it again (try %d)\n", audioChecks);
+			syncEq(true);	// (a track chosen rebuilds the chain from af)
 			prop("aid", wantAid ? std::to_string(wantAid) : "auto");
 			audioCheckAt = ticks() + 1500;
 			return;
@@ -603,6 +639,7 @@ namespace bp
 		}
 		audioChecks++;
 		fprintf(stderr, "banana-player: no sound output; opening the sound device again (try %d)\n", audioChecks);
+		syncEq(true);
 		const char* cmd[] = {"ao-reload", nullptr};
 		mpv_command_async(mpv, 0, cmd);
 		audioCheckAt = ticks() + 1500;
@@ -849,6 +886,7 @@ namespace bp
 	void Player::selectTrack(TrackType type, int64_t id)
 	{
 		const char* name = type == TrackType::Audio ? "aid" : type == TrackType::Sub ? "sid" : "vid";
+		if (type == TrackType::Audio) syncEq(true);	// a track change rebuilds the chain from af
 		prop(name, id > 0 ? std::to_string(id) : "no");
 		std::string lang;
 		for (auto& t : tracks)
@@ -879,17 +917,21 @@ namespace bp
 		rename(tmp.c_str(), path.c_str());
 	}
 
-	void Player::setSettings(const Settings& s)
+	void Player::setSettings(const Settings& s, bool persist)
 	{
 		for (auto& p : subStyleProperties(s.style)) prop(p.first.c_str(), p.second);
 		bool displayChanged = s.musicShow != settings.musicShow || s.visualizer != settings.visualizer;
 		bool loopChanged = s.loop != settings.loop;
+		bool soundChanged = s.eqOn != settings.eqOn || s.eqGains != settings.eqGains || s.soundFx != settings.soundFx;
 		settings = s;
 		if (displayChanged && isAudio && loaded)
 		{
-			applyAudioDisplay();
+			// the title's place at once; the graph once the presses stop (each change of it reopens the sound output,
+			// a second on the handheld)
 			updateOverlay();
+			displayDueAt = ticks() + 500;
 		}
+		if (soundChanged) syncEq(false);
 		if (loopChanged && isAudio) prop("loop-file", s.loop == LOOP_ONE ? "inf" : "no");
 		// switched off: nothing kept from now, and what was kept goes
 		if (!s.keepHistory) clearHistory();
@@ -903,7 +945,184 @@ namespace bp
 		}
 		// switched off: the folder kept so far goes too
 		if (!s.rememberFolder && !resume.lastFolder.empty()) setLastFolder("");
-		if (!opts.stateDir.empty()) writeFile(opts.stateDir + "/settings.conf", serializeSettings(s));
+		eqDirty = !persist;
+		if (persist && !opts.stateDir.empty()) writeFile(opts.stateDir + "/settings.conf", serializeSettings(s));
+	}
+
+	void Player::checkDisplay()
+	{
+		if (!displayDueAt || ticks() < displayDueAt) return;
+		displayDueAt = 0;
+		if (isAudio && loaded) applyAudioDisplay();
+	}
+
+	void Player::checkCpu()
+	{
+		static const bool on = getenv("BP_CPU_LOG") && !strcmp(getenv("BP_CPU_LOG"), "1");
+		if (!on) return;
+		// from the file's start (or the end of a pause): the 30 s measured are all playing
+		if (!playing() || !started || paused)
+		{
+			cpuAt = 0;
+			return;
+		}
+		rusage u;
+		getrusage(RUSAGE_SELF, &u);
+		double used = u.ru_utime.tv_sec + u.ru_utime.tv_usec / 1e6 + u.ru_stime.tv_sec + u.ru_stime.tv_usec / 1e6;
+		uint64_t now = ticks();
+		if (!cpuAt)
+		{
+			cpuAt = now;
+			cpuSeconds = used;
+			return;
+		}
+		if (now - cpuAt < 30000) return;
+		// of one core (the handheld has four: 400% is all of them)
+		fprintf(stderr, "cpu: %d%% over 30 s (%s, eq %s, effect %s)\n", (int)std::lround((used - cpuSeconds) * 100000 / (now - cpuAt)),
+			baseName(currentPath()).c_str(), isAudio && !eqPart().empty() ? "on" : "off",
+			isAudio ? std::string(soundFxKey(settings.soundFx)).c_str() : "none");
+		cpuAt = now;
+		cpuSeconds = used;
+	}
+
+	std::string Player::eqPart() const
+	{
+		return isAudio && settings.eqOn ? eqFilterString(settings.eqGains) : "";
+	}
+
+	std::string Player::fxPart()
+	{
+		SoundFx fx = isAudio ? settings.soundFx : SoundFx::None;
+		if (fx == SoundFx::None) return "";
+		std::string key = soundFxKey(fx);
+		// a reverb's impulse response, a file amovie reads: beside the settings (else, none kept or a folder a filter
+		// graph can't name, in /tmp), written when it isn't there as this build makes it. Checked once a run
+		std::string dir = lavfiSafePath(opts.stateDir) ? opts.stateDir : "/tmp/banana-player";
+		std::string path = dir + "/ir-" + key + ".wav";
+		if (irWritten.find(" " + key + " ") != std::string::npos) return soundFxFilter(fx, path);
+		std::string wav = soundFxIrWav(fx);
+		if (wav.empty()) return soundFxFilter(fx, "");	// not a reverb: no file
+		if (readFile(path) != wav)
+		{
+			mkdir(dir.c_str(), 0755);
+			writeFile(path, wav);
+			if (readFile(path) != wav)
+			{
+				// an af that can't open its file would take the sound with it: the music plays dry
+				fprintf(stderr, "banana-player: %s couldn't be written: no sound effect\n", path.c_str());
+				return "";
+			}
+		}
+		irWritten += (irWritten.empty() ? " " : "") + key + " ";
+		return soundFxFilter(fx, path);
+	}
+
+	void Player::sendEqCommand(const char* command, const std::string& arg, const std::string& target)
+	{
+		const char* cmd[] = {"af-command", "bpeq", command, arg.c_str(), target.c_str(), nullptr};
+		eqInFlight++;
+		mpv_command_async(mpv, EQ_REPLY, cmd);
+	}
+
+	void Player::syncEq(bool rebuilding)
+	{
+		std::string eq = eqPart(), fx = fxPart(), want = joinAf(eq, fx);
+		// the filters themselves as they are (the EQ in, the same effect) and no rebuild coming: each band that moved,
+		// by af-command, heard at once with no gap in the sound (mpv's af stays the string it was set to). Else af as
+		// a whole, unless it's the one mpv has (a rebuild starts from it; af set to itself does nothing anyway)
+		bool live = !rebuilding && !eq.empty() && afSet.rfind("@bpeq:", 0) == 0 && fx == afFxSet;
+		if (!live)
+		{
+			if (want != afSet) prop("af", want);
+		}
+		else
+		{
+			for (int i = 0; i < EQ_BANDS; i++)
+				if (settings.eqGains[i] != eqLive[i])
+				{
+					char g[32];
+					snprintf(g, sizeof g, "%.1f", settings.eqGains[i] + 0.0);
+					sendEqCommand("g", g, eqBandTarget(i));
+				}
+			std::string pre = eqPreGainArg(settings.eqGains);
+			if (pre != eqPreGainArg(eqLive)) sendEqCommand("volume", pre, "volume@pre");
+		}
+		eqLive = settings.eqGains;
+	}
+
+	void Player::commitEq()
+	{
+		// af made what plays: what mpv shows, and what a rebuild starts from
+		std::string want = afWant();
+		if (want != afSet) prop("af", want);
+		eqLive = settings.eqGains;
+		if (eqDirty && !opts.stateDir.empty()) writeFile(opts.stateDir + "/settings.conf", serializeSettings(settings));
+		eqDirty = false;
+	}
+
+	void Player::writeEqPresets()
+	{
+		eqSerial++;
+		if (!opts.stateDir.empty()) writeFile(opts.stateDir + "/eq-presets.tsv", eqStore.serialize());
+	}
+
+	// the user preset a name stands for (as the store keeps it: trimmed), or none
+	static const EqPreset* userPreset(const std::vector<EqPreset>& user, const std::string& name)
+	{
+		for (auto& u : user)
+			if (checkEqPresetName(name, {u}) == EqNameError::Taken) return &u;
+		return nullptr;
+	}
+
+	EqNameError Player::saveEqPreset(const std::string& name, const EqGains& gains, bool overwrite)
+	{
+		if (!overwrite)
+		{
+			EqNameError e = checkEqPresetName(name, eqStore.user());
+			if (e != EqNameError::None) return e;
+		}
+		EqNameError e = eqStore.put(name, gains);
+		if (e != EqNameError::None) return e;
+		writeEqPresets();
+		// the one playing now
+		const EqPreset* p = userPreset(eqStore.user(), name);
+		Settings s = settings;
+		s.eqPreset = p ? p->name : name;
+		s.eqOrigin.clear();
+		s.eqGains = p ? p->gains : gains;
+		setSettings(s);
+		return EqNameError::None;
+	}
+
+	EqNameError Player::renameEqPreset(const std::string& from, const std::string& to)
+	{
+		EqNameError e = eqStore.rename(from, to);
+		if (e != EqNameError::None) return e;
+		writeEqPresets();
+		const EqPreset* p = userPreset(eqStore.user(), to);
+		std::string name = p ? p->name : to;
+		if (settings.eqPreset == from || settings.eqOrigin == from)
+		{
+			Settings s = settings;
+			if (s.eqPreset == from) s.eqPreset = name;
+			if (s.eqOrigin == from) s.eqOrigin = name;
+			setSettings(s);
+		}
+		return EqNameError::None;
+	}
+
+	bool Player::deleteEqPreset(const std::string& name)
+	{
+		if (!eqStore.remove(name)) return false;
+		writeEqPresets();
+		if (settings.eqPreset == name || settings.eqOrigin == name)
+		{
+			Settings s = settings;
+			if (s.eqPreset == name) s.eqPreset.clear();	// Custom: the same curve, unsaved
+			s.eqOrigin.clear();
+			setSettings(s);
+		}
+		return true;
 	}
 
 	void Player::showLevel(const std::string& label, int percent)
@@ -1088,7 +1307,42 @@ namespace bp
 		}
 		const char* cmd[] = {"osd-overlay", "2", "ass-events", ev.c_str(), "960", "720", "10", "no", "no", nullptr};
 		mpv_command_async(mpv, 0, cmd);
-		cardShown = true;
+		cardMs = 2000;
+	}
+
+	void Player::showEqCard()
+	{
+		// the volume card's colours, in the same overlay (one replaces the other); with nothing playing, under the
+		// icon and the name. The curve (centred, 334 to 626) under the text
+		int dy = playing() ? 0 : 250;
+		bool on = settings.eqOn, fx = settings.soundFx != SoundFx::None;
+		std::string preset = settings.eqPreset.empty() ? "Custom" : settings.eqPreset, effect = soundFxName(settings.soundFx);
+		// "Equalizer · Rock", "Rock · Concert hall" (the preset cut short for the effect's room), "EQ off · Cave",
+		// "Equalizer off"
+		std::string text = !fx ? (on ? "Equalizer \xc2\xb7 " + cardText(preset, 24) : "Equalizer off")
+							   : (on ? cardText(preset, 16) : "EQ off") + " \xc2\xb7 " + effect;
+		char e[512];
+		snprintf(e, sizeof e,
+			"{\\an7\\pos(280,%d)\\bord0\\shad0\\1c&H1C1617&\\1a&H20&\\p1}m 0 0 l 400 0 400 124 0 124{\\p0}\n"
+			"{\\an7\\pos(304,%d)\\bord0\\shad0\\fnInter\\fs28\\q2\\clip(280,%d,680,%d)\\1c%s}",
+			300 + dy, 312 + dy, 300 + dy, 424 + dy, on || fx ? "&HE2EDF1&" : "&H7C868A&");
+		std::string ev = e + text + "\n";
+		snprintf(e, sizeof e, "{\\an7\\pos(334,%d)\\bord0\\shad0\\1c&H464323&\\p1}m 0 0 l 292 0 292 2 0 2{\\p0}", 392 + dy);
+		ev += e;
+		// the curve: a bar a band, up or down from the teal line by its gain. One event each, its drawing from 0 0:
+		// libass places a drawing by its own box, so a shared one would move with its highest bar
+		for (int i = 0; i < EQ_BANDS; i++)
+		{
+			double g = settings.eqGains[i];
+			int h = (int)std::lround(std::fabs(g) * 2.5);
+			if (!h) continue;
+			snprintf(e, sizeof e, "\n{\\an7\\pos(%d,%d)\\bord0\\shad0\\1c%s\\p1}m 0 0 l 22 0 22 %d 0 %d{\\p0}",
+				334 + 30 * i, g > 0 ? 392 + dy - h : 394 + dy, on ? "&H29B4F0&" : "&H7C868A&", h, h);
+			ev += e;
+		}
+		const char* cmd[] = {"osd-overlay", "2", "ass-events", ev.c_str(), "960", "720", "10", "no", "no", nullptr};
+		mpv_command_async(mpv, 0, cmd);
+		cardMs = 1500;
 	}
 
 	void Player::hideLevel()
@@ -1106,6 +1360,7 @@ namespace bp
 
 	void Player::saveResume()
 	{
+		commitEq();	// (the Equalizer page left open as a file ends, or as the player quits)
 		// a photo has no place to come back to
 		if (!loaded || playlist.empty() || opts.stateDir.empty() || isPhoto) return;
 		ResumeEntry e;
@@ -1194,7 +1449,11 @@ namespace bp
 		int show = shownMusic();
 		std::string graph = show == SHOW_ART ? "" : show == SHOW_NONE ? blankGraph() : graphFor(settings.visualizer, show == SHOW_BOTH);
 		bool had = !graphSet.empty();
-		if (graphSet != graph) prop("lavfi-complex", graph);
+		if (graphSet != graph)
+		{
+			syncEq(true);	// the graph's change rebuilds the chain from af
+			prop("lavfi-complex", graph);
+		}
 		if (graph.empty() && had)
 		{
 			// a graph taken off leaves no track chosen: the song's sound and its art back

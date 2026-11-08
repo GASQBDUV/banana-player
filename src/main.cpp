@@ -584,6 +584,8 @@ int main(int argc, char** argv)
 			player.pollEvents();
 			player.checkAudio();
 			player.checkSongEnd();
+			player.checkDisplay();
+			player.checkCpu();
 			player.checkNet();
 			player.checkPhoto();
 			player.checkLoading();
@@ -767,10 +769,10 @@ int main(int argc, char** argv)
 			}
 
 			Uint32 now = SDL_GetTicks();
-			// a chapter card shown: it goes the way the volume card does, after 2 s
-			if (player.takeCardShown())
+			// a chapter or equalizer card shown: it goes the way the volume card does, after its time
+			if (int ms = player.takeCardShown())
 			{
-				levelUntil = now + 2000;
+				levelUntil = now + ms;
 				renderPending = true;
 			}
 			if (levelUntil && now >= levelUntil)

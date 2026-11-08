@@ -1,4 +1,6 @@
 #pragma once
+#include "eq.h"
+#include "soundfx.h"
 #include "substyle.h"
 #include <string>
 
@@ -63,6 +65,13 @@ namespace bp
 		bool sameBrightness = true;
 		// its pop-up's "Not until tomorrow": not shown before this time (seconds since 1970)
 		long long updateRemindAfter = 0;
+		// the equalizer (music only). eqPreset: the preset the curve is ("" = Custom, an edited curve not saved);
+		// eqOrigin: the preset Custom was made from; eqGains: the curve that plays, whichever
+		bool eqOn = false;
+		std::string eqPreset = "Flat", eqOrigin;
+		EqGains eqGains{};
+		// music's sound effect (reverb, wide stereo...), whether or not the equalizer is on
+		SoundFx soundFx = SoundFx::None;
 	};
 
 	std::string serializeSettings(const Settings& s);
