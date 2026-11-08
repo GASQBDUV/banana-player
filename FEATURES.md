@@ -13,6 +13,7 @@ Everything Banana Player does, button by button. For installing it, see the [REA
 - [Chapters](#chapters)
 - [Settings](#settings)
 - [Quick settings](#quick-settings)
+- [Web dashboard](#web-dashboard)
 - [Updates](#updates)
 - [More](#more)
 
@@ -31,19 +32,29 @@ HEVC (x265), may drop frames. **Info** shows how it's keeping up.
 
 ## Finding something to play
 
-Open Banana Player and pick something on the bottom screen:
+Open Banana Player and the bottom screen shows **Home**:
 
-- **Recent:** the last 30 things you played.
-- **Videos:** the `videos` folder in `roms` on your card.
-- **This card** and **Second card:** anything on your SD cards.
+- **Recent**, along the top: a card for each of the last 30 things you played, newest first, with how far you got
+  (`0:27 / 0:52`, or `Played · 3:12`), a bar, and a network mark for a file on a server. **A** plays it (from where you
+  left off), **Y** opens its menu: **Resume from…** (or **Play**), **Play from the start**, **Show in folder** (opens
+  Files or Network on that file), **Add to playlist…**, **Remove from Recent**. The last card, **All recent**, opens
+  the whole list. On the touch screen tap a card to play it, swipe the strip, or hold a card for its menu. With nothing
+  played yet the strip is a single line and the tiles grow.
+- Four tiles, two by two: **Files** (your cards: **Videos**, the `videos` folder in `roms`, then **This card** and
+  **Second card**), **Playlists**, **Network** and **Extensions** (coming in a later version). Each says what's in it.
+
+Move with the D-pad: **UP/DOWN** between the strip and the tiles (back to the card or the column you left),
+**LEFT/RIGHT** along them. **X** on Home: **Clear Recent** (press twice), **Show hidden folders**, **Settings**. **B**
+twice quits, **START** opens the menu.
+
+Inside a section the header reads its name with four markers beside it, the open one lit: **L/R** go to the section
+before or after (at its top), or tap a marker. **B** goes up a folder, and from the section's top back to Home, on its
+tile.
 
 Folders come first, then files in natural order (episode 2 before episode 10). Each row has an icon (folder, video,
 song, photo), and each file shows its size. Anything you stopped part-way through shows where you left off. The line
-under the tabs shows where you are (`share / Movies`), and the bottom line shows what each button does there: the
-button's name in yellow, then what it does.
-
-The **Local**, **Playlists** and **Network** tabs at the top switch between your cards, your playlists and your network
-folders (**L/R**, or tap a tab). See [Playlists](#playlists).
+under the header shows where you are (`share / Movies`), and the bottom line shows what each button does there: the
+button's name in yellow, then what it does. See [Playlists](#playlists).
 
 Everything in a folder plays as one playlist: **L/R** go to the previous or next file, and the next one starts when
 the current one ends. Folders can mix videos and music. Photos are a list of their own: from a photo you step through
@@ -53,12 +64,12 @@ its folder on that file.
 ## Playlists
 
 A playlist is a list of your videos and songs, in the order you set. It can mix files from your cards and from network
-folders. Playlists have a tab of their own, between Local and Network.
+folders. Playlists have a section of their own, between Files and Network.
 
-- **Make one:** on the **Playlists** tab, **X** → **New playlist…** (or **A** on the empty page), then name it on the
+- **Make one:** in **Playlists**, **A** on **New playlist** (the last row), or **X** → **New playlist…**, then name it on the
   keyboard. A name is 40 characters at most, can't have a **/** in it, and can't match one you already have (capitals
   don't count).
-- **Open one:** **A** on it shows its items, in order. The tab lists the playlists by name, each with its number of items.
+- **Open one:** **A** on it shows its items, in order. The section lists Liked first, then your playlists by name, each with its number of items.
 - **Its menu:** **Y** on a playlist (or hold it) gives **Play**, **Shuffle play**, **Rename…** and **Delete playlist**
   (press it twice). Deleting a playlist leaves its files where they are.
 
@@ -73,7 +84,7 @@ folders. Playlists have a tab of their own, between Local and Network.
 
 ### Adding items
 
-- On **Local** or **Network**, **X** → **Select files**, tick the files you want (**A**, or a tap), then **X** →
+- In **Files** or **Network**, **X** → **Select files**, tick the files you want (**A**, or a tap), then **X** →
   **Add to…** and pick a playlist (or **New playlist…**). On the touch screen, a hold on a file starts this with that
   file ticked.
 - Inside a playlist, **X** → **Add files…** opens the file list, and the files you tick are added to that playlist.
@@ -112,8 +123,27 @@ Network items keep their subtitles and covers, as they do in a network folder. T
 start, while its folder is read for them.
 
 Each playlist is saved on the card as an `.m3u` text file (the usual playlist format), in
-`home/.config/banana-player/playlists/`. A change is saved about a second after you make it, and when you leave the
-Playlists tab.
+`home/.config/banana-player/playlists/`. A change is saved about a second after you make it, and when you leave
+Playlists.
+
+## Like and Add to playlist
+
+Like a song or a video to keep it in **Liked**, a playlist of its own. Photos and folders can't be liked.
+
+- **Like:** the **heart** at the top of the bottom screen while something plays, **START** → **Like** (the menu opens on
+  it), or **L3** on the RG DS Plus. The heart turns yellow and the top screen says **Added to Liked** with the title
+  (**Removed from Liked** when you press it again). A like is the file's, wherever it plays from.
+- **Add to playlist:** the square left of the heart, or **START** → **Add to playlist…**. **New playlist…** comes
+  first, then the playlists you changed last. A playlist that already has it says **✓ Added**: choosing it asks
+  **Add again?**, and a second **A** adds another copy. **New playlist…** names one on the keyboard and adds to it. The
+  square shows a check and the top screen says where it went.
+- **Liked** is always first in **Playlists**, with a yellow heart. It's newest first and can't be reordered, renamed or
+  deleted, and only Like adds to it. Inside it, an item's **Y** menu has **Play from here**, **Unlike**, **Add to
+  playlist…** and **Show in folder**; select mode's **X** is **Unlike** (press it twice).
+- **Home:** a liked file's Recent card has a small yellow heart, and a card's **Y** menu has **Like** / **Unlike** and
+  **Add to playlist…**. In **Files** and **Network**, liked files have a small heart before their note.
+- Liked holds 2,000; liking one more lets the oldest go. Likes made in the web dashboard show up on the handheld at
+  once, and the other way round.
 
 ## Controls
 
@@ -129,11 +159,12 @@ Playlists tab.
 | **X** | Video: audio and subtitles (one page, two tabs: **Y** / **X** or **L / R** switch them) · Music: No loop → Loop all → Loop one |
 | **Y** | Video: chapters · Music: chapters, for a song or audiobook that has them (on other songs it does nothing) |
 | **SELECT** | Video: Fit → Fill → Stretch · Music: the Display popup (what's shown, and the visualizer's style) |
-| **START** | Menu: Recent, Settings, About, Quit |
+| **START** | Menu, on its **Playing** tab: Like, Add to playlist…, Show in folder, Info |
+| **L3** (press the stick, RG DS Plus) | Like / Unlike what plays |
 | **B** (or **Back**) **twice** | Close the video (back to the list) |
 | **F + L2** | Screenshot of both screens (saved in the card's `screenshots` folder) |
 | **F + START** | Quit Banana Player at once (anywhere; your place is kept) |
-| **Menu/Function** (F) | Quick settings: volume, brightness, Same brightness for both screens, Quit |
+| **Menu/Function** (F) | Quick settings: volume, brightness, Same brightness for both screens, Web dashboard, Quit |
 
 **By touch:**
 - **Progress bar:** touch it to jump there. Hold and drag to scrub, and the picture follows your finger.
@@ -174,20 +205,22 @@ See [Photos](#photos) for the touch screen.
 | Button | What it does |
 |---|---|
 | **A** (or tap it) | Open the folder, play the file, or open the playlist |
-| **B** or **Back** | Up one folder (twice at the top to quit) |
+| **B** or **Back** | Up one folder; at a section's top, back to Home |
 | **UP / DOWN** | Move |
 | **LEFT / RIGHT** | Page up / down |
-| **L / R** | Previous / next tab: Local, Playlists, Network |
-| **X** | Options: **Refresh** (read the folder again), and on a folder **Hide folder** / **Unhide folder** (or hold the folder on the touch screen). On the Local and Network tabs: **Select files**, to tick files and add them to a playlist. On the Network tab: **Add connection**, **Find on the network**, **Refresh**. On the Playlists tab: **New playlist…** |
-| **Hold** (touch screen) | On a file in Local or Network: starts selecting, with that file ticked |
+| **L / R** | Previous / next section: Files, Playlists, Network, Extensions |
+| **X** | Options: **Refresh** (read the folder again), and on a folder **Hide folder** / **Unhide folder** (or hold the folder on the touch screen). In Files: **Show hidden folders**. In Files and Network: **Select files**, to tick files and add them to a playlist. In Network: **Add connection**, **Find on the network**, **Refresh**, **Web dashboard…**. In Playlists: **New playlist…**. In All recent: Home's options |
+| **Hold** (touch screen) | On a file in Files or Network: starts selecting, with that file ticked |
 | **Y** | On a folder: **Add to playlist…** (first). On a network connection: **Edit connection**, **Test connection**, **Delete connection** (press twice) (or hold it on the touch screen). On a playlist or its item: see [Playlists](#playlists) |
 | **START** | Menu |
 
 ### The menu (START)
 
-Four tabs. Switch with **L/R** or a tap; **B**, **START** or **<** closes it.
+Three tabs, four while a song or video plays. Switch with **L/R** or a tap; **B**, **START** or **<** closes it. (What
+you played last is on Home.)
 
-- **Recent:** what you played last. Pick one to play it.
+- **Playing** (only while a song or video plays, and the tab it opens on): **Like** / **Liked**, **Add to playlist…**
+  (with the playlists it's already in), **Show in folder** and **Info**. See [Like and Add to playlist](#like-and-add-to-playlist).
 - **Settings:** see [Settings](#settings).
 - **About:** version, licence and the libraries it uses.
 - **Quit:** quits Banana Player, keeping your place.
@@ -197,8 +230,8 @@ Four tabs. Switch with **L/R** or a tap; **B**, **START** or **<** closes it.
 Play videos, music and photos straight from a computer or a NAS on your Wi-Fi, over **SMB** (Windows file sharing,
 most NAS boxes, Samba) or **FTP** (and FTPS). Nothing is copied to the card.
 
-- With no connections yet, the Network tab offers **Add connection** (tap it, or **A**).
-- **Find on the network** (X on the Network tab) lists the computers sharing files nearby (Windows, Mac, Linux, NAS):
+- With no connections yet, the Network section offers **Add connection** (tap it, or **A**).
+- **Find on the network** (X in Network) lists the computers sharing files nearby (Windows, Mac, Linux, NAS):
   pick one, type your user name and password, and Save. No address to type: a computer found by its name is found
   again by that name, even when its address changes.
 - **Add connection** (X) for one it can't find, or for FTP: the type, the server's address or name, and optionally the
@@ -309,7 +342,7 @@ All three are remembered.
 
 ## Settings
 
-Settings opens on seven groups, as tiles two to a row: move with the D-pad (**UP/DOWN** a row, **LEFT/RIGHT** a tile),
+Settings opens on eight tiles (seven groups, and the [Web dashboard](#web-dashboard)), two to a row: move with the D-pad (**UP/DOWN** a row, **LEFT/RIGHT** a tile),
 open one with **A** or a tap, and **B** goes back to them. In a group, **Y** goes to the group before it and **X** to
 the one after (or tap the names either side of its title), and the line above the bottom says what the setting under the
 cursor does. **Subtitle style...** at the end of the Subtitles list opens the Subtitles group; **B** there
@@ -334,9 +367,99 @@ goes back to the list.
 | | Same for both screens | On | One brightness for both screens; off, each its own |
 | | Button hotkeys | On | Off: buttons can't pause, skip or close while something plays (touch still can) |
 | | Battery percentage | Off | Shows the battery's percent beside its icon (the icon, with a bolt while charging, is always there) |
+| | Clock | 24-hour | The time in the top corner of the bottom screen, left of the battery: 24-hour (`14:32`), 12-hour (`2:32 PM`) or Off. Not over a photo |
 | **Updates** | Check automatically | On | Looks for a new version a few seconds after the start, in the background (Wi-Fi needed) |
 | | Check for updates | | Looks now, and shows what it found |
 | | Update to … | | Downloads the new version (shown when there's one), then **Restart now** |
+| **Web dashboard** | Turn on or off, New PIN | Off | Control the player and manage files and playlists from a phone or computer on your Wi-Fi. See [Web dashboard](#web-dashboard) |
+
+## Web dashboard
+
+Turn on the web dashboard and open the handheld's address in a phone's or computer's browser. From there you can
+control what's playing, look through the card, upload and organise your files, and make playlists. It's off until you
+turn it on.
+
+### Turning it on
+
+- **Settings › Web dashboard**, or **Quick settings** (F) › **Web dashboard** (a tick box), or the Network section's
+  **X** › **Web dashboard…**.
+- The handheld's page shows a **QR code**, the **address** (for example `192.168.1.23:8080`) and a four-character
+  **PIN**. Scan the QR code with your phone's camera: it opens the dashboard and signs you in. Or type the address into
+  a browser and enter the PIN.
+- The phone or computer must be on the same Wi-Fi as the handheld.
+- It stays on across restarts until you turn it off. The PIN stays the same too, until you press **New PIN** on the
+  handheld (press it twice). That signs out every browser.
+- While the QR code is on the screen, the bottom screen turns off after 90 seconds without a press (a touch brings it
+  back).
+
+On the handheld, a **globe** beside the battery shows the dashboard is on: dim while no browser is connected, yellow when
+one is. Tap it to open the page. When a browser signs in, a note pops up on the top screen.
+
+Nothing runs while the dashboard is off. While it's on and idle it uses next to no battery, and a browser tab that's
+hidden disconnects.
+
+### Security
+
+- Only devices on your home network (private addresses) can connect. Nothing outside it can.
+- Wrong PINs: after five wrong tries from one device it waits 60 seconds before trying again, longer each time. After
+  30 wrong tries in total the PIN changes and the handheld says so.
+- A browser stays signed in for seven days.
+- The connection is **not encrypted** (plain HTTP, no certificate). Use it on your home Wi-Fi only.
+- The browser can only reach your media folders on the card. The player's own settings and the BananaOS system folders
+  are never shown.
+
+### In the browser
+
+Three tabs: **Playing**, **Files** and **Playlists**.
+
+**Playing** controls the music or video, and has a target switch at the top:
+
+- **On handheld** (the default): controls what the handheld plays. Play and pause, previous and next, seeking, back 5
+  seconds and forward 10, loop, shuffle, volume, the equalizer (presets and bands), the sound effects, chapters, and what's
+  up next.
+- **In this browser**: plays the file on the phone or computer, and pauses the handheld. Here there's no equalizer,
+  effects or handheld volume (a volume slider for the browser instead), and the chapters are the browser's own.
+  Not on iPhone or iPad yet (it says **Not on iPhone or iPad yet**): there the dashboard is the handheld's remote.
+- While the browser plays, the handheld shows **Playing in your browser** and its bar runs on with the browser's time.
+- Switching the target while something plays carries on from the same place.
+- A file the browser can't play (AVI, AC3 or DTS sound, WMA, APE and so on) says **Plays on the handheld only**.
+
+**Files** lists the card's folders:
+
+- **Upload** files and whole folders with the buttons, or drag them onto the page. Uploads carry on while you move
+  between pages.
+- **New folder**, **Rename**, **Move**, **Download**, and **Delete** (permanent: it asks first and can't be undone).
+- **Play** a file or folder on the handheld or in this browser, or **Add to playlist**.
+- **Select** several files and folders to do any of these at once. Rename works on one item at a time.
+- Uploads and new names are limited to music, video, photo and subtitle files, and images for covers. A folder can be
+  deleted from the page only if everything in it is one of those.
+
+**Playlists** are the same playlists as the handheld's Playlists section:
+
+- Create, rename, delete (the files stay where they are), and open a playlist.
+- Drag to change the order, remove items (with **Undo**), add files from **Files**.
+- **Play** or **Shuffle play**, on the handheld or in this browser.
+
+**Like and Add to playlist** in the browser:
+
+- **The heart** likes what's playing, or unlikes it. On a phone or tablet it's in the row just above the timeline, next
+  to the volume button (the title gets the whole width). On a computer it's in the player bar at the bottom, after the
+  title, with an **Add to playlist** button. Playing in this browser, the heart is that file's.
+- **Add to playlist**: the player's **⋯** on a phone, the bar's button on a computer. A playlist that already has it
+  says **✓ Added**; choosing it again asks **Add again**, and a second click adds a second copy. **New playlist…** makes
+  one from the list itself. With more than 7 playlists there's **Find**: Enter adds to the first match, or makes a
+  playlist of that name if none matches. The playlists you added to last come first. Liked is never listed.
+- A song or video's **⋯** in Files has **Like** / **Unlike** (with **Undo**) and **Add to playlist…**; photos and
+  folders have no Like. Liked files have a small yellow heart after their name. **Add** in a selection adds them all.
+- **Liked** is pinned at the top of Playlists. It's newest first, with no reordering: each row has a heart that unlikes
+  it (with **Undo**, which puts it back at the top), and **⋯ › Select…** unlikes several at once. A network file in it
+  plays on the handheld only, and a file gone from the card is marked **Gone**.
+- A like on the handheld shows up at once: the heart fills, and on the Liked page the new row comes in at the top, lit.
+
+Changes show up live on both sides: what you do on the handheld appears in the browser, and the other way round.
+
+Not yet: network folders in the browser, a grid of photo thumbnails, saving equalizer presets from the browser, and
+subtitles when playing in the browser.
 
 ## Updates
 
@@ -361,6 +484,8 @@ Press the **Menu/Function** button (F), anywhere, for a panel on the bottom scre
   levels as BananaOS's own settings and its volume and brightness keys, and they're kept after a restart.
 - **Same brightness for both screens** (a tick box): on, one Brightness bar sets both screens; off, **Top** and
   **Bottom** each get their own.
+- **Web dashboard** (a tick box): on or off. While it's on, **Settings** (Right, then A, or a tap) opens its page: the
+  QR code, the address, the PIN and **New PIN**. See [Web dashboard](#web-dashboard).
 - **Quit Banana Player.**
 
 **F** again, **B** or a tap outside the panel closes it. (F with another button, like F + L2 or F + volume, does that

@@ -27,6 +27,8 @@ namespace bp
 	static const uint64_t THUMB_REPLY = 1000;
 	// af-command's answers (the equalizer's bands): far above THUMB_REPLY's, which grow with each file
 	static const uint64_t EQ_REPLY = 1ull << 40;
+	// loadfile's answers (the playlist entry it made), plus the load's serial
+	static const uint64_t LOAD_REPLY = 1ull << 41;
 	// the panels' shape (both are 4:3)
 	static const double PANEL_ASPECT = 4.0 / 3;
 	// the thumbnail's largest size: the pan area's on the Plus's 1024x768 panel
@@ -96,6 +98,17 @@ namespace bp
 		opt("idle", "yes");				// stay up between files and after the last: we decide when to leave
 		opt("keep-open", "no");
 		opt("resume-playback", "no");		// resume.tsv instead: each of position, audio and subtitles can be off
+		// tests: what reaches the speakers, recorded (BP_AO_PCM=file: mpv's pcm output, untimed, as raw 44.1 kHz s16
+		// stereo, appended so an output reopened keeps what came before)
+		if (const char* pcm = getenv("BP_AO_PCM"))
+		{
+			opt("ao", "pcm");
+			opt("ao-pcm-file", pcm);
+			opt("ao-pcm-waveheader", "no");
+			opt("ao-pcm-append", "yes");
+			opt("audio-format", "s16");
+			opt("audio-samplerate", "44100");
+		}
 		mpv_request_log_messages(mpv, o.verbose ? "v" : "warn");
 		if (mpv_initialize(mpv) < 0) return false;
 
@@ -358,10 +371,13 @@ namespace bp
 	void Player::load()
 	{
 		const std::string& path = playlist[current];
+		heldUnplayed = false;
 		loaded = finished = false;
 		error.clear();
 		title.clear();
 		tracks.clear();
+		loadEntry = -1;
+		tracksMine = false;
 		clearChapters();
 		position = duration = -1;
 		seenAid = seenSid = -1;
@@ -439,6 +455,9 @@ namespace bp
 
 		// (a graph takes the song's first audio track itself: no track to choose)
 		wantAid = graph.empty() && settings.rememberAudio && e && e->aid > 0 ? e->aid : 0;
+		// asked for this file alone (the web's hand-off): before what's remembered
+		if (graph.empty() && nextAid > 0) wantAid = nextAid;
+		nextAid = 0;
 		if (graph.empty()) fileOpts += ",aid=" + (wantAid ? std::to_string(wantAid) : std::string("auto"));
 		std::string alang = opts.lang;
 		if (settings.rememberAudio && !resume.lastAudioLang.empty()) alang = resume.lastAudioLang + (alang.empty() ? "" : "," + alang);
@@ -514,7 +533,7 @@ namespace bp
 		if (isNet) fileOpts += netFileOptions(path);
 		// (the file's options take loadfile's index argument before them: -1, "replace" has no place)
 		const char* cmd[] = {"loadfile", path.c_str(), "replace", "-1", fileOpts.c_str(), nullptr};
-		mpv_command_async(mpv, 0, cmd);
+		mpv_command_async(mpv, LOAD_REPLY + (uint64_t)loadSerial, cmd);
 	}
 
 	// what the panel says when a network file couldn't be played on
@@ -615,6 +634,10 @@ namespace bp
 					if (isAudio && loaded) updateOverlay();
 					break;
 				case TRACK_LIST:
+					// the last file's list, read before it closed and come after this one's load(): its album art
+					// would put the art's graph on a song with none ("Pad vid1 is not connected"), which leaves it
+					// silent, frozen at its first second
+					if (!tracksMine) break;
 					refreshTracks(p->format == MPV_FORMAT_NODE ? (mpv_node*)p->data : nullptr);
 					if (loaded && readyPending && !tracks.empty()) fileReady();
 					break;
@@ -652,8 +675,30 @@ namespace bp
 				else readyPending = true;
 				break;
 			}
+			case MPV_EVENT_START_FILE:
+				startedEntry = ((mpv_event_start_file*)ev->data)->playlist_entry_id;
+				if (loadEntry >= 0 && startedEntry == loadEntry) tracksMine = true;
+				break;
 			case MPV_EVENT_COMMAND_REPLY:
 			{
+				if (ev->reply_userdata >= LOAD_REPLY)
+				{
+					// (an earlier load's answer: not this file's entry)
+					if (ev->reply_userdata != LOAD_REPLY + (uint64_t)loadSerial) break;
+					if (ev->error < 0)
+					{
+						tracksMine = true;	// (no entry to tell by: whatever list comes is taken, as before)
+						break;
+					}
+					mpv_node* r = &((mpv_event_command*)ev->data)->result;
+					if (r->format == MPV_FORMAT_NODE_MAP)
+						for (int i = 0; i < r->u.list->num; i++)
+							if (!strcmp(r->u.list->keys[i], "playlist_entry_id") && r->u.list->values[i].format == MPV_FORMAT_INT64)
+								loadEntry = r->u.list->values[i].u.int64;
+					// (it starts after the answer, but as a safeguard)
+					if (loadEntry >= 0 && startedEntry == loadEntry) tracksMine = true;
+					break;
+				}
 				if (ev->reply_userdata == EQ_REPLY)
 				{
 					if (ev->error < 0)
@@ -793,6 +838,25 @@ namespace bp
 		// try again by itself). Opened again, three times at most, each in the log
 		if (!loaded || !audioCheckAt || ticks() < audioCheckAt) return;
 		audioCheckAt = 0;
+		// a song's graph that mpv couldn't put up (its art's [vid1] on a song with none: "Pad vid1 is not connected"):
+		// mpv then drops every track, and the song sits silent at its first second. Drawn without the art, else none
+		if (!selected(TrackType::Audio) && !tracksOf(TrackType::Audio).empty() && !graphSet.empty())
+		{
+			if (audioChecks >= 3) return;
+			audioChecks++;
+			bool art = graphSet.find("[vid1]") != std::string::npos;
+			fprintf(stderr, "banana-player: %s: the music's graph failed (%s); %s (try %d)\n", baseName(currentPath()).c_str(),
+				art ? "with the art" : "without art", art ? "the visualizer alone" : "no graph", audioChecks);
+			syncEq(true);
+			if (art) prop("lavfi-complex", graphFor(settings.visualizer, false));
+			else
+			{
+				prop("lavfi-complex", "");
+				prop("aid", "auto");
+			}
+			audioCheckAt = ticks() + 1500;
+			return;
+		}
 		// a file with audio tracks and none chosen (not under a graph, which chooses its own): mpv dropped the track
 		// when the sound device wouldn't open (its error_on_track), and ao-reload does nothing with no device. The
 		// track chosen again opens the device anew. (The Audio page has no Off: this is never the person's choice)
@@ -1017,10 +1081,32 @@ namespace bp
 	void Player::unpause()
 	{
 		prop("pause", "no");
+		wakeHeld();
+	}
+
+	void Player::holdPaused()
+	{
+		pause();
+		heldUnplayed = true;
+	}
+
+	void Player::wakeHeld()
+	{
+		if (!heldUnplayed || !mpv) return;
+		heldUnplayed = false;
+		const char* cmd[] = {"ao-reload", nullptr};
+		mpv_command_async(mpv, 0, cmd);
+		fprintf(stderr, "audio: %s held paused for a page: the sound output reopened as it plays\n", baseName(currentPath()).c_str());
+	}
+
+	void Player::pause()
+	{
+		prop("pause", "yes");
 	}
 
 	void Player::togglePause()
 	{
+		if (heldUnplayed && paused) { unpause(); return; }
 		const char* cmd[] = {"cycle", "pause", nullptr};
 		mpv_command_async(mpv, 0, cmd);
 	}
@@ -1356,6 +1442,21 @@ namespace bp
 		mpv_command_async(mpv, 0, cmd);
 	}
 
+	void Player::showElsewhere(bool on)
+	{
+		if (!on)
+		{
+			const char* cmd[] = {"osd-overlay", "6", "none", "", nullptr};
+			mpv_command_async(mpv, 0, cmd);
+			return;
+		}
+		std::string ev = "{\\an7\\pos(0,0)\\bord0\\shad0\\1c&H1C1617&\\1a&H00&\\p1}m 0 0 l 960 0 960 720 0 720{\\p0}\n";
+		ev += "{\\an5\\pos(480,320)\\bord0\\shad0\\fnPixelify Sans\\fs56\\1c&H29B4F0&}Playing in your browser\n";
+		ev += "{\\an5\\pos(480,400)\\bord0\\shad0\\fnInter\\fs30\\1c&H7C868A&}Press A to play here instead";
+		const char* cmd[] = {"osd-overlay", "6", "ass-events", ev.c_str(), "960", "720", "5", "no", "no", nullptr};
+		mpv_command_async(mpv, 0, cmd);
+	}
+
 	void Player::wakeOutput()
 	{
 		wakeLoads++;
@@ -1392,7 +1493,7 @@ namespace bp
 		if (isAudio && loaded) updateOverlay();
 	}
 
-	int Player::stepChapter(int dir)
+	int Player::stepChapter(int dir, double at)
 	{
 		if (!loaded || !error.empty() || isPhoto || playlist.empty()) return CHAPTER_NONE;
 		if (chapters.empty())
@@ -1401,9 +1502,14 @@ namespace bp
 			return CHAPTER_NONE;
 		}
 		int cur = currentChapter();
+		if (at >= 0)
+		{
+			cur = -1;
+			for (int i = 0; i < (int)chapters.size() && chapters[i].time <= at; i++) cur = i;
+		}
 		if (cur >= (int)chapters.size()) cur = (int)chapters.size() - 1;
 		// no earlier than the chapter's start: the position can lag a jump, and would read as before it
-		double pos = cur >= 0 ? std::max(position, chapters[cur].time) : 0;
+		double pos = cur >= 0 ? std::max(at >= 0 ? at : position, chapters[cur].time) : 0;
 		int target = chapterTarget(chapters, cur, pos, dir);
 		if (target == CHAPTER_NONE)
 			showChapterCard(dir < 0 ? 0 : (int)chapters.size() - 1, dir < 0 ? -1 : 1);
@@ -1520,6 +1626,39 @@ namespace bp
 		cardMs = 1500;
 	}
 
+	void Player::showNoteCard(const char* const* rows, int h, const char* ink, const std::string& line1, const std::string& line2)
+	{
+		// the equalizer card's box and colours; the glyph's cells 4.5 units (\p2: drawn at twice the scale) on the
+		// left, centred on (332, 362), the two lines right of it
+		int dy = playing() ? 0 : 250, w = 0;
+		for (int y = 0; y < h; y++) w = std::max(w, (int)strlen(rows[y]));
+		std::string path;
+		for (int y = 0; y < h; y++)
+			for (int x = 0; rows[y][x];)
+			{
+				if (rows[y][x] != '#') { x++; continue; }
+				int e = x;
+				while (rows[y][e] == '#') e++;
+				char r[96];
+				snprintf(r, sizeof r, "m %d %d l %d %d %d %d %d %d ", x * 9, y * 9, e * 9, y * 9, e * 9, (y + 1) * 9, x * 9, (y + 1) * 9);
+				path += r;
+				x = e;
+			}
+		char e[512];
+		snprintf(e, sizeof e,
+			"{\\an7\\pos(280,%d)\\bord0\\shad0\\1c&H1C1617&\\1a&H20&\\p1}m 0 0 l 400 0 400 124 0 124{\\p0}\n"
+			"{\\an7\\pos(%d,%d)\\bord0\\shad0\\1c%s\\p2}",
+			300 + dy, (int)std::lround(332 - w * 2.25), (int)std::lround(362 + dy - h * 2.25), ink);
+		std::string ev = e + path + "{\\p0}\n";
+		snprintf(e, sizeof e, "{\\an4\\pos(382,%d)\\bord0\\shad0\\fnInter\\fs28\\q2\\clip(280,%d,668,%d)\\1c&HE2EDF1&}", 345 + dy, 300 + dy, 424 + dy);
+		ev += e + cardText(line1, 30) + "\n";
+		snprintf(e, sizeof e, "{\\an4\\pos(382,%d)\\bord0\\shad0\\fnInter\\fs22\\q2\\clip(280,%d,668,%d)\\1c&H7C868A&}", 384 + dy, 300 + dy, 424 + dy);
+		ev += e + cardText(line2, 30);
+		const char* cmd[] = {"osd-overlay", "2", "ass-events", ev.c_str(), "960", "720", "10", "no", "no", nullptr};
+		mpv_command_async(mpv, 0, cmd);
+		cardMs = 1500;
+	}
+
 	void Player::hideLevel()
 	{
 		const char* cmd[] = {"osd-overlay", "2", "none", "", nullptr};
@@ -1545,6 +1684,7 @@ namespace bp
 		// the tracks as last seen open (at the end, mpv's list is already gone: it isn't "subtitles off")
 		if (settings.rememberAudio && seenAid > 0) e.aid = seenAid;
 		if (settings.rememberSubs && seenSid >= 0) e.sid = seenSid;
+		e.duration = duration;	// (Home's Recent cards: how far into it)
 		resume.put(e);
 		writeFile(opts.stateDir + "/resume.tsv", resume.serialize());
 	}
@@ -1581,6 +1721,21 @@ namespace bp
 	{
 		played.clear();
 		if (!opts.stateDir.empty()) unlink((opts.stateDir + "/history.tsv").c_str());
+	}
+
+	void Player::removeFromHistory(const std::string& path)
+	{
+		if (played.remove(path) && !opts.stateDir.empty()) writeFile(opts.stateDir + "/history.tsv", played.serialize());
+	}
+
+	void Player::forgetPosition(const std::string& path)
+	{
+		const ResumeEntry* e = resume.find(path);
+		if (!e || e->position < 0) return;
+		ResumeEntry keep = *e;
+		keep.position = -1;
+		resume.put(keep);
+		if (!opts.stateDir.empty()) writeFile(opts.stateDir + "/resume.tsv", resume.serialize());
 	}
 
 	void Player::setLastFolder(const std::string& dir)
@@ -1630,6 +1785,9 @@ namespace bp
 		bool had = !graphSet.empty();
 		if (graphSet != graph)
 		{
+			// (in the log: a graph changed as a song starts, by the art its track list says it has)
+			fprintf(stderr, "music: %s: %s art, %d tracks; graph %s\n", baseName(currentPath()).c_str(),
+				hasCover(tracks) ? "has" : "no", (int)tracks.size(), graph.empty() ? "off" : graph.find("[vid1]") != std::string::npos ? "with the art" : "without art");
 			syncEq(true);	// the graph's change rebuilds the chain from af
 			prop("lavfi-complex", graph);
 		}

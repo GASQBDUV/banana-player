@@ -9,6 +9,11 @@
 #include <ctime>
 #include <sys/stat.h>
 #include <unistd.h>
+#ifdef BP_WEB
+#include "web/netif.h"
+#include "web/server.h"
+#include <qrcodegen.hpp>
+#endif
 
 namespace bp
 {
@@ -114,13 +119,27 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 	// playlists: one (lines and a note), a select box empty and ticked, a row's grip, Move, Shuffle
 	GLYPH(G_PLAYLIST, "#######....", "...........", "#######.###", "........###", "#######.#..", "........#..", "####....#..",
 		".....####..", "....#####..", ".....###...")
+	// Like: the heart filled (liked), outlined (not), a small one (a row's or a card's mark); Add to playlist
+	GLYPH(G_HEART, ".###...###.", "#####.#####", "###########", "###########", "###########", ".#########.", "..#######..",
+		"...#####...", "....###....", ".....#.....")
+	GLYPH(G_HEART_O, ".###...###.", "#...#.#...#", "#....#....#", "#.........#", "#.........#", ".#.......#.", "..#.....#..",
+		"...#...#...", "....#.#....", ".....#.....")
+	GLYPH(G_HEART_S, ".##.##.", "#######", "#######", ".#####.", "..###..", "...#...")
+	GLYPH(G_PL_ADD, "#######....", "...........", "#######....", "...........", "####....#..", "........#..", "......#####",
+		"........#..", "........#..")
 	GLYPH(G_BOX, "#########", "#.......#", "#.......#", "#.......#", "#.......#", "#.......#", "#.......#", "#.......#", "#########")
 	GLYPH(G_BOX_ON, "#########", "#########", "#######.#", "######..#", "#.###..##", "#..#..###", "##...####", "###.#####",
 		"#########")
 	GLYPH(G_GRIP, "#########", ".........", "#########", ".........", "#########")
 	GLYPH(G_MOVE, "...#...", "..###..", ".#####.", "...#...", "...#...", "...#...", ".#####.", "..###..", "...#...")
+	// the web dashboard: a globe (Settings' tile, its page, the header's indicator, the quick settings)
+	GLYPH(G_WEB, "..#####..", ".#..#..#.", "#..#.#..#", "#########", "#..#.#..#", "#########", "#..#.#..#", ".#..#..#.",
+		"..#####..")
 	GLYPH(G_SHUFFLE, ".........#.", "##.....####", "..#...#..#.", "...#.#.....", "....#......", "...#.#.....", "..#...#..#.",
 		"##.....####", ".........#.")
+	// Extensions: three blocks and a fourth to come
+	GLYPH(G_BLOCKS, "#####.#####", "#####.#####", "#####.#####", "#####.#####", "#####.#####", "...........", "#####...#..",
+		"#####...#..", "#####.#####", "#####...#..", "#####...#..")
 #undef GLYPH
 
 	// the two rows of buttons: what each does is the button it stands for
@@ -145,8 +164,13 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 		{"Files", "Folders, play history"},
 		{"Controls & screen", "Brightness, buttons"},
 		{"Updates", "New versions"},
+		{"Web dashboard", ""},	// (its line is its state: drawSettings)
 	};
 	static const char* RECENT = "\x01recent";
+	static const char* HOMEDIR = "\x01home";	// Home: the Recent strip and the sections' tiles
+	static const char* EXTDIR = "\x01" "ext";	// the Extensions section (a placeholder)
+	static const char* SECTION_NAMES[] = {"Files", "Playlists", "Network", "Extensions"};
+	static const Ui::Glyph* const SECTION_GLYPHS[] = {&G_CARD, &G_PLAYLIST, &G_NETWORK, &G_BLOCKS};
 	static const char* NETROOT = "\x01net";	// the Network tab's first page: the saved connections
 	static const char* FORMDIR = "\x01form";	// a connection's form (Add connection, Edit)
 	static const char* FINDNET = "\x01find";	// the servers found on the network
@@ -159,11 +183,16 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 	// FINDNET don't start with \x01 (the escape takes their "f" as a hex digit)
 	static bool pseudoDir(const std::string& d)
 	{
-		return d == RECENT || d == NETROOT || d == FORMDIR || d == FINDNET || d == PLROOT || isPlDir(d);
+		return d == RECENT || d == HOMEDIR || d == EXTDIR || d == NETROOT || d == FORMDIR || d == FINDNET || d == PLROOT || isPlDir(d);
+	}
+	// a section's first page (Ui::BrowseTab: Files, Playlists, Network, Extensions)
+	static std::string sectionTop(int tab)
+	{
+		return tab == 1 ? PLROOT : tab == 2 ? NETROOT : tab == 3 ? EXTDIR : "";
 	}
 	// the browser's rows' ids: 1 a folder, 2 a file, 3 Clear play history, 4 a connection, 6 Try again, -1 a message;
 	// a playlist (Playlists' first page), a playlist's item
-	enum { PL_ROW = 7, PL_ITEM = 8 };
+	enum { PL_ROW = 7, PL_ITEM = 8, PL_NEW = 9 };	// (PL_NEW: Playlists' last row, New playlist)
 	// the form's rows
 	enum { FORM_TYPE = 20, FORM_NAME, FORM_HOST, FORM_PORT, FORM_SHARE, FORM_FOLDER, FORM_SIGNIN, FORM_USER, FORM_PASS, FORM_FTPS, FORM_TEST, FORM_SAVE };
 	// the found servers' rows
@@ -250,6 +279,8 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 			int minx, maxx, miny, maxy, adv;
 			capHeight[i] = TTF_GlyphMetrics(fonts[i], 'H', &minx, &maxx, &miny, &maxy, &adv) == 0 ? maxy : TTF_FontAscent(fonts[i]) * 3 / 4;
 		}
+		// the web dashboard's PIN, big (a font of its own: the three sizes are the page's text)
+		pinFont = TTF_OpenFont(path.c_str(), (int)std::lround(56 * sy));
 		static const char* FALLBACKS[] = {"fusion-pixel-12px-proportional-zh_hans.ttf", "NotoSansThai.ttf",
 			"NotoSansArabic.ttf", "NotoSansHebrew.ttf", "NotoSansDevanagari.ttf"};
 		for (const char* name : FALLBACKS)
@@ -350,6 +381,7 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 		for (auto& c : cache) SDL_DestroyTexture(c.second);
 		for (auto* f : fonts)
 			if (f) TTF_CloseFont(f);
+		if (pinFont) TTF_CloseFont(pinFont);
 		for (auto& f : fallbacks)
 			for (auto* x : f) TTF_CloseFont(x);
 		if (ren) SDL_DestroyRenderer(ren);
@@ -362,7 +394,7 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 		if (page == Page::Chapters)
 		{
 			// a chapter a row (its index the id), the one playing as selected
-			int cur = p.currentChapter();
+			int cur = shownChapter(p);
 			for (size_t i = 0; i < p.chapters.size(); i++) out.push_back({(int64_t)i, chapterLabel(p.chapters[i], (int)i + 1), (int)i == cur});
 			return out;
 		}
@@ -398,7 +430,7 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 		page = Page::Chapters;
 		// on the one playing, three rows above it showing where the list allows (what came before it, a little)
 		int n = (int)p.chapters.size();
-		cursor = std::clamp(p.currentChapter(), 0, std::max(0, n - 1));
+		cursor = std::clamp(shownChapter(p), 0, std::max(0, n - 1));
 		scroll = std::clamp(cursor - 3, 0, std::max(0, n - ROWS_SHOWN));
 	}
 
@@ -413,6 +445,7 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 			if (r[i].id < 0) return;
 			// selecting: a row ticked (a folder still opens)
 			if (selMode != SEL_NONE && selChoose(i, p)) return;
+			if (r[i].id == PL_NEW) { plNameOpen(false, "", ""); return; }
 			if (r[i].id == PL_ROW)
 			{
 				// a playlist: its items (and the one kept for the next launch, as a folder gone into is)
@@ -445,12 +478,6 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 				enterFolder(path, p);
 				return;
 			}
-			if (r[i].id == 3)
-			{
-				if (clearHistory(p)) enterFolder("", p);	// nothing left to list: back to the first page
-				else enterFolder(RECENT, p);			// the row says "again to clear"
-				return;
-			}
 			std::string path = browsePaths[i];	// a copy: entering a folder rebuilds the list
 			// the folder last gone into, or a video opened from, is the one kept (Remember last folder): backing out
 			// to the first page to quit leaves it as it was
@@ -462,16 +489,7 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 			else
 			{
 				if (browseDir != RECENT) p.setLastFolder(browseDir);
-				// a network file whose folder wasn't listed (Recent): listed first, a moment, for the files that play
-				// after it, its subtitles and its cover (netListed opens it)
-				NetPath np;
-				const NetServer* sv = isNetPath(path) && parseNetPath(path, np) && netStore ? netStore->find(np.server) : nullptr;
-				if (sv && netWorker && netNames.find(netParent(path)) == netNames.end())
-				{
-					netOpenPending = path;
-					netWorker->list(++netSerial, *sv, netStore->password(*sv), netParent(path));
-				}
-				else openRequest = path;
+				openFile(path, p);
 			}
 			return;
 		}
@@ -493,10 +511,22 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 			return;
 		}
 		if (r[i].id < 0) return;
-		TrackType type = trackType();
-		p.selectTrack(type, r[i].id);
-		p.osd(std::string(type == TrackType::Audio ? "Audio: " : "Subtitles: ") + r[i].label);
+		chooseTrack(p, trackType(), r[i].id);
 		page = Page::Main;
+	}
+
+	bool Ui::chooseTrack(Player& p, TrackType type, int64_t id)
+	{
+		// the label as the page's row has it ("Off" first among the subtitles)
+		std::string label;
+		if (type == TrackType::Sub && id == 0) label = "Off";
+		auto list = p.tracksOf(type);
+		for (size_t i = 0; i < list.size() && label.empty(); i++)
+			if (list[i].id == id) label = trackLabel(list[i], (int)i + 1);
+		if (label.empty()) return false;
+		p.selectTrack(type, id);
+		p.osd(std::string(type == TrackType::Audio ? "Audio: " : "Subtitles: ") + label);
+		return true;
 	}
 
 	void Ui::startBrowser(Player& p, const std::string& folder)
@@ -505,6 +535,7 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 		page = Page::Browse;
 		if (!folder.empty())
 		{
+			browseTab = isNetPath(folder) ? TAB_NETWORK : TAB_LOCAL;
 			enterFolder(folder, p);
 			return;
 		}
@@ -519,7 +550,9 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 		}
 		bool there = p.settings.rememberFolder && !last.empty() && stat(last.c_str(), &st) == 0 && S_ISDIR(st.st_mode) &&
 			(p.settings.showHiddenFolders || (!isHiddenFolder(last) && !insideHiddenFolder(last)));
-		enterFolder(there ? last : "", p);
+		// a folder kept: Files, in it; else Home
+		if (there) browseTab = TAB_LOCAL;
+		enterFolder(there ? last : std::string(HOMEDIR), p);
 	}
 
 	void Ui::showBrowser(Player& p, const std::string& lastPlayed, const PlaySource& from, int index)
@@ -527,11 +560,20 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 		page = Page::Browse;
 		touchLocked = false;	// the lock is the video's
 		dropTouch();
+		if (inMenu && menuTab == TAB_PLAYING) inMenu = false;	// (its tab is what played: gone with it)
+		if (!showAfterLeave.empty())
+		{
+			// the Playing tab's Show in folder: that folder, wherever it played from
+			std::string path;
+			path.swap(showAfterLeave);
+			inMenu = false;
+			showInFolder(path, p);
+			return;
+		}
 		if (from.kind == SourceKind::Playlist && plStore)
 		{
 			// the playlist it played from, the cursor on the item (by the order it played in; else by its path)
-			if (browseTab != TAB_PLAYLISTS) tabDir[browseTab] = browseDir;
-			browseTab = TAB_PLAYLISTS;
+			setSection(TAB_PLAYLISTS);
 			if (!exists(from.id)) { enterFolder(PLROOT, p); return; }
 			enterFolder(plDirFor(from.id), p);
 			int item = from.id == plOrderId && index >= 0 && index < (int)plOrder.size() ? plOrder[index] : -1;
@@ -545,17 +587,12 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 			fitList();
 			return;
 		}
-		// from a playlist's tab to a file of a card's (Recent): its folder is the Local tab's
-		if (browseTab == TAB_PLAYLISTS && !isNetPath(lastPlayed) && !lastPlayed.empty())
-		{
-			tabDir[browseTab] = browseDir;
-			browseTab = TAB_LOCAL;
-		}
+		// a file of a card's (from Home, Recent or a playlist too): its folder, in Files
+		if (!isNetPath(lastPlayed) && !lastPlayed.empty()) setSection(TAB_LOCAL);
 		if (isNetPath(lastPlayed))
 		{
 			// its network folder, listed again (the cursor goes to it once the listing comes)
-			if (browseTab != TAB_NETWORK) tabDir[browseTab] = browseDir;
-			browseTab = TAB_NETWORK;
+			setSection(TAB_NETWORK);
 			netSelect = lastPlayed;
 			enterFolder(netParent(lastPlayed), p);
 			return;
@@ -570,10 +607,10 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 	void Ui::dropTouch()
 	{
 		// a finger still down on what's gone presses nothing on what comes (as it lifts); none down: nothing to drop
-		if (panTouch || listTouch || dragging || pressedBtn >= 0) swallowTouch = true;
-		panTouch = panMoved = listTouch = dragging = false;
-		pressedBtn = -1;
-		flickAt = tapAt = holdAt = 0;
+		if (panTouch || listTouch || dragging || pressedBtn >= 0 || homeTouch) swallowTouch = true;
+		panTouch = panMoved = listTouch = dragging = homeTouch = false;
+		pressedBtn = homePress = -1;
+		flickAt = tapAt = holdAt = homeHoldAt = 0;
 	}
 
 	void Ui::fitList()
@@ -605,26 +642,48 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 			return e && e->position >= 0 && !isAudioFile(path) ? "at " + formatTime(e->position) : std::string();
 		};
 		netLoading = false;
-		// what Recent lists: a file still there (on a card taken out: not), or a network one whose connection is
-		// still saved (whether the file is there is only known by asking its server: when it's opened)
-		auto inRecent = [&](const std::string& path) {
-			if (isNetPath(path))
-			{
-				NetPath np;
-				return parseNetPath(path, np) && netStore && netStore->find(np.server);
-			}
-			return exists(path) && (p.settings.showHiddenFolders || !insideHiddenFolder(path));
-		};
 		plMissing.clear();
 		plMissingSerial++;
-		if (dir == PLROOT)
+		if (dir == HOMEDIR)
+		{
+			// the Recent strip listed again, the focus kept on the file it was on (gone: the card that took its place)
+			std::string was = homeStrip < (int)recent.size() ? recent[homeStrip].path : "";
+			int wasAt = homeStrip;
+			listRecent(p);
+			if (homeFresh)
+			{
+				homeFresh = false;
+				homeZone = recent.empty() ? HOME_GRID : HOME_STRIP;
+				homeStrip = homeGrid = homeCol = 0;
+			}
+			else
+			{
+				int found = -1;
+				for (size_t i = 0; i < recent.size() && !was.empty(); i++)
+					if (recent[i].path == was) found = (int)i;
+				homeStrip = was.empty() ? stripCount() - 1 : found >= 0 ? found : std::min(wasAt, std::max(0, (int)recent.size() - 1));
+				if (recent.empty() && homeZone == HOME_STRIP)
+				{
+					homeZone = HOME_GRID;
+					homeGrid = homeCol = 0;
+				}
+			}
+			homeStrip = std::clamp(homeStrip, 0, stripCount() - 1);
+			stripOff = stripTarget(homeStrip);
+			stripT0 = 0;
+		}
+		else if (dir == EXTDIR) add(-1, "Extensions are on the way", "", "");
+		else if (dir == PLROOT)
 		{
 			// the saved playlists, by name
+			// Liked first, then the user's by name, then New playlist
 			if (!plStore) add(-1, "Playlists aren't available", "", "");
 			else
+			{
 				for (auto& pl : plStore->list())
-					add(PL_ROW, pl.name, pl.file, std::to_string(pl.count) + (pl.count == 1 ? " item" : " items"));
-			if (browseRows.empty() && plStore) add(-1, "No playlists yet", "", "");
+					add(PL_ROW, pl.name, pl.file, pl.builtin && !pl.count ? "Empty" : std::to_string(pl.count) + (pl.count == 1 ? " item" : " items"));
+				add(PL_NEW, "New playlist", "", "");
+			}
 		}
 		else if (isPlDir(dir))
 		{
@@ -672,20 +731,13 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 			}
 		}
 		else if (dir.empty())
-		{
-			int recent = 0;
-			for (auto& path : p.history().items())
-				if (inRecent(path)) recent++;
-			if (p.settings.keepHistory && recent) add(1, "Recent", RECENT, std::to_string(recent) + (recent == 1 ? " item" : " items"));
-			for (auto& r : roots) add(1, r.label, r.path, r.path);
-		}
+			for (auto& r : roots) add(1, r.label, r.path, r.path);	// Files' top: the places (Recent is Home's)
 		else if (dir == RECENT && !p.settings.keepHistory) add(-1, "Play history is off (Settings)", "", "");
 		else if (dir == RECENT)
 		{
-			// the history (a file taken away or on a card taken out left out), and a way to clear it
-			for (auto& path : p.history().items())
-				if (inRecent(path)) add(2, baseName(path), path, fileNote(at(path), isNetPath(path) ? -1 : fileSize(path)));
-			if (!browseRows.empty()) add(3, "Clear play history", "", clearArmed ? "Press again to clear" : "Press twice");
+			// All recent: the history (a file taken away or on a card taken out left out); X clears it
+			listRecent(p);
+			for (auto& it : recent) add(2, baseName(it.path), it.path, fileNote(at(it.path), it.net ? -1 : fileSize(it.path)));
 		}
 		else
 		{
@@ -694,7 +746,7 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 				add(e.dir ? 1 : 2, e.name, e.path, e.dir ? (isHiddenFolder(e.path) ? "hidden" : "") : fileNote(at(e.path), fileSize(e.path)));
 			if (!ok) add(-1, "This folder can't be opened", "", "");
 		}
-		if (browseRows.empty() && !isPlDir(dir)) add(-1, "Nothing to play here", "", "");
+		if (browseRows.empty() && !isPlDir(dir) && dir != HOMEDIR) add(-1, "Nothing to play here", "", "");
 		auto it = placeIn.find(dir);
 		cursor = it == placeIn.end() ? 0 : std::min(it->second.first, (int)browseRows.size() - 1);
 		scroll = it == placeIn.end() ? 0 : it->second.second;
@@ -799,7 +851,7 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 	bool Ui::emptyAction() const
 	{
 		// (an empty playlist's: Add files)
-		bool emptyPl = isPlDir(browseDir) && plLoaded && plStore && plCur.entries.empty();
+		bool emptyPl = isPlDir(browseDir) && plLoaded && plStore && plCur.entries.empty() && !plIsLiked(plCur.file);
 		return page == Page::Browse && !inMenu && selMode == SEL_NONE &&
 			((browseDir == NETROOT) || (browseDir == PLROOT && plStore) || emptyPl) && browseRows.size() == 1 && browseRows[0].id < 0;
 	}
@@ -818,23 +870,47 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 
 	bool Ui::atFirstPage() const
 	{
-		return browseDir.empty() || browseDir == NETROOT || browseDir == PLROOT;
+		return browseDir.empty() || browseDir == NETROOT || browseDir == PLROOT || browseDir == EXTDIR || browseDir == RECENT;
+	}
+
+	bool Ui::atHome() const
+	{
+		return browseDir == HOMEDIR;
+	}
+
+	void Ui::setSection(int tab)
+	{
+		if (tab == browseTab) return;
+		// (Home and All recent are no section's)
+		if (!atHome() && browseDir != RECENT) tabDir[browseTab] = browseDir;
+		browseTab = tab;
 	}
 
 	void Ui::switchTab(int tab, Player& p)
 	{
-		if (tab == browseTab) return;
-		tabDir[browseTab] = browseDir;
-		browseTab = tab;
+		if (tab == browseTab && !atHome() && browseDir != RECENT) return;
+		setSection(tab);
 		std::string dir = tabDir[tab];
-		if (tab == TAB_NETWORK && dir.empty()) dir = NETROOT;
-		if (tab == TAB_PLAYLISTS && dir.empty()) dir = PLROOT;
+		if (dir.empty()) dir = sectionTop(tab);
 		enterFolder(dir, p);
+	}
+
+	void Ui::openSection(int tab, Player& p)
+	{
+		if (tab < 0 || tab >= BROWSE_TABS) return;
+		setSection(tab);
+		tabDir[tab].clear();
+		enterFolder(sectionTop(tab), p);
 	}
 
 	void Ui::openMainMenu(Player& p, int tab)
 	{
-		if (!inMenu) menuReturnDir = browseDir;
+		if (!inMenu)
+		{
+			menuReturnDir = browseDir;
+			menuReturnCursor = cursor;
+			menuReturnScroll = scroll;
+		}
 		inMenu = true;
 		showTab(tab, p);
 	}
@@ -846,15 +922,9 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 		cursor = scroll = 0;
 		switch (tab)
 		{
-		case TAB_RECENT:
-			if (roots.empty()) roots = browseRoots();	// started with a file: the browser never opened
-			page = Page::Browse;
-			enterFolder(RECENT, p);
-			// the playing one is first: the cursor on the one after, what's likely wanted next
-			if (p.playing() && browsePaths.size() > 1 && browsePaths[0] == p.currentPath()) cursor = 1;
-			break;
 		case TAB_SETTINGS: page = Page::Settings; setGroup = -1; break;
 		case TAB_ABOUT: openAbout(p); break;
+		case TAB_PLAYING: page = Page::Playing; break;
 		default: page = Page::Exit; break;
 		}
 	}
@@ -863,8 +933,10 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 	{
 		inMenu = false;
 		if (p.playing()) { page = Page::Main; return; }
-		// the browser, back in its folder (and on its row)
+		// the browser, back in its folder (and on its row), listed again (a setting can change what it lists)
 		page = Page::Browse;
+		cursor = menuReturnCursor;
+		scroll = menuReturnScroll;
 		enterFolder(menuReturnDir, p);
 	}
 
@@ -874,9 +946,39 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 		return !browseDir.empty() && !pseudoDir(browseDir) && !isNetPath(browseDir) && row >= 0 && row < (int)browseRows.size() && browseRows[row].id == 1;
 	}
 
+	std::string Ui::browseSelection() const
+	{
+		if (atHome())
+		{
+			if (homeZone == HOME_GRID) return SECTION_NAMES[homeGrid];
+			return homeStrip < (int)recent.size() ? recent[homeStrip].path : "All recent";
+		}
+		return cursor < (int)browsePaths.size() ? browsePaths[cursor] : "";
+	}
+
 	std::vector<std::string> Ui::browseLabels() const
 	{
 		std::vector<std::string> out;
+		if (atHome())
+		{
+			// the Recent cards (shown: in the strip's view now), then the tiles: "card" or "tile", its name, its line
+			int off = (int)std::lround(stripOff);
+			if (recent.empty()) out.push_back("shown    (no Recent: a line instead of the strip)");
+			for (int i = 0; !recent.empty() && i < (int)recent.size() + 1; i++)
+			{
+				int x = 16 + i * STRIDE - off;
+				bool at = homeZone == HOME_STRIP && homeStrip == i;
+				std::string l = std::string(x + CARD_W > 0 && x < W ? "shown  " : "hidden ") + (at ? "> " : "  ") + "card ";
+				if (i < (int)recent.size())
+					l += recent[i].name + "  | " + recent[i].sub + (recent[i].net ? " [net]" : "") + " \xC2\xB7 " + recent[i].where;
+				else l += "All recent  | " + std::to_string(recent.size()) + " played";
+				out.push_back(l);
+			}
+			for (int g = 0; g < BROWSE_TABS; g++)
+				out.push_back(std::string("shown  ") + (homeZone == HOME_GRID && homeGrid == g ? "> " : "  ") + "tile " + SECTION_NAMES[g] +
+					"  | " + tileSub(g));
+			return out;
+		}
 		for (size_t i = 0; i < browseRows.size(); i++)
 		{
 			std::string l = std::string((int)i >= scroll && (int)i < scroll + ROWS_SHOWN ? "shown  " : "hidden ") +
@@ -913,7 +1015,8 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 
 	void Ui::openBrowseMenu(int row, MenuHow how)
 	{
-		if (browseDir == FORMDIR) return;
+		// (Home's and All recent's are their own: openHomeOptions, openRecentMenu; Extensions has none yet)
+		if (browseDir == FORMDIR || browseDir == EXTDIR || atHome()) return;
 		bool onRow = row >= 0 && row < (int)browseRows.size();
 		if (browseDir == PLROOT || isPlDir(browseDir))
 		{
@@ -934,7 +1037,8 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 				file = browsePaths[row];
 				title = browseRows[row].label;
 				note = browseRows[row].note;
-				items = {CTX_PL_PLAY, CTX_PL_SHUFFLE, CTX_PL_RENAME, CTX_PL_DELETE, CTX_CANCEL};
+				if (plIsLiked(file)) items = {CTX_PL_PLAY, CTX_PL_SHUFFLE, CTX_CANCEL};	// no rename or delete
+				else items = {CTX_PL_PLAY, CTX_PL_SHUFFLE, CTX_PL_RENAME, CTX_PL_DELETE, CTX_CANCEL};
 			}
 			else if (how == MENU_X)
 			{
@@ -943,11 +1047,20 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 				title = plCur.name;
 				note = count(plCur.entries.size());
 				// eight with items (the box steps its rows closer to fit, the count left to the page), four without
-				if (!plCur.entries.empty())
-					items = {CTX_PL_PLAY, CTX_PL_SHUFFLE, CTX_PL_ADD_FILES, CTX_PL_ADD_FOLDER, CTX_PL_SELECT, CTX_PL_DEDUP};
-				else items = {CTX_PL_ADD_FILES, CTX_PL_ADD_FOLDER};
-				items.push_back(CTX_PL_RENAME);
-				items.push_back(CTX_PL_DELETE);
+				if (plIsLiked(file))
+				{
+					// only the Like button adds to Liked; here: play, and remove (Select)
+					if (plCur.entries.empty()) return;
+					items = {CTX_PL_PLAY, CTX_PL_SHUFFLE, CTX_PL_SELECT};
+				}
+				else
+				{
+					if (!plCur.entries.empty())
+						items = {CTX_PL_PLAY, CTX_PL_SHUFFLE, CTX_PL_ADD_FILES, CTX_PL_ADD_FOLDER, CTX_PL_SELECT, CTX_PL_DEDUP};
+					else items = {CTX_PL_ADD_FILES, CTX_PL_ADD_FOLDER};
+					items.push_back(CTX_PL_RENAME);
+					items.push_back(CTX_PL_DELETE);
+				}
 			}
 			else
 			{
@@ -958,9 +1071,10 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 				int miss = plMissingAt(row);
 				if (miss)
 				{
-					note = miss == 1 ? "Not found. Is the card in?" : "Its connection was deleted";
+					note = plIsLiked(file) && miss == 1 ? "It's gone from the card" : miss == 1 ? "Not found. Is the card in?" : "Its connection was deleted";
 					items = {CTX_PL_REMOVE, CTX_CANCEL};
 				}
+				else if (plIsLiked(file)) items = {CTX_PL_HERE, CTX_PL_REMOVE, CTX_PL_ADD_ONE, CTX_PL_SHOW, CTX_CANCEL};	// (Remove is Unlike)
 				else items = {CTX_PL_HERE, CTX_PL_MOVE, CTX_PL_REMOVE, CTX_PL_SHOW, CTX_CANCEL};
 			}
 			ctxOpen = true;
@@ -996,7 +1110,13 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 			id = np.server;
 			items = {CTX_EDIT, CTX_TEST, CTX_DELETE, CTX_CANCEL};
 		}
-		else if (browseDir == NETROOT && how == MENU_X) items = {CTX_ADD, CTX_FIND, CTX_REFRESH, CTX_CANCEL};
+		else if (browseDir == NETROOT && how == MENU_X)
+		{
+			items = {CTX_ADD, CTX_FIND, CTX_REFRESH, CTX_CANCEL};
+#ifdef BP_WEB
+			items.insert(items.end() - 1, CTX_WEB);
+#endif
+		}
 		else if (folder) items = {CTX_HIDE, CTX_REFRESH, CTX_CANCEL};
 		else if (netFolder && how != MENU_X && plStore)
 		{
@@ -1008,6 +1128,9 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 		else return;	// Y, or a hold, on what has no menu of its own
 		// a card's folder (Y, a hold): Add to playlist... first
 		if (folder && how != MENU_X && plStore) items.insert(items.begin(), CTX_ADD_TO);
+		// X on a card's pages: Show hidden folders, before Cancel
+		if (how == MENU_X && !isNetPath(browseDir) && (browseDir.empty() || !pseudoDir(browseDir)))
+			items.insert(items.end() - 1, CTX_HIDDEN);
 		if (folder || netFolder) ctxFolder = browsePaths[row];
 		if (selectFiles) items.insert(items.begin(), CTX_SELECT_FILES);
 		ctxOpen = true;
@@ -1022,6 +1145,82 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 	void Ui::chooseBrowseMenu(int item, Player& p)
 	{
 		int what = item >= 0 && item < (int)ctxItems.size() ? ctxItems[item] : CTX_CANCEL;
+		// (before the playlists' below: their numbers come after them)
+		if (what == CTX_WEB) { ctxOpen = false; openWeb(); return; }
+		if (what >= CTX_R_PLAY)
+		{
+			std::string path = ctxRecent;
+			if (what == CTX_CLEAR_RECENT)
+			{
+				// twice; nothing to clear, nothing
+				if (recent.empty()) return;
+				if (!ctxArmed) { ctxArmed = true; return; }
+				ctxOpen = false;
+				p.clearHistory();
+				p.osd("Recent cleared");
+				goHome(HOME_GRID, 0, p);
+				return;
+			}
+			if (what == CTX_HIDDEN)
+			{
+				// the menu stays up (its value changes); the page listed again under it, on the same row
+				Settings st = p.settings;
+				st.showHiddenFolders = !st.showHiddenFolders;
+				p.setSettings(st);
+				std::string at = cursor >= 0 && cursor < (int)browsePaths.size() ? browsePaths[cursor] : "";
+				int c = cursor, s = scroll;
+				enterFolder(browseDir, p);
+				cursor = c;
+				scroll = s;
+				for (size_t i = 0; i < browsePaths.size(); i++)
+					if (!at.empty() && browsePaths[i] == at) cursor = (int)i;
+				fitList();
+				return;
+			}
+			ctxOpen = false;
+			switch (what)
+			{
+			case CTX_SETTINGS: openMainMenu(p, TAB_SETTINGS); break;
+			case CTX_R_START: p.forgetPosition(path); openFile(path, p); break;
+			case CTX_R_PLAY: openFile(path, p); break;
+			case CTX_R_SHOW: showInFolder(path, p); break;
+			case CTX_R_ADD:
+			{
+				// the one file: the playlists to add it to (none yet: a new one)
+				std::string title;
+				for (auto& x : recent)
+					if (x.path == path) title = x.name;
+				openAddOne(path, title, -1, p);
+				break;
+			}
+			case CTX_R_LIKE:
+			{
+				std::string title;
+				for (auto& x : recent)
+					if (x.path == path) title = x.name;
+				bool was = plStore && plStore->isLiked(path);
+				if (setLikedPath(p, path, title, -1, !was) != was) likeCard(p, !was, title);
+				break;
+			}
+			case CTX_R_REMOVE:
+			{
+				p.removeFromHistory(path);
+				p.osd("Removed from Recent");
+				// (the list again: Home keeps its place, the card after it in its slot)
+				int c = cursor, s = scroll;
+				enterFolder(browseDir, p);
+				if (browseDir == RECENT)
+				{
+					cursor = c;
+					scroll = s;
+					fitList();
+				}
+				break;
+			}
+			default: break;
+			}
+			return;
+		}
 		if (what == CTX_PL_DELETE)
 		{
 			// twice (the files themselves stay where they are: the menu says so)
@@ -1041,6 +1240,9 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 			bool open = isPlDir(browseDir) && plLoaded && file == plCur.file;
 			if (open) pl = plCur;
 			else if (!file.empty() && (!plStore || !plStore->load(file, pl, skipped))) { p.osd("Couldn't read the playlist"); return; }
+			if (plIsLiked(file) && (what == CTX_PL_RENAME || what == CTX_PL_DELETE || what == CTX_PL_DEDUP || what == CTX_PL_ADD_FILES ||
+				what == CTX_PL_ADD_FOLDER || what == CTX_PL_MOVE))
+				return;	// Liked is managed by the Like button; Remove and Select there are Unlike
 			switch (what)
 			{
 			case CTX_PL_NEW: plNameOpen(false, "", ""); break;
@@ -1070,21 +1272,8 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 			case CTX_PL_SHOW:
 				if (open && at >= 0 && at < (int)pl.entries.size())
 				{
-					// its folder, in the Local or the Network tab, the cursor on it
-					std::string path = pl.entries[at].path;
-					tabDir[browseTab] = browseDir;
-					if (isNetPath(path))
-					{
-						browseTab = TAB_NETWORK;
-						netSelect = path;
-						enterFolder(netParent(path), p);
-						break;
-					}
-					browseTab = TAB_LOCAL;
-					enterFolder(parentFolder(path), p);
-					for (size_t i = 0; i < browsePaths.size(); i++)
-						if (browsePaths[i] == path) cursor = (int)i;
-					fitList();
+					// its folder, in Files or Network, the cursor on it
+					showInFolder(pl.entries[at].path, p);
 				}
 				break;
 			case CTX_PL_ADD_FILES: case CTX_PL_ADD_FOLDER:
@@ -1096,6 +1285,10 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 				}
 				break;
 			case CTX_PL_SELECT: if (open) selStart(SEL_EDIT, ""); break;
+			case CTX_PL_ADD_ONE:
+				if (open && at >= 0 && at < (int)pl.entries.size())
+					openAddOne(pl.entries[at].path, pl.entries[at].title, pl.entries[at].duration, p);
+				break;
 			case CTX_PL_MOVE:
 				// the one item, moved at once (and back to the list as it was, after)
 				if (open && at >= 0 && at < (int)plCur.entries.size())
@@ -1238,6 +1431,7 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 			if (both) out.push_back(T + 10);
 			out.push_back(T + 5);
 			out.push_back(T + 7);
+			out.push_back(CLOCK_ROW);
 			return out;
 		}
 		case GROUP_UPDATES:
@@ -1261,6 +1455,7 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 		if (row == MUSIC_ROW) return "What the top screen shows while a song plays (SELECT while playing).";
 		if (row == VIS_ROW) return "How the music is drawn: Bars, Waves, Spectrum or Circle (SELECT while playing).";
 		if (row == SOUND_ROW) return "Equalizer and effects for music (not videos). A opens it";
+		if (row == CLOCK_ROW) return "The time in the top corner of this screen";
 		if (row == PAN_ROW) return "Which side the pan area (the small photo) is on.";
 		if (row == DRAG_ROW) return "The box: a drag moves the frame over the small photo. The photo: a drag moves the photo, as on a phone.";
 		if (row == CLEAR_ROW) return "Empties Recent. Press A twice. The places you stopped at are kept.";
@@ -1290,11 +1485,20 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 		setGroup = (setGroup + dir + GROUPS) % GROUPS;
 		cursor = scroll = 0;
 		styleFromSubs = false;
+		// Web dashboard has no rows: its page
+		if (setGroup == GROUP_WEB) openWeb();
 	}
 
 	void Ui::openGroup(int g)
 	{
 		page = Page::Settings;
+		if (g == GROUP_WEB)
+		{
+			setGroup = -1;
+			cursor = GROUP_WEB;
+			openWeb();
+			return;
+		}
 		setGroup = g;
 		cursor = scroll = 0;
 	}
@@ -1314,6 +1518,9 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 		if (top || bottom) r.push_back(Q_BRIGHT);
 		if (top && bottom && !sameBrightness) r.push_back(Q_BOTTOM);
 		if (top && bottom) r.push_back(Q_SAME);
+#ifdef BP_WEB
+		r.push_back(Q_WEB);
+#endif
 		r.push_back(Q_QUIT);
 		return r;
 	}
@@ -1326,12 +1533,19 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 		sameBrightness = p.settings.sameBrightness;
 		volumePct = volume.get();
 		quickCursor = 0;
+		quickSub = 0;
 		quickDrag = false;
 		pressedBtn = -1;
 	}
 
 	void Ui::quickAdjust(int row, int dir, Player& p)
 	{
+		// Web dashboard's row: LEFT the switch, RIGHT its Settings button (while it's on)
+		if (row == Q_WEB)
+		{
+			quickSub = dir > 0 && p.settings.webDashboard ? 1 : 0;
+			return;
+		}
 		if (row == Q_VOLUME && volumePct >= 0)
 		{
 			// bananad's keys' step
@@ -1378,6 +1592,12 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 			int pm = backlight.permille(Backlight::TOP);
 			if (sameBrightness && pm >= 100) backlight.set(Backlight::BOTTOM, pm);
 		}
+		else if (row == Q_WEB)
+		{
+			// its Settings button: the Web dashboard page (the QR code, the PIN, New PIN), the quick settings put away
+			if (quickSub == 1 && p.settings.webDashboard) { quickOpen = false; openWeb(); }
+			else webTurn(!p.settings.webDashboard, p);
+		}
 		else if (row == Q_QUIT) quitRequested = true;
 	}
 
@@ -1419,6 +1639,7 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 				quickCursor = i;
 				if (barRow(i) && quickMinus(i).hit(x, y)) pressedBtn = 300 + i * 4;
 				else if (barRow(i) && quickPlus(i).hit(x, y)) pressedBtn = 301 + i * 4;
+				else if (rows[i] == Q_WEB && p.settings.webDashboard && quickPinBtn(i).hit(x, y)) pressedBtn = 303 + i * 4;
 				else if (barRow(i) && Rect{quickBar(i).x - 6, quickRowRect(i).y, quickBar(i).w + 12, 54}.hit(x, y))
 				{
 					// the bar, as the progress bar: at once, and while the finger drags
@@ -1443,7 +1664,12 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 			if (i >= (int)rows.size() || !quickRowRect(i).hit(x, y)) return false;
 			if (what == 0) quickAdjust(rows[i], -1, p);
 			else if (what == 1) quickAdjust(rows[i], 1, p);
-			else quickChoose(rows[i], p);
+			else
+			{
+				// Web dashboard's: its Settings button (3), or the rest of the row, its switch (2)
+				if (rows[i] == Q_WEB) quickSub = what == 3 ? 1 : 0;
+				quickChoose(rows[i], p);
+			}
 		}
 		return false;
 	}
@@ -1483,6 +1709,32 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 				fill({box.x + 2, box.y + 2, box.w - 4, box.h - 4}, at ? TEAL : SURFACE);
 				if (p.settings.sameBrightness) drawGlyphMid(G_CHECK, box.x + box.w / 2, box.y + box.h / 2, YELLOW);
 				drawTextMid("Same brightness for both screens", 1, at ? YELLOW : CREAM, r.x + 56, mid, r.w - 66);
+				continue;
+			}
+			if (row == Q_WEB)
+			{
+				// a tick box (on or off), its name, and while it's on a button to its page in Settings
+				bool on = p.settings.webDashboard, onSwitch = at && (quickSub == 0 || !on);
+				Rect box{r.x + 16, mid - 13, 26, 26};
+				fill(box, onSwitch ? YELLOW : CREAM);
+				fill({box.x + 2, box.y + 2, box.w - 4, box.h - 4}, at ? TEAL : SURFACE);
+				if (on) drawGlyphMid(G_CHECK, box.x + box.w / 2, box.y + box.h / 2, YELLOW);
+				drawTextMid("Web dashboard", 1, onSwitch ? YELLOW : CREAM, r.x + 56, mid, 200);
+				if (on)
+				{
+					Rect b = quickPinBtn(i);
+					fill(b, pressedBtn == 303 + i * 4 ? PRESSED : at ? BG : TEAL);
+					if (at && quickSub == 1)
+					{
+						fill({b.x, b.y, b.w, 2}, YELLOW);
+						fill({b.x, b.y + b.h - 2, b.w, 2}, YELLOW);
+						fill({b.x, b.y, 2, b.h}, YELLOW);
+						fill({b.x + b.w - 2, b.y, 2, b.h}, YELLOW);
+					}
+					drawButton({b.x, b.y, b.w - 20, b.h}, nullptr, "Settings", nullptr, false, 1);	// (centred in what the arrow leaves)
+					drawGlyphMid(G_RIGHT, b.x + b.w - 18, b.y + b.h / 2, CREAM);
+				}
+				else drawTextMid("Off", 0, at ? DIM_TEAL : DIM, r.x + r.w - 16, mid, 0, 1);
 				continue;
 			}
 			int pct;
@@ -1549,10 +1801,45 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 		if (row - STYLE_ROW0 < STYLE_KEYS) stepStyle(s.style, (StyleKey)(row - STYLE_ROW0), dir);
 		else if (row == MUSIC_ROW) s.musicShow = ((s.musicShow + dir) % SHOWS + SHOWS) % SHOWS;
 		else if (row == VIS_ROW) s.visualizer = ((s.visualizer + dir) % VISUALIZERS + VISUALIZERS) % VISUALIZERS;
+		else if (row == CLOCK_ROW) s.clock = ((s.clock + dir) % CLOCKS + CLOCKS) % CLOCKS;
 		else if (row == PAN_ROW) s.panRight = !s.panRight;
 		else if (row == DRAG_ROW) s.dragBox = !s.dragBox;
 		else s.*REMEMBER[row - TOGGLE_ROW] = !(s.*REMEMBER[row - TOGGLE_ROW]);
 		p.setSettings(s);
+	}
+
+	bool Ui::predicting(const Player& p) const
+	{
+		const BrowserPos& b = browserPos;
+		return browserPlaying && p.paused && b.t >= 0 && p.loaded && p.duration > 0 && p.currentPath() == b.path;
+	}
+
+	double Ui::shownPosition(const Player& p) const
+	{
+		if (!predicting(p)) return p.position;
+		const BrowserPos& b = browserPos;
+		double t = b.t + (b.playing ? (SDL_GetTicks() - b.at) / 1000.0 : 0);
+		return std::clamp(t, 0.0, p.duration);
+	}
+
+	int Ui::shownChapter(const Player& p) const
+	{
+		if (!predicting(p)) return p.currentChapter();
+		double t = shownPosition(p);
+		int c = -1;
+		for (int i = 0; i < (int)p.chapters.size() && p.chapters[i].time <= t; i++) c = i;
+		return c;
+	}
+
+	void Ui::noteSeek(const Player& p, double t)
+	{
+		if (predicting(p)) browserPos = {browserPos.path, std::clamp(t, 0.0, p.duration), SDL_GetTicks(), browserPos.playing};
+	}
+
+	void Ui::resumeFromBrowser(Player& p)
+	{
+		if (!predicting(p)) return;
+		p.seekFraction(std::clamp(shownPosition(p) / p.duration, 0.0, 1.0));	// queued before the unpause: no sound from before
 	}
 
 	bool Ui::repeats(Button b, const Player& p) const
@@ -1599,12 +1886,19 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 	bool Ui::press(Button b, Player& p)
 	{
 		sameBrightness = p.settings.sameBrightness;
+		webInputAt = SDL_GetTicks();
 		if (quickOpen) return quickKey(b, p);
 		if (kbOpen)
 		{
 			kbPress(b);
 			if (eqNameSubmit) eqNameDone(p);
 			if (plNameSubmit) plNameDone(p);
+			return false;
+		}
+		// Add to... over what plays (or the Playing tab); the browser's is taken below, in its turn
+		if (pickerOpen && page != Page::Browse)
+		{
+			pickerKey(b, p);
 			return false;
 		}
 		displayOpen = displayOpen && displayShown(p);	// (the song gone under it: closed)
@@ -1619,7 +1913,12 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 		{
 			if (p.settings.buttonHotkeys && !inMenu && p.playing() && !p.playingPhoto() && p.error.empty() &&
 				(page == Page::Main || page == Page::Tracks || page == Page::Chapters))
-				p.stepChapter(b == Button::L2 ? -1 : 1);
+			{
+				bool pred = predicting(p);
+				int t = p.stepChapter(b == Button::L2 ? -1 : 1, pred ? shownPosition(p) : -1);
+				if (pred && t >= 0 && t < (int)p.chapters.size()) noteSeek(p, p.chapters[t].time);
+				else if (pred && t == CHAPTER_FILE_START) noteSeek(p, 0);
+			}
 			return false;
 		}
 		// the buttons play on with the panel dark; the ones that open a page bring it back
@@ -1627,7 +1926,16 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 		if (b != Button::B) quitArmed = 0;
 		if (inMenu)
 		{
-			if (b == Button::L || b == Button::R) { showTab((menuTab + (b == Button::R ? 1 : TABS - 1)) % TABS, p); return false; }
+			if (b == Button::L || b == Button::R)
+			{
+				// round, in the order shown
+				auto tabs = menuTabs(p);
+				int n = (int)tabs.size(), at = 0;
+				for (int i = 0; i < n; i++)
+					if (tabs[i] == menuTab) at = i;
+				showTab(tabs[(at + (b == Button::R ? 1 : n - 1)) % n], p);
+				return false;
+			}
 			// B in the subtitle style opened from the Subtitles list: back to that list
 			if (b == Button::B && page == Page::Settings && setGroup == GROUP_SUBS && styleFromSubs)
 			{
@@ -1654,6 +1962,8 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 			// the tab's page takes the rest (Recent's list, the settings' rows, About's scrolling)
 		}
 		if (page == Page::Sound) return soundKey(b, p);
+		if (page == Page::Web) return webKey(b, p);
+		if (page == Page::Playing) return playingKey(b, p);
 		if (page == Page::Settings)
 		{
 			auto rows = settingRows();
@@ -1752,6 +2062,14 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 			return false;
 		}
 		if (page == Page::Browse && !inMenu && selMode != SEL_NONE && selKey(b, p)) return false;
+		if (page == Page::Browse && !inMenu && atHome()) return homeKey(b, p);
+		// All recent: X Home's options, Y a file's menu (as on its card)
+		if (page == Page::Browse && !inMenu && browseDir == RECENT && b == Button::X) { openHomeOptions(); return false; }
+		if (page == Page::Browse && !inMenu && browseDir == RECENT && b == Button::Y)
+		{
+			if (cursor >= 0 && cursor < (int)browseRows.size() && browseRows[cursor].id == 2) openRecentMenu(browsePaths[cursor]);
+			return false;
+		}
 		if (page == Page::Browse && !inMenu && b == Button::X) { openBrowseMenu(cursor, MENU_X); return false; }
 		if (page == Page::Browse && !inMenu && b == Button::Y) { openBrowseMenu(cursor, MENU_Y); return false; }
 		// the form: LEFT/RIGHT step a choice (Type, Sign in, FTPS); L/R don't leave it for the other tab
@@ -1767,19 +2085,21 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 		if (page == Page::Browse && !inMenu && browseDir == FINDNET && (b == Button::L || b == Button::R)) return false;
 		if (page == Page::Browse && !inMenu && (b == Button::L || b == Button::R))
 		{
-			// a tab each way, no wrap
+			// a section each way, no wrap, at its top (All recent is none's)
 			int t = browseTab + (b == Button::R ? 1 : -1);
-			if (t >= 0 && t < BROWSE_TABS) switchTab(t, p);
+			if (browseDir != RECENT && t >= 0 && t < BROWSE_TABS) openSection(t, p);
 			return false;
 		}
 		if (page == Page::Browse && b == Button::B)
 		{
-			// opened over a video: back to it from the first page
-			if (p.playing() && atFirstPage()) { page = Page::Main; return false; }
-			if (!atFirstPage()) { browseUp(p); return false; }
-			// the first page: B twice leaves
-			if (quitArmed && SDL_GetTicks() - quitArmed < QUIT_WINDOW_MS) return true;
-			quitArmed = SDL_GetTicks();
+			// a section's top: Home, on its tile (All recent: on its card)
+			if (atFirstPage())
+			{
+				if (browseDir == RECENT) goHome(HOME_STRIP, (int)recent.size(), p);
+				else goHome(HOME_GRID, browseTab, p);
+				return false;
+			}
+			browseUp(p);
 			return false;
 		}
 		if (page == Page::Browse && b == Button::Start) { openMainMenu(p); return false; }
@@ -1820,7 +2140,7 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 			return false;
 		switch (b)
 		{
-		case Button::A: p.togglePause(); break;
+		case Button::A: if (p.paused) resumeFromBrowser(p); p.togglePause(); break;
 		case Button::B:
 			if (quitArmed && SDL_GetTicks() - quitArmed < QUIT_WINDOW_MS) return true;
 			quitArmed = SDL_GetTicks();
@@ -1831,14 +2151,26 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 		case Button::X: if (!musicKey(b, p)) openTracks(tracksTab, p); break;
 		// (a file with no chapters, or none known yet: the page says so)
 		case Button::Y: if (!musicKey(b, p)) openChapters(p); break;
-		case Button::Start: openMainMenu(p); break;
+		// the menu opens on what plays (Like, Add to playlist...): Settings is a tab along
+		case Button::Start: openMainMenu(p, playingTabShown(p) ? TAB_PLAYING : TAB_SETTINGS); break;
+		// the stick pressed in (the RG DS Plus): Like, at once (over a photo it turns it, above)
+		case Button::L3: likeNow(p); break;
 		case Button::Select:
 			if (musicKey(b, p)) break;
 			p.setAspect(nextAspect(p.aspect));
 			p.osd(std::string("Aspect: ") + aspectName(p.aspect));
 			break;
-		case Button::Left: p.seekRelative(-BACK_S); break;
-		case Button::Right: p.seekRelative(FORWARD_S); break;
+		// (a page playing it: from where it should be by now; the jump is passed on to the page)
+		case Button::Left:
+		case Button::Right:
+			if (predicting(p))
+			{
+				double t = std::clamp(shownPosition(p) + (b == Button::Left ? -BACK_S : FORWARD_S), 0.0, p.duration);
+				p.seekFraction(t / p.duration);
+				noteSeek(p, t);
+			}
+			else p.seekRelative(b == Button::Left ? -BACK_S : FORWARD_S);
+			break;
 		case Button::L: if (!p.prev()) p.osd("This is the first one"); break;
 		case Button::R: if (!p.next()) p.osd("This is the last one"); break;
 		case Button::Up: case Button::Down:
@@ -1950,6 +2282,29 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 	{
 		// a playlist's edits, written once they've stopped for a second
 		if (plDirty && SDL_GetTicks() - plDirtyAt >= 1000) plFlush(p);
+		// the web's equalizer: what mpv keeps, and settings.conf, once its sliders stop for a second
+		if (eqWebDirtyAt && SDL_GetTicks() - eqWebDirtyAt >= 1000)
+		{
+			eqWebDirtyAt = 0;
+			p.commitEq();
+		}
+		// the hand-off from a browser: its position, once the file it opened knows its length (5 s at most)
+		if (!seekPath.empty())
+		{
+			if (SDL_GetTicks() > seekUntil || p.currentPath() != seekPath || !p.error.empty()) seekPath.clear();
+			else if (p.loaded && p.duration > 0)
+			{
+				p.seekFraction(std::clamp(seekTo / p.duration, 0.0, 1.0));
+				seekPath.clear();
+			}
+		}
+		if (page == Page::Web)
+		{
+			// the address can change (another Wi-Fi), and the page is left up: read again every 10 s; and, as the
+			// photo of a QR code needs no screen after, the bottom panel dark after 90 s without a touch or a button
+			if (SDL_GetTicks() - webIpAt >= 10000) readWebIp();
+			if (panel.on() && webView(p) == WEB_ON_VIEW && SDL_GetTicks() - webInputAt >= 90000) panel.set(false);
+		}
 		// a dragged row near the list's top or bottom: the list scrolls under it, a row each 150 ms
 		if (plDrag.on && page == Page::Browse && isPlDir(browseDir) && SDL_GetTicks() - plDrag.scrollAt >= 150)
 		{
@@ -1972,6 +2327,9 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 			}
 			else p.netFolderListed(dir, {}, false);
 		}
+		stripStep();
+		if (likePopAt && SDL_GetTicks() - likePopAt >= 200) likePopAt = 0;
+		if (addFlashUntil && SDL_GetTicks() >= addFlashUntil) addFlashUntil = 0;
 		if (!flickAt) return;
 		if (!p.playingPhoto() || page != Page::Main || panTouch)
 		{
@@ -2015,6 +2373,11 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 		if (id == MOVE_CANCEL) return {24, 428, 288, 44};
 		if (id == MOVE_DONE) return {328, 428, 288, 44};
 		if (id == BUSY_CANCEL) return {152, 224, 336, 46};
+		if (id == WEB_NEWPIN) return {296, 384, 152, 52};
+		if (id == WEB_OFF) return {464, 384, 152, 52};
+		if (id == ADD_BTN) return {404, 8, 48, 48};
+		if (id == LIKE_BTN) return {460, 8, 48, 48};
+		if (id >= PLAY_ROW && id < PLAY_ROW + 4) return playingRowRect(id - PLAY_ROW);
 		if (id >= PHOTO_BTN) return {0, 0, 0, 0};	// photoBtn's: they move with the pan area
 		if (id == QUIT_BTN) return {468, 428, 148, 44};
 		if (id == EMPTY_BTN) return {200, 300, 240, 52};
@@ -2043,6 +2406,13 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 		if (id == SEL_CANCEL) { selBack(p, true); return false; }
 		if (id == MOVE_CANCEL || id == MOVE_DONE) { moveEnd(id == MOVE_DONE, p); return false; }
 		if (id == BUSY_CANCEL) { cancelAdd(p); return false; }
+		if (id == LIKE_BTN) { likeNow(p); return false; }
+		if (id == ADD_BTN)
+		{
+			if (p.playing()) openAddOne(p.currentPath(), p.title, p.loaded ? p.duration : -1, p);
+			return false;
+		}
+		if (id >= PLAY_ROW && id < PLAY_ROW + 4) return playingChoose(id - PLAY_ROW, p);
 		// a song's line under the buttons, and its Sound button (Y's place, a song with no chapters): the Sound page
 		if (page == Page::Main && p.playingAudio() && (id == LINE1_BTN || (id == 6 && p.chapters.empty() && p.error.empty())))
 		{
@@ -2088,6 +2458,7 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 	bool Ui::pointer(const Pointer& pt, Player& p)
 	{
 		int x = (int)(pt.x * W), y = (int)(pt.y * H);
+		webInputAt = SDL_GetTicks();
 		if (kbOpen && panel.on())
 		{
 			kbPointer(pt, x, y);
@@ -2113,9 +2484,23 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 		auto barFraction = [&] { return std::clamp((x - BAR.x) / (double)BAR.w, 0.0, 1.0); };
 
 		if (quickOpen) return quickPointer(pt, x, y, p);
+		// Add to... over what plays (or the Playing tab) as over the browser
+		if (pickerOpen) return pickerPointer(pt, x, y, p);
 		displayOpen = displayOpen && displayShown(p);
 		if (displayOpen) return displayPointer(pt, x, y, p);
+		// the header's web dashboard mark: its page, as the finger lifts on it
+		if (webIndDown || (pt.kind == Pointer::Down && webInd.w && webInd.hit(x, y) && !ctxOpen && !pickerOpen && !popupShown(p)))
+		{
+			if (pt.kind == Pointer::Down) webIndDown = true;
+			else if (pt.kind == Pointer::Up)
+			{
+				webIndDown = false;
+				if (webInd.hit(x, y) && page != Page::Web) openWeb();
+			}
+			return false;
+		}
 		if (page == Page::Sound) return soundPointer(pt, x, y, p);
+		if (page == Page::Web) return webPointer(pt, x, y, p);
 		// locked, over a video: Screen off goes through; a hold on the lock (draw() times it) releases it; nothing else
 		if (touchLocked && p.playing() && !p.playingPhoto() && page == Page::Main && pressedBtn != SCREEN_BTN)
 		{
@@ -2195,6 +2580,7 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 				// the drag's last place, to the frame
 				dragging = false;
 				p.seekFraction(dragFraction);
+				noteSeek(p, dragFraction * p.duration);
 			}
 			else if (SDL_GetTicks() - scrubAt >= SCRUB_MS && std::fabs(dragFraction - scrubbed) > 0.0005)
 			{
@@ -2206,6 +2592,7 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 			return false;
 		}
 		if (panTouch) return photoPointer(pt, x, y, p);
+		if (homeTouch) return homePointer(pt, x, y, p);
 		if (listTouch)
 		{
 			// a list (the tracks, the browser, the settings): a drag scrolls it, a tap acts as the finger lifts
@@ -2247,13 +2634,22 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 		{
 			// the tab bar: a tab, or "<" (it closes the menu as the finger lifts)
 			if (buttonRect(BACK_ICON).hit(x, y)) { pressedBtn = BACK_ICON; return false; }
-			for (int t = 0; t < TABS; t++)
-				if (tabRect(t).hit(x, y)) showTab(t, p);
+			auto tabs = menuTabs(p);
+			for (int t = 0; t < (int)tabs.size(); t++)
+				if (menuTabRect(t, (int)tabs.size()).hit(x, y)) showTab(tabs[t], p);
 			return false;
 		}
 		if (page == Page::Exit)
 		{
 			if (buttonRect(EXIT_BTN).hit(x, y)) pressedBtn = EXIT_BTN;
+			return false;
+		}
+		if (page == Page::Playing)
+		{
+			// a row acts as the finger lifts on it
+			auto rows = playingRows();
+			for (int i = 0; i < (int)rows.size(); i++)
+				if (buttonRect(PLAY_ROW + i).hit(x, y)) { cursor = i; pressedBtn = PLAY_ROW + i; }
 			return false;
 		}
 
@@ -2306,7 +2702,7 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 				int n = selCount(), ticked = 0, files = selFolderFiles(ticked);
 				std::vector<std::pair<int, bool>> ids;
 				if (moving) ids = {{MOVE_CANCEL, true}, {MOVE_DONE, true}};
-				else if (selMode == SEL_EDIT) ids = {{SEL_ALL, !plCur.entries.empty()}, {SEL_MOVE, n > 0}, {SEL_ACT, n > 0}};
+				else if (selMode == SEL_EDIT) ids = {{SEL_ALL, !plCur.entries.empty()}, {SEL_MOVE, n > 0 && !plIsLiked(plCur.file)}, {SEL_ACT, n > 0}};
 				else if (selMode == SEL_ADD) ids = {{SEL_ALL, files > 0}, {SEL_CANCEL, true}, {SEL_ACT, n > 0}};
 				else ids = {{SEL_CANCEL, true}, {SEL_ACT, pickable()}};
 				for (auto& id : ids)
@@ -2321,10 +2717,13 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 				if (selTickable(i)) { dragBegin(i, y, p); return false; }
 			}
 		}
+		if (page == Page::Browse && !inMenu && atHome()) return homePointer(pt, x, y, p);
 		if (page == Page::Browse && !inMenu && y < 60)
 		{
-			for (int t = 0; t < BROWSE_TABS; t++)
-				if (browseTabRect(t).hit(x, y)) switchTab(t, p);
+			// a section's marker: that section (Home and All recent have none)
+			if (browseDir != RECENT)
+				for (int t = 0; t < BROWSE_TABS; t++)
+					if (pipRect(t, p).hit(x, y)) openSection(t, p);
 			return false;
 		}
 		if (page == Page::Tracks && y < 60)
@@ -2388,6 +2787,9 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 		}
 		for (int id : {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, QUIT_BTN, SCREEN_BTN, INFO_BTN, LOCK_BTN})
 			if (buttonRect(id).hit(x, y)) pressedBtn = id;
+		if (headerActions(p))
+			for (int id : {ADD_BTN, LIKE_BTN})
+				if (buttonRect(id).hit(x, y)) pressedBtn = id;
 		return false;
 	}
 
@@ -2397,7 +2799,7 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 		const Track* s = p.selected(TrackType::Sub);
 		char buf[256];
 		snprintf(buf, sizeof buf, "%d %d %d %d %ld %ld %d %d %lld %lld %zu %d %d %d %.2f %d %d %d %d|", (int)page, cursor, scroll,
-			p.paused + setGroup * 2 + 2, (long)std::floor(p.position), (long)p.duration, (int)p.aspect, p.loaded, a ? (long long)a->id : 0LL,
+			p.paused + setGroup * 2 + 2, (long)std::floor(shownPosition(p)) * 2 + (predicting(p) && browserPos.playing), (long)p.duration, (int)p.aspect, p.loaded, a ? (long long)a->id : 0LL,
 			s ? (long long)s->id : 0LL, p.tracks.size(), dragging, (int)(dragFraction * 1000), quitArmed != 0, p.speed,
 			p.index(), p.count(), pressedBtn + touchLocked * 100 + (lockHoldAt != 0) * 1000, listTouch * 1000 + browseVersion + (clearArmed != 0) * 100000 + (int)p.history().items().size() * 1000000);
 		std::string photo = "|tab" + std::to_string(browseTab) + (netLoading ? "L" : "");
@@ -2419,7 +2821,7 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 				" " + std::to_string(popupShown(p)) + std::to_string(popupCursor) + std::to_string(pressedBtn);
 		// the chapters: the list, the one playing (the Chapters page's progress goes by the position, above), the tab
 		photo += "|ch" + std::to_string(p.chapterSerial) + " " + std::to_string(p.chapters.size()) + " " +
-			std::to_string(p.currentChapter()) + " t" + std::to_string(tracksTab);
+			std::to_string(shownChapter(p)) + " t" + std::to_string(tracksTab);
 		// Sound: its tab, the band, the effect under the cursor, its dialogs and the presets' list; the Display popup
 		if (page == Page::Sound || displayOpen)
 		{
@@ -2448,6 +2850,23 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 			const PlaySource& src = p.source();
 			photo += "|src" + std::to_string((int)src.kind) + (src.shuffled ? "s" : "") + (isNetPath(p.currentPath()) ? "n" : "") +
 				(p.netWaiting() ? "w" : "") + src.title + "|" + src.id;
+		}
+		photo += webSig(p);
+		// Like: the heart's pop, the Add square's check, the picker's one file and its question
+		{
+			Uint32 now = SDL_GetTicks();
+			photo += "|like" + std::to_string(likePopAt && now - likePopAt < 110) + std::to_string(addFlashUntil && now < addFlashUntil) +
+				std::to_string(pickerArmed) + pickerOne + "|" + std::to_string(likedNow(p));
+		}
+		// the clock: its minute
+		if (!clockText(p).empty()) photo += "|clk" + std::to_string((long long)time(nullptr) / 60);
+		// Home: the focus, the strip's scroll, a finger on a card or a tile, the tiles' lines (the connections)
+		if (atHome())
+		{
+			char hb[120];
+			snprintf(hb, sizeof hb, "|home%d %d %d %ld %d %zu %d", homeZone, homeStrip, homeGrid, std::lround(stripOff), homePress,
+				recent.size(), netStore ? netStore->version() : -1);
+			photo += hb;
 		}
 		return buf + photo + p.title + "|" + p.error + "|" + serializeSettings(p.settings) + "|bat" + std::to_string(battery.percent) + (battery.charging ? "c" : "") + (inMenu ? "|menu" + std::to_string(menuTab) : "") + (ctxOpen ? "|ctx" + std::to_string(ctxCursor) + std::to_string(pressedBtn) + ctxStatus + (ctxArmed ? "!" : "") : "") + upd
 			+ (kbOpen ? "|kb" + eqNameNote + std::to_string(kbCursor) + "," + std::to_string(kbPressed) + "," + std::to_string((int)kbShift) + (kbSymbols ? "s" : "") + std::to_string(kbEdit.caret) + kbEdit.text + (kbCaretShown() ? "|" : "") : "");
@@ -2601,6 +3020,7 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 			findRows();
 		}
 		if (dropArmed && SDL_GetTicks() - dropArmed >= QUIT_WINDOW_MS) dropArmed = 0;
+		if (pinArmed && SDL_GetTicks() - pinArmed >= QUIT_WINDOW_MS) pinArmed = 0;
 		// a finger held on a folder: its menu (the lift that follows chooses nothing). On a playlist's item, or a file:
 		// selecting, that one ticked
 		if (holdAt && listTouch && !listScrolled && SDL_GetTicks() - holdAt >= 600)
@@ -2623,6 +3043,21 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 			}
 			else openBrowseMenu(cursor, MENU_HOLD);
 		}
+		// a finger held on a Recent card: its menu (the lift that follows chooses nothing)
+		if (homeHoldAt && homeTouch && !homeMoved && SDL_GetTicks() - homeHoldAt >= 500)
+		{
+			int i = homePress;
+			homeHoldAt = 0;
+			homeTouch = false;
+			homePress = -1;
+			swallowTouch = true;
+			if (i >= 0 && i < (int)recent.size())
+			{
+				homeZone = HOME_STRIP;
+				setStrip(i);
+				openRecentMenu(recent[i].path);
+			}
+		}
 		plCheckShown();
 		std::string sig = signature(p);
 		if (page == Page::Info || page == Page::About)
@@ -2636,19 +3071,23 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 
 	void Ui::renderPage(const Player& p)
 	{
+		showHidden = p.settings.showHiddenFolders;
 		SDL_SetRenderDrawColor(ren, BG.r, BG.g, BG.b, 255);
 		SDL_RenderClear(ren);
+		webInd = {0, 0, 0, 0};	// (drawBattery puts it back where it draws it)
 		if (page == Page::Info || page == Page::About) drawInfo(p);
+		else if (page == Page::Web) drawWeb(p);
 		else if (page == Page::Exit) drawExit(p);
 		else if (page == Page::Settings) drawSettings(p);
 		else if (page == Page::Chapters) drawChapters(p);
 		else if (page == Page::Sound) drawSound(p);
+		else if (page == Page::Playing) drawPlaying(p);
 		else if (page != Page::Main) drawTracks(p);
 		else drawMain(p);
 		if (displayShown(p)) drawDisplay(p);
-		if (inMenu) drawTabs();
+		if (inMenu) drawTabs(p);
 		if (ctxOpen && page == Page::Browse) drawBrowseMenu();
-		if (pickerOpen && page == Page::Browse) drawPicker();
+		if (pickerOpen) drawPicker();
 		if (addPending.serial && page == Page::Browse) drawBusy();
 		if (popupShown(p)) drawUpdatePopup();
 		if (quickOpen) drawQuick(p);
@@ -2662,9 +3101,48 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 		batteryAt = SDL_GetTicks();
 	}
 
-	void Ui::drawBattery(int right, int y, const Player& p)
+	std::string Ui::clockText(const Player& p) const
 	{
-		if (battery.percent < 0) return;
+		// (not over a photo: its page is left as it is, as the web's globe is)
+		if (p.settings.clock == CLOCK_OFF || (page == Page::Main && p.playingPhoto())) return "";
+		time_t now = time(nullptr);
+		struct tm t;
+		if (!localtime_r(&now, &t)) return "";
+		return formatClock(t.tm_hour, t.tm_min, p.settings.clock == CLOCK_12);
+	}
+
+	int Ui::statusLeft(const Player& p) const
+	{
+		// as drawBattery lays them out, right to left: the battery (its percent, a bolt), the globe, the clock
+		int left = 616;
+		if (battery.percent >= 0)
+		{
+			left = 616 - 33;
+			if (p.settings.batteryPercent) left -= 6 + (int)(textWidth(std::to_string(battery.percent) + "%", 0) / sx) + 4;
+			if (battery.charging) left -= 14;
+		}
+		if (webIndicatorShown(p)) left = (battery.percent >= 0 ? left - 8 : left) - 18;
+		std::string c = clockText(p);
+		if (!c.empty()) left -= (left == 616 ? 0 : 10) + (int)std::lround(textWidth(c, 0) / sx);
+		return left;
+	}
+
+	void Ui::drawBattery(int right, int y, const Player& p, int minX)
+	{
+		// the clock, left of the rest (as statusLeft has it); dim while touch is locked
+		auto clock = [&](int edge) {
+			std::string c = clockText(p);
+			if (c.empty()) return;
+			int cr = edge - (edge == right ? 0 : 10);
+			if (cr - (int)std::lround(textWidth(c, 0) / sx) < minX) return;
+			drawTextMid(c, 0, touchLocked && page == Page::Main ? DIM : CREAM, cr, y + 8, 0, 1);
+		};
+		if (battery.percent < 0)
+		{
+			drawWebIndicator(right, y + 8, p);
+			clock(webIndicatorShown(p) ? right - 18 : right);
+			return;
+		}
 		// the body (an outline, filled to the charge) and its nub; the percent before it, the bolt before that
 		const int bw = 30, bh = 16;
 		int x = right - bw - 3;
@@ -2689,7 +3167,10 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 			for (int r = 0; r < 7; r++)
 				for (int c = 0; c < 5; c++)
 					if (BOLT[r][c] == '#') fill({bx + c * 2, by + r * 2, 2, 2}, YELLOW);
+			left = bx;
 		}
+		drawWebIndicator(left - 8, y + 8, p);
+		clock(webIndicatorShown(p) ? left - 8 - 18 : left);
 	}
 
 	std::string Ui::updateStatus() const
@@ -2825,23 +3306,48 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 			int it = ctxItems[i];
 			bool del = it == CTX_DELETE || it == CTX_PL_DELETE;
 			bool armed = del && ctxArmed && i == ctxCursor;
-			const char* label = it == CTX_HIDE ? (isHiddenFolder(ctxPath) ? "Unhide folder" : "Hide folder")
+			const RecentItem* ri = nullptr;
+			for (auto& x : recent)
+				if (x.path == ctxRecent) ri = &x;
+			std::string note;
+			SDL_Color noteInk = i == ctxCursor ? DIM_TEAL : DIM;
+			if (it == CTX_R_SHOW && ri) note = ri->where;
+			if (it == CTX_HIDDEN) note = showHidden ? "On" : "Off";
+			if (it == CTX_CLEAR_RECENT)
+			{
+				bool armedClear = ctxArmed && i == ctxCursor;
+				note = recent.empty() ? "Empty" : armedClear ? "Press again to clear" : "Press twice";
+				if (armedClear) noteInk = YELLOW;
+			}
+			std::string resume = ri && !ri->at.empty() ? "Resume from " + ri->at : "Play";
+			bool likedR = it == CTX_R_LIKE && plStore && plStore->isLiked(ctxRecent);
+			bool inLiked = plIsLiked(ctxPlFile);	// Liked's Remove is Unlike
+			const char* label = it == CTX_R_PLAY ? resume.c_str() : it == CTX_R_START ? "Play from the start"
+				: it == CTX_R_SHOW ? "Show in folder" : it == CTX_R_ADD || it == CTX_PL_ADD_ONE ? "Add to playlist\xE2\x80\xA6"
+				: it == CTX_R_LIKE ? (likedR ? "Unlike" : "Like") : it == CTX_R_REMOVE ? "Remove from Recent"
+				: it == CTX_CLEAR_RECENT ? "Clear Recent" : it == CTX_HIDDEN ? "Show hidden folders" : it == CTX_SETTINGS ? "Settings"
+				: it == CTX_HIDE ? (isHiddenFolder(ctxPath) ? "Unhide folder" : "Hide folder")
 				: it == CTX_REFRESH ? "Refresh" : it == CTX_ADD ? "Add connection" : it == CTX_FIND ? "Find on the network"
 				: it == CTX_EDIT ? "Edit connection" : it == CTX_TEST ? "Test connection"
 				: armed ? "Press again to delete" : it == CTX_DELETE ? "Delete connection" : it == CTX_PL_DELETE ? "Delete playlist"
 				: it == CTX_PL_NEW ? "New playlist\xE2\x80\xA6" : it == CTX_PL_PLAY ? (isPlDir(browseDir) ? "Play all" : "Play")
 				: it == CTX_PL_SHUFFLE ? "Shuffle play" : it == CTX_PL_RENAME ? "Rename\xE2\x80\xA6" : it == CTX_PL_DEDUP ? "Remove duplicates"
-				: it == CTX_PL_HERE ? "Play from here" : it == CTX_PL_REMOVE ? "Remove from playlist" : it == CTX_PL_SHOW ? "Show in folder"
+				: it == CTX_PL_HERE ? "Play from here" : it == CTX_PL_REMOVE ? (inLiked ? "Unlike" : "Remove from playlist") : it == CTX_PL_SHOW ? "Show in folder"
 				: it == CTX_PL_ADD_FILES ? "Add files\xE2\x80\xA6" : it == CTX_PL_ADD_FOLDER ? "Add folder\xE2\x80\xA6"
 				: it == CTX_PL_SELECT ? "Select" : it == CTX_PL_MOVE ? "Move" : it == CTX_SELECT_FILES ? "Select files"
-				: it == CTX_ADD_TO ? "Add to playlist\xE2\x80\xA6" : "Cancel";
-			const Glyph* g = it == CTX_HIDE ? &G_EYE : it == CTX_REFRESH ? &G_REFRESH : it == CTX_ADD ? &G_PLUS : it == CTX_FIND ? &G_SEARCH
+				: it == CTX_ADD_TO ? "Add to playlist\xE2\x80\xA6" : it == CTX_WEB ? "Web dashboard\xE2\x80\xA6" : "Cancel";
+			const Glyph* g = it == CTX_R_PLAY ? &G_PLAY : it == CTX_R_START ? &G_REFRESH : it == CTX_R_SHOW ? &G_FOLDER
+				: it == CTX_R_ADD || it == CTX_PL_ADD_ONE ? &G_PL_ADD : it == CTX_R_LIKE ? (likedR ? &G_HEART_O : &G_HEART)
+				: it == CTX_PL_REMOVE && inLiked ? &G_HEART_O : it == CTX_R_REMOVE ? &G_MINUS : it == CTX_CLEAR_RECENT ? &G_TRASH
+				: it == CTX_HIDDEN ? &G_EYE : it == CTX_SETTINGS ? &G_GEAR
+				: it == CTX_HIDE ? &G_EYE : it == CTX_REFRESH ? &G_REFRESH : it == CTX_ADD ? &G_PLUS : it == CTX_FIND ? &G_SEARCH
 				: it == CTX_EDIT ? &G_PENCIL : it == CTX_TEST ? &G_PLUG : del ? &G_TRASH
 				: it == CTX_PL_NEW ? &G_PLUS : it == CTX_PL_PLAY || it == CTX_PL_HERE ? &G_PLAY : it == CTX_PL_SHUFFLE ? &G_SHUFFLE
 				: it == CTX_PL_RENAME ? &G_PENCIL : it == CTX_PL_DEDUP || it == CTX_PL_REMOVE ? &G_MINUS : it == CTX_PL_SHOW ? &G_FOLDER
 				: it == CTX_PL_ADD_FILES ? &G_PLUS : it == CTX_PL_ADD_FOLDER ? &G_FOLDER : it == CTX_PL_SELECT || it == CTX_SELECT_FILES ? &G_BOX_ON
-				: it == CTX_PL_MOVE ? &G_MOVE : it == CTX_ADD_TO ? &G_PLAYLIST : &G_CROSS;
-			drawDialogRow(ctxRow(i), g, label, i == ctxCursor, pressedBtn == 100 + i, del ? (armed ? YELLOW : RED) : it == CTX_CANCEL ? DIM : CREAM);
+				: it == CTX_PL_MOVE ? &G_MOVE : it == CTX_ADD_TO ? &G_PLAYLIST : it == CTX_WEB ? &G_WEB : &G_CROSS;
+			drawDialogRow(ctxRow(i), g, label, i == ctxCursor, pressedBtn == 100 + i, del ? (armed ? YELLOW : RED) : it == CTX_CANCEL ? DIM
+				: it == CTX_R_LIKE && !likedR ? YELLOW : CREAM, note, noteInk);
 		}
 		// a menu too long for its line (a playlist's): Delete's word on the footer instead
 		if (plArmed && !ctxExtra()) drawFooterText("Your files stay where they are", YELLOW);
@@ -2895,10 +3401,13 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 		drawGlyphMid(G_BACK, b.x + b.w / 2 - 1, b.y + b.h / 2, armed ? BG : CREAM, 3);
 	}
 
-	void Ui::drawHeader(const std::string& title, const Player& p)
+	void Ui::drawHeader(const std::string& title, const Player& p, int titleRight)
 	{
 		drawBackIcon();
-		int room = 616 - 72 - (battery.percent >= 0 ? BATTERY_W : 0);
+		int room = 616 - 72 - (battery.percent >= 0 ? BATTERY_W : 0) - (webIndicatorShown(p) ? 26 : 0);
+		// the clock's room too (none over a photo: its title as it always was)
+		if (!clockText(p).empty()) room = std::min(room, statusLeft(p) - 12 - 72);
+		if (titleRight) room = std::min(room, titleRight - 12 - 72);
 		drawTextMid(title, 2, CREAM, 72, 32, room);
 		drawBattery(616, 24, p);
 	}
@@ -2952,22 +3461,28 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 		fill({630, y, 4, h}, DIM);
 	}
 
-	void Ui::drawEmpty(const Glyph& g, const std::string& title, const std::string& sub, const char* action)
+	void Ui::drawEmpty(const Glyph& g, const std::string& title, const std::string& sub, const char* action, const Glyph* btn)
 	{
+		const Glyph& bg = btn ? *btn : G_PLUS;
 		// in the middle of the page: a big mark, what it is, what to do
 		int cy = action ? 196 : 216;
 		drawGlyphMid(g, W / 2, cy - 36, DIM, 4);
 		drawTextMid(title, 1, CREAM, W / 2, cy + 16, 560, 2);
-		if (!sub.empty()) drawTextMid(sub, 0, DIM, W / 2, cy + 46, 560, 2);
+		for (size_t a = 0, k = 0; a <= sub.size() && !sub.empty(); k++)
+		{
+			size_t e = std::min(sub.find('\n', a), sub.size());
+			drawTextMid(sub.substr(a, e - a), 0, DIM, W / 2, cy + 46 + (int)k * 24, 560, 2);
+			a = e + 1;
+		}
 		if (action)
 		{
 			Rect b = buttonRect(EMPTY_BTN);
 			bool at = cursor == 0;
 			fill(b, pressedBtn == EMPTY_BTN ? PRESSED : TEAL);
 			if (at) { fill({b.x, b.y, b.w, 2}, YELLOW); fill({b.x, b.y + b.h - 2, b.w, 2}, YELLOW); fill({b.x, b.y, 2, b.h}, YELLOW); fill({b.x + b.w - 2, b.y, 2, b.h}, YELLOW); }
-			int tw = (int)std::lround(textWidth(action, 1) / sx), gw = glyphW(G_PLUS);
+			int tw = (int)std::lround(textWidth(action, 1) / sx), gw = glyphW(bg);
 			int x = b.x + b.w / 2 - (tw + gw + 10) / 2;
-			drawGlyphMid(G_PLUS, x + gw / 2, b.y + b.h / 2, at ? YELLOW : CREAM);
+			drawGlyphMid(bg, x + gw / 2, b.y + b.h / 2, at ? YELLOW : CREAM);
 			drawTextMid(action, 1, at ? YELLOW : CREAM, x + gw + 10, b.y + b.h / 2);
 		}
 	}
@@ -2997,26 +3512,55 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 		if (!title.empty()) drawTextMid(title, 1, YELLOW, box.x + box.w / 2, box.y + 30, box.w - 40, 2);
 	}
 
-	void Ui::drawDialogRow(Rect r, const Glyph* g, const std::string& label, bool at, bool pressed, SDL_Color ink)
+	void Ui::drawDialogRow(Rect r, const Glyph* g, const std::string& label, bool at, bool pressed, SDL_Color ink,
+		const std::string& note, SDL_Color noteInk)
 	{
 		if (pressed) fill(r, PRESSED);
 		else if (at) drawFocus(r);
 		SDL_Color c = at && ink.r == CREAM.r && ink.g == CREAM.g ? YELLOW : ink;
-		int x = r.x + 20;
+		int x = r.x + 20, noteW = 0;
 		if (g)
 		{
 			drawGlyphMid(*g, x + 11, r.y + r.h / 2, c);
 			x += 36;
 		}
-		drawTextMid(label, 1, c, x, r.y + r.h / 2, r.x + r.w - x - 12);
+		if (!note.empty())
+		{
+			drawTextMid(note, 0, noteInk.a ? noteInk : at ? DIM_TEAL : DIM, r.x + r.w - 14, r.y + r.h / 2, 0, 1);
+			noteW = (int)std::lround(textWidth(note, 0) / sx) + 20;
+		}
+		drawTextMid(label, 1, c, x, r.y + r.h / 2, r.x + r.w - x - 12 - noteW);
 	}
 
-	void Ui::drawTabs()
+	void Ui::drawTabs(const Player& p)
 	{
-		static const char* names[TABS] = {"Recent", "Settings", "About", "Quit"};
+		static const char* names[TABS] = {"Settings", "About", "Quit", "Playing"};
 		fill({0, 0, W, 62}, BG);	// over whatever the page drew there
+		webInd = {0, 0, 0, 0};	// (the battery and its marks gone under it: drawn again)
 		drawBackIcon();
-		for (int t = 0; t < TABS; t++) drawTab(tabRect(t), names[t], t == menuTab);
+		auto tabs = menuTabs(p);
+		int n = (int)tabs.size();
+		for (int t = 0; t < n; t++) drawTab(menuTabRect(t, n), names[tabs[t]], tabs[t] == menuTab);
+		Rect last = menuTabRect(n - 1, n);
+		drawBattery(616, 24, p, last.x + last.w + 8);
+	}
+
+	std::vector<int> Ui::menuTabs(const Player& p) const
+	{
+		if (playingTabShown(p)) return {TAB_PLAYING, TAB_SETTINGS, TAB_ABOUT, TAB_EXIT};
+		return {TAB_SETTINGS, TAB_ABOUT, TAB_EXIT};
+	}
+
+	bool Ui::playingTabShown(const Player& p) const { return p.playing() && !p.playingPhoto(); }
+
+	Ui::Rect Ui::menuTabRect(int i, int n) const
+	{
+		if (n != 4) return tabRect(i);
+		// four, as wide as their names need
+		static const int WS[4] = {112, 120, 100, 84};
+		int x = 72;
+		for (int k = 0; k < i; k++) x += WS[k] + 8;
+		return {x, 10, WS[i], 44};
 	}
 
 	Ui::RowIcon Ui::rowIcon(int i) const
@@ -3030,7 +3574,8 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 				: browseRows[i].id == R_TYPE_ADDRESS ? ICON_TYPE : ICON_NONE;
 		switch (browseRows[i].id)
 		{
-		case PL_ROW: return ICON_PLAYLIST;
+		case PL_ROW: return plIsLiked(path) ? ICON_LIKED : ICON_PLAYLIST;
+		case PL_NEW: return ICON_NEW;
 		case 4: return ICON_NETWORK;
 		case 6: return ICON_REFRESH;
 		case 1:
@@ -3087,7 +3632,8 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 		const Glyph* g = icon == ICON_RECENT ? &G_CLOCK : icon == ICON_PLACE ? &G_CARD : icon == ICON_FOLDER ? &G_FOLDER
 			: icon == ICON_VIDEO ? &G_FILM : icon == ICON_SONG ? &G_NOTE : icon == ICON_PHOTO ? &G_PICTURE
 			: icon == ICON_NETWORK ? &G_NETWORK : icon == ICON_REFRESH ? &G_REFRESH : icon == ICON_TYPE ? &G_PENCIL
-			: icon == ICON_TEST ? &G_PLUG : icon == ICON_SAVE ? &G_CHECK : icon == ICON_PLAYLIST ? &G_PLAYLIST : nullptr;
+			: icon == ICON_TEST ? &G_PLUG : icon == ICON_SAVE ? &G_CHECK : icon == ICON_PLAYLIST ? &G_PLAYLIST
+			: icon == ICON_LIKED ? &G_HEART : icon == ICON_NEW ? &G_PLUS : nullptr;
 		if (g) drawGlyphMid(*g, x + 11, y + 10, c);
 	}
 
@@ -3110,24 +3656,59 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 	{
 		bool browse = page == Page::Browse;
 		bool sel = browse && !inMenu && selMode != SEL_NONE;
+		if (browse && !inMenu && !sel && atHome()) { drawHome(p); return; }
 		if (sel) drawSelHeader(p);
 		else if (browse && !inMenu)
 		{
-			drawBackIcon();
-			// the tabs, as START's menu has them
-			static const char* TABS_NAMES[BROWSE_TABS] = {"Local", "Playlists", "Network"};
-			for (int t = 0; t < BROWSE_TABS; t++) drawTab(browseTabRect(t), TABS_NAMES[t], t == browseTab);
-			drawBattery(616, 24, p);
-			// where it is, its end kept; the folder it's in brighter. A playlist: how many items, on the right
-			int whereW = 592;
-			if (isPlDir(browseDir) && plLoaded)
+			// All recent: a page of Home's; else a section's header (its markers in place of tabs)
+			if (browseDir == RECENT) drawHeader("Recent", p);
+			else drawSectionHeader(p);
+			if (browseDir == EXTDIR)
 			{
-				size_t n = plCur.entries.size();
-				std::string count = std::to_string(n) + (n == 1 ? " item" : " items");
-				drawTextMid(count, 0, DIM, 616, SUB_Y, 0, 1);
-				whereW -= (int)std::lround(textWidth(count, 0) / sx) + 24;
+				drawEmpty(G_BLOCKS, "Extensions are on the way", "Add-ons for browsing online video sources and saving\n"
+					"videos to your card to watch later. Not in this version yet.", nullptr);
+				drawHints({{"B", "Home"}, {"L/R", "Sections"}, {"START", "Menu"}});
+				return;
 			}
-			drawWhere(24, whereW);
+			// where it is, its end kept; the folder it's in brighter. A playlist: how many items, on the right. A
+			// section's top: what's in it
+			if (atFirstPage())
+			{
+				int n = 0;
+				for (auto& row : browseRows) n += row.id == PL_ROW || row.id == 4;
+				bool cards = false, videos = false;
+				for (auto& rt : roots)
+				{
+					cards = cards || (rt.label.size() >= 4 && rt.label.compare(rt.label.size() - 4, 4, "card") == 0);
+					videos = videos || rt.label == "Videos";
+				}
+				std::string top = browseDir == RECENT ? "Newest first \xC2\xB7 the last 30"
+					: browseDir.empty() ? (videos && cards ? "Videos and your cards" : cards ? "Your cards" : "Your folders")
+					: browseDir == PLROOT ? (!plStore ? "" : n <= 1 ? "Liked"
+						: "Liked \xC2\xB7 " + std::to_string(n - 1) + (n == 2 ? " playlist" : " playlists"))
+					: !n ? ""
+					: std::to_string(n) + (n == 1 ? " connection" : " connections");
+				if (!top.empty()) drawTextMid(top, 0, DIM, 16, SUB_Y);
+			}
+			else
+			{
+				int whereW = 600;
+				if (isPlDir(browseDir) && plLoaded && plIsLiked(plCur.file))
+				{
+					// Liked: its order, and how many (empty: the page says so)
+					size_t n = plCur.entries.size();
+					if (n) drawTextMid("Newest first \xC2\xB7 " + std::to_string(n) + (n == 1 ? " item" : " items"), 0, DIM, 16, SUB_Y);
+					whereW = 0;
+				}
+				else if (isPlDir(browseDir) && plLoaded)
+				{
+					size_t n = plCur.entries.size();
+					std::string count = std::to_string(n) + (n == 1 ? " item" : " items");
+					drawTextMid(count, 0, DIM, 616, SUB_Y, 0, 1);
+					whereW -= (int)std::lround(textWidth(count, 0) / sx) + 24;
+				}
+				if (whereW) drawWhere(16, whereW);
+			}
 		}
 		else if (!browse) drawTracksHeader(p);
 		auto r = rows(p);
@@ -3140,12 +3721,15 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 			bool net = browseDir == NETROOT || isNetPath(browseDir);
 			bool pl = browseDir == PLROOT || isPlDir(browseDir);
 			const Glyph& g = net ? G_NETWORK : browseDir == RECENT ? G_CLOCK : G_FOLDER;
-			std::string sub = m == "No connections yet" ? "A computer or NAS that shares its files"
+			std::string sub = m == "No connections yet" ? "Play from a computer or a NAS on your Wi-Fi"
 				: m == "Nothing to play here" ? "No videos, music or photos in this folder"
 				: m == "This folder can't be opened" ? "Is the card still in?"
 				: m == "Play history is off (Settings)" ? "Turn it on in Settings, Files" : "";
 			std::string title = m == "Play history is off (Settings)" ? "Play history is off" : m;
-			if (pl)
+			if (pl && isPlDir(browseDir) && plIsLiked(plCur.file) && plLoaded)
+				drawEmpty(G_HEART_O, "Nothing liked yet", "Tap the heart at the top while a song or video plays,\n"
+					"or press START \xE2\x80\xBA Like. Liked things gather here.", nullptr);
+			else if (pl)
 				drawEmpty(G_PLAYLIST, title, m == "No playlists yet" ? "Gather videos and songs to play in your order"
 					: m == "Playlists aren't available" ? "There's no folder to keep them in"
 					: m == "This playlist can't be opened" ? "Was it deleted?" : "Add videos and songs from your cards or the network",
@@ -3203,8 +3787,15 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 					RowIcon icon = rowIcon(i);
 					if (icon != ICON_NONE)
 					{
-						drawRowIcon(icon, boxes ? 60 : 32, mid - 10, inert ? DIM : at ? YELLOW : CREAM);
+						drawRowIcon(icon, boxes ? 60 : 32, mid - 10, icon == ICON_LIKED ? YELLOW : inert || (icon == ICON_NEW && !at) ? DIM
+							: at ? YELLOW : CREAM);
 						textX = boxes ? 94 : 66;
+					}
+					// a liked file: a small heart before its note
+					if (r[i].id == 2 && plStore && i < (int)browsePaths.size() && plStore->isLiked(browsePaths[i]))
+					{
+						drawGlyphMid(G_HEART_S, noteW ? 608 - noteW : 601, mid, YELLOW);
+						noteW += 22;
 					}
 				}
 				else if (style)
@@ -3219,7 +3810,7 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 					drawGlyphMid(r[i].selected ? G_RADIO_ON : G_RADIO, 41, mid, r[i].selected ? YELLOW : at ? CREAM : DIM);
 					textX = 66;
 				}
-				SDL_Color ink = (r[i].id < 0 && !style) || inert ? soft : at ? YELLOW : CREAM;
+				SDL_Color ink = (r[i].id < 0 && !style) || inert ? soft : at ? YELLOW : r[i].id == PL_NEW ? DIM_TEAL : CREAM;
 				drawTextMid(r[i].label, 1, ink, textX, mid, 600 - textX - noteW);
 			}
 		// a dragged row: where it lands, a line in the gap (none while it would stay where it is)
@@ -3240,27 +3831,28 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 			return;
 		}
 		if (sel) { drawSelBar(); return; }
-		if (quitArmed) { drawFooterText("Press B again to quit", YELLOW); return; }
-		const char* other = browseTab == TAB_PLAYLISTS ? "Tabs" : "Playlists";
-		const char* tabKey = browseTab == TAB_LOCAL ? "R" : browseTab == TAB_PLAYLISTS ? "L/R" : "L";
+		// B at a section's top goes Home; L/R to the sections either side
+		const char* back = atFirstPage() ? "Home" : "Back";
 		bool plEmpty = r.size() == 1 && r[0].id < 0;
-		if (inMenu) drawHints({{"A", "Play"}, {"B", "Close"}, {"L/R", "Tabs"}});
-		else if (form) drawHints({{"A", "Change"}, {"LEFT/RIGHT", "Choose"}, {"B", "Cancel"}});
+		// a row with a menu of its own (Y): a folder, a connection, a playlist, its item
+		bool yMenu = cursor < n && (folderRow(cursor) || (browseDir == NETROOT && r[cursor].id == 4) || r[cursor].id == PL_ROW ||
+			r[cursor].id == PL_ITEM || (isNetPath(browseDir) && r[cursor].id == 1 && plStore));
+		bool file = cursor < n && (r[cursor].id == 2 || r[cursor].id == PL_ITEM);
+		if (form) drawHints({{"A", "Change"}, {"LEFT/RIGHT", "Choose"}, {"B", "Cancel"}});
 		else if (browseDir == FINDNET) drawHints({{"A", "Add this one"}, {"B", "Back"}});
-		else if (emptyAction() && browseDir == PLROOT) drawHints({{"A", "New playlist"}, {tabKey, other}, {"START", "Menu"}});
-		else if (emptyAction() && isPlDir(browseDir)) drawHints({{"A", "Add files"}, {"B", "Back"}, {"X", "Options"}, {tabKey, other}});
-		else if (emptyAction()) drawHints({{"A", "Add connection"}, {"X", "Options"}, {tabKey, other}, {"START", "Menu"}});
-		else if (browseDir == PLROOT && plEmpty) drawHints({{tabKey, other}, {"START", "Menu"}, {"B\xC3\x97" "2", "Quit"}});
-		else if (browseDir == PLROOT)
-			drawHints({{"A", "Open"}, {"X", "Options"}, {"Y", "Playlist"}, {tabKey, other}, {"START", "Menu"}, {"B\xC3\x97" "2", "Quit"}});
-		else if (isPlDir(browseDir) && plEmpty) drawHints({{"B", "Back"}, {"X", "Options"}, {tabKey, other}});
-		else if (isPlDir(browseDir))
-			drawHints({{"A", "Play"}, {"B", "Back"}, {"X", "Options"}, {"Y", "Item"}, {tabKey, other}, {"START", "Menu"}});
-		else if (browseDir == NETROOT) drawHints({{"A", "Open"}, {"X", "Options"}, {"Y", "Connection"}, {tabKey, other}, {"START", "Menu"}});
-		else if (r.size() == 1 && r[0].id < 0 && !form)
-			drawHints({{"B", "Back"}, {"X", "Options"}, {tabKey, other}, {"START", "Menu"}});
-		else if (browseDir.empty()) drawHints({{"A", "Open"}, {"X", "Options"}, {tabKey, other}, {"START", "Menu"}, {"B\xC3\x97" "2", "Quit"}});
-		else drawHints({{"A", browseDir == RECENT ? "Play" : "Open"}, {"B", "Back"}, {"X", "Options"}, {tabKey, other}, {"START", "Menu"}});
+		else if (browseDir == RECENT && plEmpty) drawHints({{"B", "Home"}, {"X", "Options"}, {"START", "Menu"}});
+		else if (browseDir == RECENT) drawHints({{"A", "Play"}, {"Y", "Menu"}, {"B", "Home"}, {"X", "Options"}, {"START", "Menu"}});
+		else if (plEmpty && isPlDir(browseDir) && plIsLiked(plCur.file)) drawHints({{"B", back}, {"L/R", "Sections"}, {"START", "Menu"}});
+		else if (browseDir == PLROOT && cursor < n && r[cursor].id == PL_NEW)
+			drawHints({{"A", "New playlist"}, {"B", back}, {"X", "Options"}, {"L/R", "Sections"}});
+		else if (emptyAction() && browseDir == PLROOT)
+			drawHints({{"A", "New playlist"}, {"B", back}, {"X", "Options"}, {"L/R", "Sections"}, {"START", "Menu"}});
+		else if (emptyAction() && isPlDir(browseDir)) drawHints({{"A", "Add files"}, {"B", back}, {"X", "Options"}, {"L/R", "Sections"}});
+		else if (emptyAction())
+			drawHints({{"A", "Add connection"}, {"B", back}, {"X", "Options"}, {"L/R", "Sections"}, {"START", "Menu"}});
+		else if (plEmpty) drawHints({{"B", back}, {"X", "Options"}, {"L/R", "Sections"}, {"START", "Menu"}});
+		else if (yMenu) drawHints({{"A", file ? "Play" : "Open"}, {"B", back}, {"X", "Options"}, {"Y", "Menu"}, {"L/R", "Sections"}});
+		else drawHints({{"A", file ? "Play" : "Open"}, {"B", back}, {"X", "Options"}, {"L/R", "Sections"}});
 	}
 
 	void Ui::drawPlRow(int i, int mid, bool at)
@@ -3271,13 +3863,16 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 		// selecting: its box where its number was, its grip on the right (Move's block: its arrows, yellow)
 		bool edit = selMode == SEL_EDIT && !inMenu;
 		bool block = edit && ((moving && plSel.count(i)) || (plDrag.on && dragSel.count(i)));
+		// (Liked has no numbers: its order is the likes', newest first)
+		bool liked = plIsLiked(plCur.file);
 		if (edit) drawGlyphMid(plSel.count(i) ? G_BOX_ON : G_BOX, 40, mid, plSel.count(i) ? YELLOW : soft);
-		else drawTextMid(std::to_string(i + 1), 0, soft, 56, mid, 0, 1);
+		else if (!liked) drawTextMid(std::to_string(i + 1), 0, soft, 56, mid, 0, 1);
 		if (edit) drawGlyphMid(block ? G_MOVE : G_GRIP, 600, mid, block ? YELLOW : soft);
 		int right = edit ? 572 : 608;
 		// its number in the playlist, its mark (an alert when it isn't there), its name, where it is
 		const Glyph& g = miss ? G_ALERT : isAudioFile(path) ? G_NOTE : G_FILM;
-		drawGlyphMid(g, 64 + 11, mid, miss ? DIM : at ? YELLOW : CREAM);
+		int gx = liked && !edit ? 43 : 64 + 11;
+		drawGlyphMid(g, gx, mid, miss ? DIM : at ? YELLOW : CREAM);
 		// a missing one says so in its name, "[Gone]" (why: its menu's line), not on the right
 		std::string note = miss ? "" : browseRows[i].note;
 		int noteW = 0;
@@ -3293,7 +3888,7 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 				noteW += 30;
 			}
 		}
-		int x = 96;
+		int x = liked && !edit ? 66 : 96;
 		if (miss)
 		{
 			static const std::string GONE = "[Gone] ";
@@ -3342,7 +3937,7 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 			drawHints({{"B", "Back"}});
 			return;
 		}
-		int cur = p.currentChapter(), at = std::min(cursor, n - 1);
+		int cur = shownChapter(p), at = std::min(cursor, n - 1);
 		for (int i = scroll; i < n && i < scroll + ROWS_SHOWN; i++)
 		{
 			int y = ROW_Y + (i - scroll) * ROW_H, mid = y + 22;
@@ -3363,7 +3958,8 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 			{
 				// how far into it: up to the next one's start, or the file's end
 				double end = i + 1 < n ? p.chapters[i + 1].time : p.duration;
-				double f = end > c.time && p.position >= 0 ? std::clamp((p.position - c.time) / (end - c.time), 0.0, 1.0) : 0;
+				double at = shownPosition(p);
+				double f = end > c.time && at >= 0 ? std::clamp((at - c.time) / (end - c.time), 0.0, 1.0) : 0;
 				fill({104, y + 37, 504, 3}, focus ? BG : SCREEN);
 				fill({104, y + 37, (int)(504 * f), 3}, YELLOW);
 			}
@@ -3468,7 +4064,7 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 		if (setGroup < 0)
 		{
 			// the groups as tiles, two to a row: a mark, a name, what's in it
-			static const Glyph* MARKS[GROUPS] = {&G_CC, &G_NOTE, &G_PICTURE, &G_BOOKMARK, &G_FOLDER, &G_SUN, &G_DOWNLOAD};
+			static const Glyph* MARKS[GROUPS] = {&G_CC, &G_NOTE, &G_PICTURE, &G_BOOKMARK, &G_FOLDER, &G_SUN, &G_DOWNLOAD, &G_WEB};
 			for (int g = 0; g < GROUPS; g++)
 			{
 				Rect t = groupRect(g);
@@ -3483,13 +4079,20 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 				}
 				drawGlyphMid(*MARKS[g], t.x + 34, t.y + t.h / 2, at ? YELLOW : CREAM, 3);
 				drawTextMid(GROUP_NAMES[g].name, 1, at ? YELLOW : CREAM, t.x + 66, t.y + 27, t.w - 76);
-				drawTextMid(GROUP_NAMES[g].about, 0, at ? DIM_TEAL : DIM, t.x + 66, t.y + 52, t.w - 76);
+				std::string about = GROUP_NAMES[g].about;
+				if (g == GROUP_WEB)
+				{
+					int n = webClients();
+					about = !p.settings.webDashboard ? "Off" : n == 0 ? "On \xC2\xB7 No browser yet"
+						: "On \xC2\xB7 " + std::to_string(n) + (n == 1 ? " browser" : " browsers");
+				}
+				drawTextMid(about, 0, at ? DIM_TEAL : DIM, t.x + 66, t.y + 52, t.w - 76);
 			}
 			drawHints({{"D-PAD", "Move"}, {"A", "Open"}, {"B", "Close"}, {"L/R", "Tabs"}});
 			return;
 		}
 		// the group in the middle, the ones before and after it either side: a tap (or X / Y) away
-		static const char* SHORT[GROUPS] = {"Subtitles", "Music", "Photos", "Remember", "Files", "Controls", "Updates"};
+		static const char* SHORT[GROUPS] = {"Subtitles", "Music", "Photos", "Remember", "Files", "Controls", "Updates", "Web"};
 		drawTextMid(GROUP_NAMES[setGroup].name, 1, YELLOW, W / 2, 73, 248, 2);
 		for (int k = 0; k < 2; k++)
 		{
@@ -3575,6 +4178,11 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 				label = row == BOTTOM_LIGHT_ROW ? "Bottom brightness" : sameBrightness ? "Brightness" : "Top brightness";
 				int pm = backlight.permille(row == TOP_LIGHT_ROW ? Backlight::TOP : Backlight::BOTTOM);
 				value = pm < 0 ? "-" : std::to_string((pm + 5) / 10) + "%";
+			}
+			else if (row == CLOCK_ROW)
+			{
+				label = "Clock";
+				value = p.settings.clock == CLOCK_12 ? "12-hour" : p.settings.clock == CLOCK_OFF ? "Off" : "24-hour";
 			}
 			else if (row == PAN_ROW)
 			{
@@ -3797,7 +4405,7 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 	{
 		// before the first chapter starts there's none to name (and nothing to tap)
 		return p.playing() && !p.playingPhoto() && !p.loading() && p.error.empty() && !p.chapters.empty() &&
-			p.currentChapter() >= 0 && p.currentChapter() < (int)p.chapters.size();
+			shownChapter(p) >= 0 && shownChapter(p) < (int)p.chapters.size();
 	}
 
 	void Ui::drawMain(const Player& p)
@@ -3805,7 +4413,21 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 		if (p.playingPhoto()) { drawPhoto(p); return; }
 		std::string name = p.currentPath().substr(p.currentPath().rfind('/') + 1);
 		bool err = !p.error.empty();
-		drawHeader(!p.title.empty() ? p.title : err ? name : "Opening...", p);
+		bool actions = headerActions(p);
+		drawHeader(!p.title.empty() ? p.title : err ? name : "Opening...", p, actions ? buttonRect(ADD_BTN).x : 0);
+		if (actions)
+		{
+			// Add to playlist, then the heart (the outer one: the right thumb's, the one used most). Both work on a file
+			// that didn't open (it's still a file); locked, dim with the rest
+			Uint32 now = SDL_GetTicks();
+			Rect a = buttonRect(ADD_BTN), l = buttonRect(LIKE_BTN);
+			fill(a, pressedBtn == ADD_BTN ? PRESSED : TEAL);
+			if (addFlashUntil && now < addFlashUntil) drawGlyphMid(G_CHECK, a.x + 24, a.y + 24, YELLOW, 3);
+			else drawGlyphMid(G_PL_ADD, a.x + 25, a.y + 24, touchLocked ? DIM : CREAM, 3);
+			bool on = likedNow(p), popping = likePopAt && now - likePopAt < 110;
+			fill(l, pressedBtn == LIKE_BTN ? PRESSED : TEAL);
+			drawGlyphMid(on ? G_HEART : G_HEART_O, l.x + 24, l.y + 24, touchLocked ? DIM : on ? YELLOW : CREAM, popping ? 4 : 3);
+		}
 		if (roots.empty()) roots = browseRoots();	// (started with a file: the browser never read them)
 		drawSource(p);
 		const char* leave = browserMode ? "close" : "quit";
@@ -3824,14 +4446,15 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 		}
 		else
 		{
-			std::string status = p.loading() ? "Loading" + std::string(SDL_GetTicks() / 400 % 4, '.') : p.paused ? "Paused" : "Playing";
+			std::string status = p.loading() ? "Loading" + std::string(SDL_GetTicks() / 400 % 4, '.') : predicting(p) && browserPos.playing ? "Playing in your browser"
+				: p.paused ? "Paused" : "Playing";
 			if (p.source().shuffled) status += " \xC2\xB7 Shuffle";
 			if (std::fabs(p.speed - 1) > 1e-6) status += " \xC2\xB7 " + speedLabel(p.speed);
 			if (!hotkeys) status += " \xC2\xB7 buttons off";
 			int x = 24;
 			if (!p.loading())
 			{
-				drawGlyphMid(p.paused ? G_PAUSE : G_PLAY, 32, STATUS_Y, YELLOW);
+				drawGlyphMid(p.paused && !(predicting(p) && browserPos.playing) ? G_PAUSE : G_PLAY, 32, STATUS_Y, YELLOW);
 				x = 52;
 			}
 			drawTextMid(status, 1, YELLOW, x, STATUS_Y, 330);
@@ -3840,7 +4463,7 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 			// "Chapter 3 of 12" dim when it has none. A tap opens the list
 			if (chapterLineShown(p))
 			{
-				int c = p.currentChapter(), n = (int)p.chapters.size();
+				int c = shownChapter(p), n = (int)p.chapters.size();
 				if (pressedBtn == CHAPTER_BTN) fill(buttonRect(CHAPTER_BTN), PRESSED);
 				drawGlyphMid(G_CHAPTERS, 35, CHAPTER_Y, DIM);
 				if (chapterUntitled(p.chapters[c].title))
@@ -3849,7 +4472,8 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 				drawGlyphMid(G_RIGHT, 604, CHAPTER_Y, DIM);
 			}
 
-			double frac = dragging ? dragFraction : p.duration > 0 && p.position >= 0 ? std::clamp(p.position / p.duration, 0.0, 1.0) : 0;
+			double pos = shownPosition(p);
+			double frac = dragging ? dragFraction : p.duration > 0 && pos >= 0 ? std::clamp(pos / p.duration, 0.0, 1.0) : 0;
 			fill(BAR, TEAL);
 			fill({BAR.x, BAR.y, (int)(BAR.w * frac), BAR.h}, YELLOW);
 			// where each chapter starts: a notch through the bar (none too close to the last, none at all past 100:
@@ -3867,10 +4491,10 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 				}
 			}
 			fill({BAR.x + (int)(BAR.w * frac) - 4, BAR.y - 6, 8, BAR.h + 12}, CREAM);
-			drawText(formatTime(dragging ? dragFraction * p.duration : p.position), 1, CREAM, BAR.x, BAR.y + 32);
+			drawText(formatTime(dragging ? dragFraction * p.duration : pos), 1, CREAM, BAR.x, BAR.y + 32);
 			drawText(formatTime(p.duration), 1, DIM, BAR.x + BAR.w, BAR.y + 32, 0, 1);
 			// how long is left, at the speed it plays (half at 2x)
-			double left = timeLeft(dragging ? dragFraction * p.duration : p.position, p.duration, p.speed);
+			double left = timeLeft(dragging ? dragFraction * p.duration : pos, p.duration, p.speed);
 			// dragging the bar of a file with chapters: the chapter under the finger instead ("3 · The Dragon")
 			int under = -1;
 			if (dragging && p.duration > 0)
@@ -3940,7 +4564,7 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 				{
 					// Chapters: the one playing of how many ("3/12"; "3" when that's too wide, "–/12" before the first).
 					// None (or not known yet) dims it, though it still opens the page that says so
-					int n = (int)p.chapters.size(), c = p.currentChapter();
+					int n = (int)p.chapters.size(), c = shownChapter(p);
 					std::string num;
 					if (n > 0)
 					{
@@ -4521,8 +5145,13 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 			}
 			else
 			{
-				// where it was left (as the folders show it), then the folder it's in
+				// where it was left (as the folders show it), then the folder it's in. Liked: how long it is
 				const ResumeEntry* r = p.resumeStore().find(e.path);
+				if (plIsLiked(plCur.file) && e.duration > 0)
+				{
+					add(PL_ITEM, e.title.empty() ? entryTitle(e.path) : e.title, e.path, formatTime(e.duration));
+					continue;
+				}
 				std::string at = r && r->position >= 0 && !isAudioFile(e.path) ? "at " + formatTime(r->position) : "";
 				std::string folder = baseName(parentFolder(e.path));
 				note = at.empty() ? folder : folder.empty() ? at : at + " \xC2\xB7 " + folder;
@@ -4646,7 +5275,7 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 
 	void Ui::plDelete(const std::string& file, Player& p)
 	{
-		if (!plStore) return;
+		if (!plStore || plIsLiked(file)) return;
 		// its edits not written yet: never (written after, they'd bring it back)
 		if (plDirty && plCur.file == file) plDirty = false;
 		else plFlush(p);
@@ -4669,7 +5298,8 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 
 	void Ui::plNameOpen(bool rename, const std::string& file, const std::string& name)
 	{
-		if (!plStore) return;
+		if (!plStore || (rename && plIsLiked(file))) return;
+		plNameThenAdd = false;	// (Add to...'s New playlist sets it after)
 		plRenaming = rename;
 		plRenameFile = file;
 		plNameNote.clear();
@@ -4712,7 +5342,9 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 				// Add to... > New playlist...: what was to be added goes in it (and the browser stays where it is)
 				plNameThenAdd = false;
 				pickerFolder = plNameAddFolder;
+				pickerNewOne = true;
 				pickerAdd(file, p);
+				pickerNewOne = false;
 				return;
 			}
 			if (!plRenaming)
@@ -4802,8 +5434,7 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 
 	void Ui::returnToPlaylist(const std::string& file, int item, Player& p)
 	{
-		if (browseTab != TAB_PLAYLISTS) tabDir[browseTab] = browseDir;
-		browseTab = TAB_PLAYLISTS;
+		setSection(TAB_PLAYLISTS);
 		if (!exists(file)) { enterFolder(PLROOT, p); return; }
 		enterFolder(plDirFor(file), p);
 		if (item >= 0 && item < (int)browseRows.size())
@@ -5027,7 +5658,7 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 
 	void Ui::moveStart(Player& p)
 	{
-		if (plSel.empty() || !plLoaded) return;
+		if (plSel.empty() || !plLoaded || plIsLiked(plCur.file)) return;
 		moveOrig = plCur.entries;
 		moveOrigSel = plSel;
 		// the ticked ones together, at the first one's place, at once
@@ -5094,6 +5725,7 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 
 	void Ui::dragBegin(int row, int y, Player& p)
 	{
+		if (plIsLiked(plCur.file)) return;	// Liked has no order of its own to change
 		// a ticked row takes the ticked ones with it, gathered at once; else the row alone
 		std::set<int> block = plSel.count(row) ? plSel : std::set<int>{row};
 		moveRemap = gatherSelection(plCur.entries, block);
@@ -5145,14 +5777,31 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 		selSerial++;
 	}
 
-	void Ui::openPicker(const std::string& folder, Player& p)
+	void Ui::openPicker(const std::string& folder, Player& p, bool one)
 	{
 		if (!plStore) return;
 		plFlush(p);
-		pickerList = plStore->list();
+		if (!one) pickerOne.clear();
+		pickerList = plStore->addTargets();	// not Liked: only the Like button adds there
+		// the one changed last first (as good as the one last added to), then by name as listed
+		std::vector<std::pair<long long, size_t>> order;
+		for (size_t i = 0; i < pickerList.size(); i++)
+		{
+			struct stat st;
+			order.push_back({stat(pickerList[i].file.c_str(), &st) == 0 ? (long long)st.st_mtime : 0LL, i});
+		}
+		std::stable_sort(order.begin(), order.end(), [](const auto& a, const auto& b) { return a.first > b.first; });
+		std::vector<PlaylistStore::Info> sorted;
+		for (auto& o : order) sorted.push_back(pickerList[o.second]);
+		pickerList = sorted;
+		// one file: the playlists that have it already
+		pickerHas.assign(pickerList.size(), 0);
+		if (one)
+			for (size_t i = 0; i < pickerList.size(); i++) pickerHas[i] = plStore->containsPath(pickerList[i].file, pickerOne);
+		pickerArmed = -1;
 		pickerFolder = folder;
 		// none yet: the one to make is the only choice
-		if (pickerList.empty()) { pickerNew(p); return; }
+		if (pickerList.empty() && !one) { pickerNew(p); return; }
 		pickerOpen = true;
 		pickerCursor = pickerScroll = 0;
 		pressedBtn = -1;
@@ -5162,21 +5811,34 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 	{
 		// named after the folder (a ticked file's, the one the menu was for)
 		pickerOpen = false;
-		plNameOpen(false, "", folderName(pickerFolder.empty() ? browseDir : pickerFolder));
+		plNameOpen(false, "", pickerOne.empty() ? folderName(pickerFolder.empty() ? browseDir : pickerFolder) : "");
 		plNameThenAdd = true;
 		plNameAddFolder = pickerFolder;
 	}
 
 	void Ui::pickerChoose(int i, Player& p)
 	{
-		pickerOpen = false;
 		pressedBtn = -1;
+		// one file a playlist has already: asked first (Add again?), a second A adds a copy
+		if (i > 0 && !pickerOne.empty() && i - 1 < (int)pickerHas.size() && pickerHas[i - 1] && pickerArmed != i)
+		{
+			pickerArmed = i;
+			return;
+		}
+		pickerOpen = false;
 		if (i == 0) { pickerNew(p); return; }
 		if (i - 1 < (int)pickerList.size()) pickerAdd(pickerList[i - 1].file, p);
 	}
 
 	void Ui::pickerAdd(const std::string& dest, Player& p)
 	{
+		if (!pickerOne.empty())
+		{
+			// the one file (addTo shows the card and lights the Add square)
+			addTo(dest, {{pickerOne, pickerOneTitle, pickerOneDuration}}, 0, pickerOneTitle, false, p);
+			pickerOne.clear();
+			return;
+		}
 		// a folder's media (its menu's Add to playlist...), or the files ticked (then done selecting, still here)
 		if (!pickerFolder.empty())
 		{
@@ -5190,6 +5852,7 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 	bool Ui::pickerKey(Button b, Player& p)
 	{
 		int n = (int)pickerList.size() + 1;
+		if (b != Button::A) pickerArmed = -1;	// moved off it: asked again next time
 		switch (b)
 		{
 		case Button::Up: pickerCursor = (pickerCursor + n - 1) % n; break;
@@ -5286,8 +5949,10 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 		Playlist pl;
 		int skipped = 0;
 		plFlush(p);
+		if (plIsLiked(dest)) { p.osd("Use the Like button to add to Liked"); return false; }
 		if (!plStore || !plStore->load(dest, pl, skipped)) { p.osd("Couldn't read the playlist"); return false; }
 		int before = (int)pl.entries.size(), dropped = 0;
+		bool again = !pickerOne.empty() && plStore->containsPath(dest, pickerOne);
 		auto remap = addEntries(pl.entries, add, -1, PL_MAX_ENTRIES, dropped);
 		int added = (int)add.size() - dropped;
 		if (added <= 0) { p.osd("Playlist is full: " + quoted(pl.name) + " has " + std::to_string(PL_MAX_ENTRIES) + " items"); return false; }
@@ -5295,7 +5960,14 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 		plTellPlayer(pl, remap, p);
 		std::string note = "Added " + std::to_string(added) + " to " + quoted(pl.name) + photoNote;
 		if (dropped) note += " \xC2\xB7 Playlist is full, " + std::to_string(dropped) + " left out";
-		p.osd(note);
+		if (!pickerOne.empty())
+		{
+			// one file: the card over the top panel, the Add square's check
+			p.showNoteCard(G_PLAYLIST_ROWS, G_PLAYLIST.h, "&HE2EDF1&", (again ? "Added again to " : "Added to ") + pl.name,
+				pickerNewOne ? "New playlist \xC2\xB7 " + pickerOneTitle : pickerOneTitle);
+			addFlashUntil = SDL_GetTicks() + 1200;
+		}
+		else p.osd(note);
 		if (back)
 		{
 			selEnd();
@@ -5393,8 +6065,9 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 			}
 		}
 		int cw = count.empty() ? 0 : (int)std::lround(textWidth(count, 1) / sx);
-		if (!count.empty()) drawTextMid(count, 1, countInk, 496, 32, 0, 1);
-		drawTextMid(title, 2, CREAM, 72, 32, std::max(40, 496 - (cw ? cw + 16 : 0) - 72));
+		int end = std::min(496, statusLeft(p) - 12);	// (left of the clock)
+		if (!count.empty()) drawTextMid(count, 1, countInk, end, 32, 0, 1);
+		drawTextMid(title, 2, CREAM, 72, 32, std::max(40, end - (cw ? cw + 16 : 0) - 72));
 		// the line under it: Move's keys; adding, where it is (a card or the network); a playlist's, as ever
 		if (moving)
 		{
@@ -5462,9 +6135,12 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 		{
 			bool all = !plCur.entries.empty() && (int)plSel.size() == (int)plCur.entries.size();
 			drawBarButton(SEL_ALL, &G_BOX_ON, all ? "None" : "All", "SELECT", CREAM, false, plCur.entries.empty());
-			drawBarButton(SEL_MOVE, &G_MOVE, "Move", "Y", CREAM, false, n == 0);
+			// (Liked: no order of its own to move, and Remove is Unlike)
+			bool liked = plIsLiked(plCur.file);
+			if (!liked) drawBarButton(SEL_MOVE, &G_MOVE, "Move", "Y", CREAM, false, n == 0);
 			// (armed: the words alone, room for them)
-			drawBarButton(SEL_ACT, removeArmed ? nullptr : &G_MINUS, removeArmed ? "Again: remove " + many(n) : std::string("Remove"), "X",
+			drawBarButton(SEL_ACT, removeArmed ? nullptr : liked ? &G_HEART_O : &G_MINUS,
+				removeArmed ? (liked ? "Again: unlike " : "Again: remove ") + many(n) : std::string(liked ? "Unlike" : "Remove"), "X",
 				removeArmed ? YELLOW : RED, false, n == 0);
 			return;
 		}
@@ -5486,7 +6162,8 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 	{
 		Rect box = pickerBox();
 		int n = (int)pickerList.size() + 1;
-		drawDialog(box, pickerFolder.empty() ? "Add " + std::to_string(picked.size()) + " to\xE2\x80\xA6"
+		drawDialog(box, !pickerOne.empty() ? "Add " + quoted(pickerOneTitle) + " to\xE2\x80\xA6"
+			: pickerFolder.empty() ? "Add " + std::to_string(picked.size()) + " to\xE2\x80\xA6"
 			: "Add " + quoted(folderName(pickerFolder)) + " to\xE2\x80\xA6");
 		for (int i = pickerScroll; i < n && i < pickerScroll + PICKER_SHOWN; i++)
 		{
@@ -5503,9 +6180,16 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 				continue;
 			}
 			auto& pl = pickerList[i - 1];
-			std::string count = std::to_string(pl.count) + (pl.count == 1 ? " item" : " items");
+			// on the right: Add again? (asked), ✓ Added (it has the one file), else how many
+			bool has = i - 1 < (int)pickerHas.size() && pickerHas[i - 1], armed = pickerArmed == i;
+			std::string count = armed ? "Add again?" : has ? "Added" : std::to_string(pl.count) + (pl.count == 1 ? " item" : " items");
 			int cw = (int)std::lround(textWidth(count, 0) / sx);
-			drawTextMid(count, 0, at ? DIM_TEAL : DIM, 512, mid, 0, 1);
+			drawTextMid(count, 0, armed ? YELLOW : at ? DIM_TEAL : DIM, 512, mid, 0, 1);
+			if (has && !armed)
+			{
+				drawGlyphMid(G_CHECK, 512 - cw - 14, mid, YELLOW);
+				cw += 24;
+			}
 			drawGlyphMid(G_PLAYLIST, r.x + 31, mid, ink);
 			drawTextMid(pl.name, 1, ink, r.x + 56, mid, 512 - cw - 12 - (r.x + 56));
 		}
@@ -5517,7 +6201,7 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 			int h = std::max(16, height * PICKER_SHOWN / n);
 			fill({532, top + (height - h) * pickerScroll / std::max(1, n - PICKER_SHOWN), 4, h}, DIM);
 		}
-		drawHints({{"A", "Add"}, {"B", "Cancel"}});
+		drawHints({{"A", pickerArmed > 0 ? "Add again" : "Add"}, {"B", "Cancel"}});
 	}
 
 	void Ui::drawBusy()
@@ -5556,8 +6240,8 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 		int maxW = 616 - 52 - rightW - 24;
 		if (pl)
 		{
-			// the playlist's name, cut at its end
-			drawGlyphMid(G_PLAYLIST, 35, SOURCE_Y, YELLOW);
+			// the playlist's name, cut at its end (Liked: its heart)
+			drawGlyphMid(plIsLiked(src.id) ? G_HEART : G_PLAYLIST, 35, SOURCE_Y, YELLOW);
 			drawTextMid(src.title, 0, CREAM, 52, SOURCE_Y, maxW);
 			return;
 		}
@@ -6436,5 +7120,1107 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 			}
 			drawHints({{"A", "Choose"}, {"B", "Close"}});
 		}
+	}
+
+	// ---- the web dashboard ----
+
+	int Ui::webView(const Player& p) const
+	{
+		if (!p.settings.webDashboard) return WEB_OFF_VIEW;
+#ifdef BP_WEB
+		if (!web || !web->running()) return WEB_FAILED_VIEW;
+		// (the server listens all the same: it answers once the Wi-Fi is back)
+		if (webIp.empty()) return WEB_NOWIFI_VIEW;
+		return WEB_ON_VIEW;
+#else
+		return WEB_FAILED_VIEW;
+#endif
+	}
+
+	int Ui::webClients() const
+	{
+#ifdef BP_WEB
+		if (web && web->running()) return web->clients();
+#endif
+		return 0;
+	}
+
+	std::string Ui::webPin() const
+	{
+#ifdef BP_WEB
+		if (web && web->running()) return web->pin();
+#endif
+		return "";
+	}
+
+	std::string Ui::webAddress() const
+	{
+#ifdef BP_WEB
+		if (web && web->running() && !webIp.empty()) return webIp + ":" + std::to_string(web->port());
+#endif
+		return "";
+	}
+
+	void Ui::readWebIp()
+	{
+#ifdef BP_WEB
+		webIp = deviceAddress();
+		// tests: BP_WEB_IP stands in for the address ("none": no Wi-Fi)
+		if (const char* ip = getenv("BP_WEB_IP")) webIp = strcmp(ip, "none") == 0 ? "" : ip;
+#endif
+		webIpAt = SDL_GetTicks();
+	}
+
+	bool Ui::webIndicatorShown(const Player& p) const
+	{
+		// (the photo player is left as it is: it has its own header, all its room taken)
+#ifdef BP_WEB
+		return p.settings.webDashboard && !(page == Page::Main && p.playingPhoto());
+#else
+		(void)p;
+		return false;
+#endif
+	}
+
+	void Ui::drawWebIndicator(int right, int cy, const Player& p)
+	{
+		if (!webIndicatorShown(p)) return;
+		// dim while no browser watches, yellow with one; never blinking (it's a state, not news)
+		drawGlyphMid(G_WEB, right - 9, cy, webClients() > 0 ? YELLOW : DIM, 2);
+		webInd = {right - 31, cy - 24, 44, 48};
+	}
+
+	std::string Ui::webSig(const Player& p) const
+	{
+		char b[96];
+		snprintf(b, sizeof b, "|web%d %d %d %d %d %d %d", p.settings.webDashboard, webView(p), webClients(), pinArmed != 0, quickSub,
+			webIndicatorShown(p), (int)webIndDown);
+		return b + webPin() + " " + webAddress();
+	}
+
+	void Ui::openWeb()
+	{
+		if (page == Page::Web) return;
+		webBack = {page, inMenu, menuTab, setGroup, cursor, scroll};
+		// from Settings: back on its tile, among the groups
+		if (page == Page::Settings)
+		{
+			webBack.setGroup = -1;
+			webBack.cursor = GROUP_WEB;
+			webBack.scroll = 0;
+		}
+		// the page has a header of its own: the menu's tabs put away
+		inMenu = false;
+		ctxOpen = false;
+		styleFromSubs = false;
+		page = Page::Web;
+		cursor = scroll = 0;
+		pressedBtn = -1;
+		pinArmed = 0;
+		webInputAt = SDL_GetTicks();
+		readWebIp();
+	}
+
+	void Ui::closeWeb()
+	{
+		page = webBack.page;
+		inMenu = webBack.inMenu;
+		menuTab = webBack.menuTab;
+		setGroup = webBack.setGroup;
+		cursor = webBack.cursor;
+		scroll = webBack.scroll;
+		pinArmed = 0;
+		pressedBtn = -1;
+	}
+
+	void Ui::webTurn(bool on, Player& p)
+	{
+		Settings s = p.settings;
+		s.webDashboard = on;
+		p.setSettings(s);
+		if (webPower) webPower(on);
+		pinArmed = 0;
+		readWebIp();
+		// from the quick settings (the page shows it itself): what came of it, over the top panel
+		if (page != Page::Web)
+		{
+			std::string addr = webAddress();
+			p.osd(!on ? "Web dashboard off" : addr.empty() ? "Web dashboard on" : "Web dashboard on: " + addr, 2000);
+		}
+	}
+
+	void Ui::webNewPin(Player& p)
+	{
+#ifdef BP_WEB
+		if (!web || !web->running()) return;
+		if (!pinArmed || SDL_GetTicks() - pinArmed >= QUIT_WINDOW_MS)
+		{
+			pinArmed = SDL_GetTicks();
+			return;
+		}
+		pinArmed = 0;
+		std::string pin = web->newPin();
+		if (page != Page::Web) p.osd("New PIN: " + pin, 2000);
+#else
+		(void)p;
+#endif
+	}
+
+	void Ui::webPrimary(Player& p)
+	{
+		switch (webView(p))
+		{
+		case WEB_OFF_VIEW: webTurn(true, p); break;
+		case WEB_NOWIFI_VIEW: readWebIp(); break;
+		case WEB_FAILED_VIEW: if (webPower) webPower(true); readWebIp(); break;
+		default: break;
+		}
+	}
+
+	bool Ui::webKey(Button b, Player& p)
+	{
+		int v = webView(p);
+		if (b == Button::B)
+		{
+			closeWeb();
+			if (page == Page::Main && !p.playing()) page = Page::Browse;	// (what played is over)
+			return false;
+		}
+		if (v == WEB_ON_VIEW)
+		{
+			if (b == Button::Y) webNewPin(p);
+			else if (b == Button::X) webTurn(false, p);
+		}
+		else if (b == Button::A) webPrimary(p);
+		else if (b == Button::X && v != WEB_OFF_VIEW) webTurn(false, p);
+		return false;
+	}
+
+	bool Ui::webPointer(const Pointer& pt, int x, int y, Player& p)
+	{
+		int v = webView(p);
+		if (pt.kind == Pointer::Down)
+		{
+			pressedBtn = -1;
+			if (buttonRect(BACK_ICON).hit(x, y)) pressedBtn = BACK_ICON;
+			else if (v == WEB_ON_VIEW)
+			{
+				for (int id : {WEB_NEWPIN, WEB_OFF})
+					if (buttonRect(id).hit(x, y)) pressedBtn = id;
+			}
+			else if (buttonRect(EMPTY_BTN).hit(x, y)) pressedBtn = EMPTY_BTN;
+			return false;
+		}
+		if (pt.kind != Pointer::Up || pressedBtn < 0) return false;
+		int id = pressedBtn;
+		pressedBtn = -1;
+		if (!buttonRect(id).hit(x, y)) return false;
+		if (id == BACK_ICON) return webKey(Button::B, p);
+		if (id == WEB_NEWPIN && v == WEB_ON_VIEW) webNewPin(p);
+		else if (id == WEB_OFF && v == WEB_ON_VIEW) webTurn(false, p);
+		else if (id == EMPTY_BTN && v != WEB_ON_VIEW) webPrimary(p);
+		return false;
+	}
+
+	void Ui::drawWeb(const Player& p)
+	{
+		drawHeader("Web dashboard", p);
+		int v = webView(p);
+		if (v != WEB_ON_VIEW)
+		{
+			// one of the empty pages: a mark, what it is, the lines under it (two at most), the button
+			const Glyph& g = v == WEB_OFF_VIEW ? G_WEB : G_ALERT;
+			std::string title = v == WEB_OFF_VIEW ? "Web dashboard is off" : v == WEB_NOWIFI_VIEW ? "No Wi-Fi" : "Couldn't start the web dashboard";
+			std::string sub = v == WEB_OFF_VIEW ? "Manage files and playlists, and control the music, from a phone or computer on your Wi-Fi."
+				: v == WEB_NOWIFI_VIEW ? "Connect to Wi-Fi in BananaOS first. It comes back on with the Wi-Fi."
+				: "Something else is using port 8080. Try again in a moment.";
+			drawEmpty(g, title, "", v == WEB_OFF_VIEW ? "Turn on" : "Try again", v == WEB_OFF_VIEW ? &G_POWER : &G_REFRESH);
+			auto lines = wrapText(sub, 0, 520, 2);
+			for (size_t i = 0; i < lines.size(); i++) drawTextMid(lines[i], 0, DIM, W / 2, 242 + (int)i * 24, 560, 2);
+			if (v == WEB_OFF_VIEW) drawHints({{"A", "Turn on"}, {"B", "Back"}});
+			else drawHints({{"A", "Try again"}, {"X", "Turn off"}, {"B", "Back"}});
+			return;
+		}
+		std::string addr = webAddress(), pin = webPin();
+#ifdef BP_WEB
+		// the QR code: http://<address>/#pin=XXXX (the fragment never reaches the server; the page signs in with it)
+		std::string url = "http://" + addr + "/#pin=" + pin;
+		if (url != qrText)
+		{
+			qrText = url;
+			qrMods.clear();
+			qrSize = 0;
+			try
+			{
+				qrcodegen::QrCode qr = qrcodegen::QrCode::encodeText(url.c_str(), qrcodegen::QrCode::Ecc::MEDIUM);
+				qrSize = qr.getSize();
+				qrMods.resize((size_t)qrSize * qrSize);
+				for (int yy = 0; yy < qrSize; yy++)
+					for (int xx = 0; xx < qrSize; xx++) qrMods[(size_t)yy * qrSize + xx] = qr.getModule(xx, yy) ? 1 : 0;
+			}
+			catch (const std::exception&)
+			{
+				qrSize = 0;
+			}
+		}
+#endif
+		// the card: cream, dark modules (never the other way round: phones' readers want dark on light), each module a
+		// whole number of the panel's pixels, the quiet zone (3 modules at least) the card's own margin
+		Rect card{24, 72, 248, 248};
+		fill(card, CREAM);
+		if (qrSize > 0)
+		{
+			int x0 = (int)std::lround(card.x * sx), y0 = (int)std::lround(card.y * sy);
+			int cw = (int)std::lround((card.x + card.w) * sx) - x0, ch = (int)std::lround((card.y + card.h) * sy) - y0;
+			int m = std::max(1, std::min(cw, ch) / (qrSize + 6));
+			int ox = x0 + (cw - m * qrSize) / 2, oy = y0 + (ch - m * qrSize) / 2;
+			SDL_SetRenderDrawBlendMode(ren, SDL_BLENDMODE_NONE);
+			SDL_SetRenderDrawColor(ren, BG.r, BG.g, BG.b, 255);
+			for (int yy = 0; yy < qrSize; yy++)
+				for (int xx = 0; xx < qrSize;)
+				{
+					if (!qrMods[(size_t)yy * qrSize + xx]) { xx++; continue; }
+					int e = xx;
+					while (e < qrSize && qrMods[(size_t)yy * qrSize + e]) e++;
+					SDL_Rect d{ox + xx * m, oy + yy * m, (e - xx) * m, m};
+					SDL_RenderFillRect(ren, &d);
+					xx = e;
+				}
+		}
+		drawTextMid("Scan with your phone", 0, CREAM, 148, 340, 248, 2);
+		drawTextMid("It signs you in too", 0, DIM, 148, 362, 248, 2);
+
+		drawTextMid("Or type this address", 0, DIM, 296, 84, 320);
+		bool fits = textWidth(addr, 2) / sx <= 320;
+		drawTextMid(addr, fits ? 2 : 1, YELLOW, 296, 116, 320);
+		drawTextMid("PIN", 0, DIM, 296, 160);
+		for (int i = 0; i < 4; i++)
+		{
+			Rect bx{296 + i * 84, 176, 68, 80};
+			fill(bx, TEAL);
+			if (i >= (int)pin.size() || !pinFont) continue;
+			std::string key = "pin|" + pin.substr(i, 1);
+			SDL_Texture* t = nullptr;
+			auto it = cache.find(key);
+			if (it != cache.end()) t = it->second;
+			else if (SDL_Surface* sf = TTF_RenderUTF8_Blended(pinFont, pin.substr(i, 1).c_str(), CREAM))
+			{
+				t = SDL_CreateTextureFromSurface(ren, sf);
+				SDL_FreeSurface(sf);
+				cache[key] = t;
+			}
+			if (!t) continue;
+			int tw, th;
+			SDL_QueryTexture(t, nullptr, nullptr, &tw, &th);
+			// the capitals' middle on the box's (the font's box has room for descenders under them)
+			int minx, maxx, miny, maxy, adv, cap = th / 2;
+			if (TTF_GlyphMetrics(pinFont, 'H', &minx, &maxx, &miny, &maxy, &adv) == 0) cap = TTF_FontAscent(pinFont) - maxy / 2;
+			int cx = (int)std::lround((bx.x + bx.w / 2.0) * sx), cy = (int)std::lround((bx.y + bx.h / 2.0) * sy);
+			SDL_Rect d{cx - tw / 2, cy - cap, tw, th};
+			SDL_RenderCopy(ren, t, nullptr, &d);
+		}
+		int n = webClients();
+		drawGlyphMid(G_WEB, 305, 292, n ? YELLOW : DIM);
+		if (n) drawTextMid(std::to_string(n) + (n == 1 ? " browser connected" : " browsers connected"), 1, CREAM, 324, 292, 300);
+		else drawTextMid("No browser connected yet", 0, DIM, 324, 292, 300);
+
+		// New PIN pressed once: what the second press does, where the note is
+		auto note = wrapText(pinArmed ? "A new PIN signs out every browser" : "Your phone needs the same Wi-Fi", 0, 248, 2);
+		for (size_t i = 0; i < note.size(); i++)
+			drawTextMid(note[i], 0, pinArmed ? YELLOW : DIM, 148, 410 - (int)(note.size() - 1) * 11 + (int)i * 22, 248, 2);
+		Rect np = buttonRect(WEB_NEWPIN), off = buttonRect(WEB_OFF);
+		fill(np, pressedBtn == WEB_NEWPIN ? PRESSED : pinArmed ? RED : TEAL);
+		drawButton(np, pinArmed ? nullptr : &G_REFRESH, pinArmed ? "Press again" : "New PIN", "Y", false, 1);
+		fill(off, pressedBtn == WEB_OFF ? PRESSED : TEAL);
+		drawButton(off, &G_POWER, "Turn off", "X", false, 1);
+		drawHints({{"Y", "New PIN"}, {"X", "Turn off"}, {"B", "Back"}});
+	}
+
+	void Ui::folderChanged(const std::string& dir, Player& p)
+	{
+		std::string d = dir;
+		while (d.size() > 1 && d.back() == '/') d.pop_back();
+		if (page != Page::Browse || browseDir != d || pseudoDir(d) || isNetPath(d)) return;
+		// not under a menu, the picker or a move (their rows are the list's as it was)
+		if (ctxOpen || pickerOpen || addPending.serial || moving || plDrag.on || kbOpen) return;
+		std::string at = cursor >= 0 && cursor < (int)browsePaths.size() ? browsePaths[cursor] : "";
+		int s = scroll;
+		enterFolder(d, p);
+		for (size_t i = 0; i < browsePaths.size(); i++)
+			if (browsePaths[i] == at) cursor = (int)i;
+		scroll = s;
+		fitList();
+		browseVersion++;
+	}
+
+	int Ui::volumeLevel()
+	{
+		// read once (the script runs): after that, kept as it changes
+		if (volumePct == -1 && volume.present())
+		{
+			int v = volume.get();
+			volumePct = v < 0 ? -2 : v;
+		}
+		return volumePct < 0 ? -1 : volumePct;
+	}
+
+	// ---- Like ----
+
+	bool Ui::likeable(const Player& p) const { return plStore && p.playing() && PlaylistStore::likable(p.currentPath()); }
+
+	bool Ui::likedNow(const Player& p) const { return plStore && p.playing() && plStore->isLiked(p.currentPath()); }
+
+	bool Ui::headerActions(const Player& p) const
+	{
+		return plStore && p.playing() && !p.playingPhoto() && PlaylistStore::likable(p.currentPath());
+	}
+
+	void Ui::likeCard(Player& p, bool liked, const std::string& title)
+	{
+		// in the volume card's place: which file it was (a Like pressed as the song changes still says)
+		if (liked) p.showNoteCard(G_HEART_ROWS, G_HEART.h, "&H29B4F0&", "Added to Liked", title);
+		else p.showNoteCard(G_HEART_O_ROWS, G_HEART_O.h, "&H7C868A&", "Removed from Liked", title);
+	}
+
+	void Ui::likeNow(Player& p)
+	{
+		if (!likeable(p) || p.playingPhoto()) return;
+		bool was = likedNow(p);
+		std::string title = !p.title.empty() ? p.title : entryTitle(p.currentPath());
+		if (setLikedNow(p, !was) == was) return;	// (not saved: setLikedPath's card says so)
+		likePopAt = SDL_GetTicks();
+		likeCard(p, !was, title);
+	}
+
+	void Ui::openAddOne(const std::string& path, const std::string& title, double duration, Player& p)
+	{
+		if (!plStore || !PlaylistStore::likable(path)) return;	// (songs and videos: never a photo)
+		pickerOne = path;
+		pickerOneTitle = title.empty() ? entryTitle(path) : title;
+		pickerOneDuration = duration;
+		openPicker("", p, true);
+	}
+
+	// ---- START's Playing tab ----
+
+	std::vector<int> Ui::playingRows() const
+	{
+		// Show in folder closes what plays: only where that leads to the browser
+		if (browserMode) return {PR_LIKE, PR_ADD, PR_SHOW, PR_INFO};
+		return {PR_LIKE, PR_ADD, PR_INFO};
+	}
+
+	bool Ui::playingKey(Button b, Player& p)
+	{
+		int n = (int)playingRows().size();
+		switch (b)
+		{
+		case Button::Up: cursor = (cursor + n - 1) % n; break;
+		case Button::Down: cursor = (cursor + 1) % n; break;
+		case Button::A: return playingChoose(cursor, p);
+		default: break;
+		}
+		return false;
+	}
+
+	bool Ui::playingChoose(int row, Player& p)
+	{
+		auto rows = playingRows();
+		if (row < 0 || row >= (int)rows.size() || !p.playing()) return false;
+		cursor = row;
+		switch (rows[row])
+		{
+		case PR_LIKE: likeNow(p); return false;	// (the tab stays: the row says what it is now)
+		case PR_ADD: openAddOne(p.currentPath(), p.title, p.loaded ? p.duration : -1, p); return false;
+		case PR_SHOW:
+			// closed, then its folder (showBrowser)
+			showAfterLeave = p.currentPath();
+			inMenu = false;
+			page = Page::Main;
+			return true;
+		default:
+			inMenu = false;
+			page = Page::Info;
+			cursor = scroll = 0;
+			infoAt = 0;
+			return false;
+		}
+	}
+
+	void Ui::drawPlaying(const Player& p)
+	{
+		std::string path = p.currentPath();
+		bool audio = p.playingAudio();
+		// what plays: its kind, its title, the artist and album (a video: where it is)
+		Rect card{16, 68, 608, 62};
+		fill(card, SURFACE);
+		drawGlyphMid(audio ? G_NOTE : G_FILM, 46, card.y + 31, DIM, 3);
+		drawTextMid(!p.title.empty() ? p.title : entryTitle(path), 1, CREAM, 80, card.y + 20, 520);
+		std::string sub = audio && !p.artist().empty() ? p.artist() + (p.album().empty() ? "" : " \xC2\xB7 " + p.album())
+			: whereOf(isNetPath(path) ? netParent(path) : parentFolder(path));
+		drawTextMid(sub, 0, DIM, 80, card.y + 45, 520);
+		// the playlists it's in, read again when they change
+		if (plStore && (playingInSerial != plStore->serial() || playingInPath != path))
+		{
+			playingInSerial = plStore->serial();
+			playingInPath = path;
+			std::vector<std::string> in;
+			for (auto& pl : plStore->addTargets())
+				if (plStore->containsPath(pl.file, path)) in.push_back(pl.name);
+			playingIn = in.empty() ? "" : in.size() == 1 ? "In " + in[0] : "In " + std::to_string(in.size()) + " playlists";
+		}
+		bool liked = likedNow(p);
+		auto rows = playingRows();
+		for (int i = 0; i < (int)rows.size(); i++)
+		{
+			Rect r = playingRowRect(i);
+			bool at = i == cursor;
+			if (pressedBtn == PLAY_ROW + i) fill(r, PRESSED);
+			else if (at) drawFocus(r);
+			const Glyph* g = &G_INFO;
+			std::string label = "Info", note = "Size, codecs, tags";
+			SDL_Color ink = at ? YELLOW : CREAM;
+			switch (rows[i])
+			{
+			case PR_LIKE:
+				g = liked ? &G_HEART : &G_HEART_O;
+				label = liked ? "Liked" : "Like";
+				note = liked ? "In Liked" : "Adds it to Liked";
+				if (liked) ink = YELLOW;
+				break;
+			case PR_ADD: g = &G_PL_ADD; label = "Add to playlist\xE2\x80\xA6"; note = plStore ? playingIn : ""; break;
+			case PR_SHOW:
+				g = &G_FOLDER;
+				label = "Show in folder";
+				note = isNetPath(path) ? netBaseName(netParent(path)) : baseName(parentFolder(path));
+				break;
+			default: break;
+			}
+			int mid = r.y + r.h / 2;
+			drawGlyphMid(*g, r.x + 31, mid, ink);
+			int nw = 0;
+			if (!note.empty())
+			{
+				drawTextMid(note, 0, at ? DIM_TEAL : DIM, r.x + r.w - 14, mid, 240, 1);
+				nw = std::min(240, (int)std::lround(textWidth(note, 0) / sx)) + 24;
+			}
+			drawTextMid(label, 1, at ? YELLOW : CREAM, r.x + 56, mid, r.w - 70 - nw);
+		}
+		drawHints({{"UP/DOWN", "Move"}, {"A", "Choose"}, {"B", "Close"}, {"L/R", "Tabs"}});
+	}
+
+	bool Ui::setLikedNow(Player& p, bool on)
+	{
+		if (!p.playing()) return false;
+		std::string path = p.currentPath();
+		std::string title = p.title.empty() || !p.loaded ? "" : p.title;
+		return setLikedPath(p, path, title, p.loaded ? p.duration : -1, on);
+	}
+
+	bool Ui::setLikedPath(Player& p, const std::string& path, const std::string& title, double duration, bool on, int at,
+		std::string* dropped)
+	{
+		if (dropped) dropped->clear();
+		if (!plStore) return false;
+		if (plStore->isLiked(path) != on)
+		{
+			// (Liked's own edits waiting, if it's open, are written first so this one doesn't lose them)
+			plFlush(p);
+			Playlist before;
+			int skipped = 0;
+			bool playsLiked = p.playing() && p.source().kind == SourceKind::Playlist && p.source().id == plStore->likedFile();
+			if (playsLiked) plStore->load(plStore->likedFile(), before, skipped);
+			if (!plStore->setLiked(path, title, duration, on, at, dropped))
+			{
+				if (plStore->likable(path))
+					p.showNoteCard(G_ALERT_ROWS, G_ALERT.h, "&H4F5AE0&", "Couldn't save Liked", "The card may be full or locked");
+				return plStore->isLiked(path);
+			}
+			// Liked is what plays: its order moved (a new one goes first), the player told as an edit
+			if (playsLiked)
+			{
+				Playlist after;
+				if (plStore->load(plStore->likedFile(), after, skipped))
+				{
+					std::vector<int> remap(before.entries.size(), -1);
+					std::vector<char> used(after.entries.size(), 0);
+					for (size_t i = 0; i < before.entries.size(); i++)
+						for (size_t j = 0; j < after.entries.size(); j++)
+							if (!used[j] && after.entries[j].path == before.entries[i].path) { remap[i] = int(j); used[j] = 1; break; }
+					plTellPlayer(after, remap, p);
+				}
+			}
+			// the pages that show Liked (the list's count, its items) read it again
+			selSerial++;
+			if (browseDir == plDirFor(plStore->likedFile()))
+			{
+				plCur = Playlist();
+				plLoaded = plStore->load(plStore->likedFile(), plCur, skipped);
+				plRefresh(p);
+			}
+			else plWebListChanged(p);
+		}
+		return plStore->isLiked(path);
+	}
+
+	// ---- playlists edited from the web dashboard ----
+
+	std::string Ui::plWebFile(const std::string& id) const
+	{
+		if (plStore && id == PlaylistStore::LIKED_ID) return plStore->likedFile();
+		if (!plStore || id.empty() || id.find('/') != std::string::npos || id[0] == '.') return "";
+		for (auto& i : plStore->list())
+		{
+			std::string stem = baseName(i.file);
+			if (stem.size() > 4 && stem.compare(stem.size() - 4, 4, ".m3u") == 0) stem.resize(stem.size() - 4);
+			if (stem == id) return i.file;
+		}
+		return "";
+	}
+
+	void Ui::plWebEdited(const std::string& file, const std::vector<int>& remap, Player& p)
+	{
+		if (browseDir == plDirFor(file))
+		{
+			// a move or a drag under way here was of the list as it was: dropped, the list as it is now
+			moving = moveFromMenu = false;
+			plDrag.on = false;
+			Playlist pl;
+			int skipped = 0;
+			if (plStore && plStore->load(file, pl, skipped))
+			{
+				plCur = pl;
+				plLoaded = true;
+				plDirty = false;
+				plSel = remapSelection(plSel, remap);
+				cursor = std::max(0, remapIndex(cursor, remap));
+				plRefresh(p);
+			}
+			plTellPlayer(plCur, remap, p);
+			selSerial++;
+			return;
+		}
+		Playlist pl;
+		int skipped = 0;
+		if (plStore && plStore->load(file, pl, skipped)) plTellPlayer(pl, remap, p);
+	}
+
+	void Ui::plWebRenamed(const std::string& old, const std::string& file, const std::string& name, Player& p)
+	{
+		// as a rename on the handheld goes on (plNameDone)
+		if (p.playing() && p.source().kind == SourceKind::Playlist && p.source().id == old) p.renameSource(old, name, file);
+		if (plOrderId == old) plOrderId = file;
+		if (p.resumeStore().lastFolder == old) p.setLastFolder(file);
+		if (tabDir[TAB_PLAYLISTS] == plDirFor(old)) tabDir[TAB_PLAYLISTS] = plDirFor(file);
+		if (page != Page::Browse) return;
+		if (browseDir == plDirFor(old))
+		{
+			int c = cursor, s = scroll;
+			enterFolder(plDirFor(file), p);
+			cursor = c;
+			scroll = s;
+			fitList();
+		}
+		else plWebListChanged(p);
+	}
+
+	void Ui::plWebDeleted(const std::string& file, Player& p)
+	{
+		// (its edits not written: never, now)
+		if (plCur.file == file) plDirty = false;
+		if (p.resumeStore().lastFolder == file) p.setLastFolder("");
+		if (tabDir[TAB_PLAYLISTS] == plDirFor(file)) tabDir[TAB_PLAYLISTS] = PLROOT;
+		if (browseDir == plDirFor(file))
+		{
+			selEnd();
+			moving = false;
+			plDrag.on = false;
+			ctxOpen = false;
+			enterFolder(PLROOT, p);
+		}
+		else plWebListChanged(p);
+	}
+
+	void Ui::plWebListChanged(Player& p)
+	{
+		// the list of playlists on show: read again, the cursor on the same one
+		if (browseDir != PLROOT || ctxOpen || kbOpen) return;
+		std::string at = cursor >= 0 && cursor < (int)browsePaths.size() ? browsePaths[cursor] : "";
+		int s = scroll;
+		enterFolder(PLROOT, p);
+		for (size_t i = 0; i < browsePaths.size(); i++)
+			if (browsePaths[i] == at) cursor = (int)i;
+		scroll = s;
+		fitList();
+	}
+
+	// ---- Home: the Recent strip and the sections' tiles; a section's header ----
+
+	void Ui::listRecent(Player& p)
+	{
+		recent.clear();
+		if (!p.settings.keepHistory) return;
+		for (auto& path : p.history().items())
+		{
+			// a file still there (on a card taken out: not), or a network one whose connection is still saved (whether
+			// the file is there is only known by asking its server: when it's opened)
+			bool net = isNetPath(path);
+			NetPath np;
+			const NetServer* sv = net && netStore && parseNetPath(path, np) ? netStore->find(np.server) : nullptr;
+			if (net ? !sv : !exists(path) || (!p.settings.showHiddenFolders && insideHiddenFolder(path))) continue;
+			RecentItem it;
+			it.path = path;
+			it.net = net;
+			// its name without the extension, as a card's title
+			it.name = baseName(path);
+			size_t dot = it.name.rfind('.');
+			if (dot != std::string::npos && dot > 0) it.name.erase(dot);
+			it.kind = isAudioFile(path) ? &G_NOTE : isPhotoFile(path) ? &G_PICTURE : &G_FILM;
+			// how far into it: where it was left (a song always starts at its start: played), of how long it is
+			const ResumeEntry* e = p.resumeStore().find(path);
+			double len = e ? e->duration : -1, pos = e && e->position >= 0 && !isAudioFile(path) ? e->position : -1;
+			if (pos >= 0)
+			{
+				it.at = formatTime(pos);
+				it.sub = len > 0 ? it.at + " / " + formatTime(len) : "at " + it.at;
+				it.frac = len > 0 ? std::clamp(pos / len, 0.0, 1.0) : 0;
+			}
+			else
+			{
+				it.sub = len > 0 ? "Played \xC2\xB7 " + formatTime(len) : "Played";
+				it.frac = 1;
+			}
+			// where it is: the server, or the place on the cards ("Videos", "This card")
+			if (sv) it.where = serverName(*sv);
+			else
+			{
+				std::string w = whereOf(parentFolder(path));
+				it.where = w.substr(0, w.find(" / "));
+			}
+			recent.push_back(it);
+		}
+	}
+
+	void Ui::setStrip(int i, bool animate)
+	{
+		homeStrip = std::clamp(i, 0, stripCount() - 1);
+		double to = stripTarget(homeStrip);
+		if (!animate || to == stripOff)
+		{
+			stripOff = to;
+			stripT0 = 0;
+			return;
+		}
+		stripFrom = stripOff;
+		stripTo = to;
+		stripT0 = std::max<Uint32>(1, SDL_GetTicks());
+	}
+
+	void Ui::stripStep()
+	{
+		if (!stripT0) return;
+		// eased out over 120 ms: quick to start, settling into place
+		double k = std::min(1.0, (SDL_GetTicks() - stripT0) / 120.0), e = 1 - std::pow(1 - k, 3);
+		stripOff = stripFrom + (stripTo - stripFrom) * e;
+		if (k >= 1)
+		{
+			stripOff = stripTo;
+			stripT0 = 0;
+		}
+	}
+
+	Ui::Rect Ui::tileRect(int g) const
+	{
+		// two by two under the strip; taller with no Recent (a line in its place)
+		bool has = !recent.empty();
+		int y0 = has ? 200 : 96, h = has ? 110 : 162;
+		return {16 + g % 2 * 312, y0 + g / 2 * (h + 8), 296, h};
+	}
+
+	std::string Ui::tileSub(int g) const
+	{
+		// made again when what they say changes: the playlists, the connections, the places
+		int key = (plStore ? plStore->serial() : -1) * 7919 + (netStore ? netStore->version() : -1) * 31 + (int)roots.size();
+		if (key != tileSubsKey)
+		{
+			tileSubsKey = key;
+			auto join = [](const std::vector<std::string>& parts) {
+				std::string out;
+				for (auto& s : parts) out += (out.empty() ? "" : " \xC2\xB7 ") + s;
+				return out;
+			};
+			// Files: the places, two cards or more counted ("Videos · 2 cards")
+			int cards = 0;
+			for (auto& r : roots)
+				if (r.label.size() >= 4 && r.label.compare(r.label.size() - 4, 4, "card") == 0) cards++;
+			std::vector<std::string> parts;
+			bool counted = false;
+			for (auto& r : roots)
+			{
+				bool card = r.label.size() >= 4 && r.label.compare(r.label.size() - 4, 4, "card") == 0;
+				if (!card || cards < 2) parts.push_back(r.label);
+				else if (!counted)
+				{
+					parts.push_back(std::to_string(cards) + " cards");
+					counted = true;
+				}
+			}
+			tileSubs[TAB_LOCAL] = parts.empty() ? "No folders" : join(parts);
+			size_t n = plStore ? plStore->addTargets().size() : 0;	// the user's own (Liked is always there)
+			tileSubs[TAB_PLAYLISTS] = !plStore ? "Not available" : n == 0 ? "Liked"
+				: "Liked \xC2\xB7 " + std::to_string(n) + (n == 1 ? " playlist" : " playlists");
+			// Network: the connections by name, the most recently used first
+			std::vector<NetServer> list = netStore ? netStore->servers() : std::vector<NetServer>();
+			std::stable_sort(list.begin(), list.end(), [](const NetServer& a, const NetServer& b) { return a.lastUsed > b.lastUsed; });
+			parts.clear();
+			for (auto& sv : list) parts.push_back(serverName(sv));
+			tileSubs[TAB_NETWORK] = parts.empty() ? "No connections yet" : join(parts);
+			tileSubs[TAB_EXT] = "Coming soon";
+		}
+		return g >= 0 && g < BROWSE_TABS ? tileSubs[g] : "";
+	}
+
+	void Ui::goHome(int zone, int idx, Player& p)
+	{
+		enterFolder(HOMEDIR, p);
+		if (zone == HOME_GRID || recent.empty())
+		{
+			homeZone = HOME_GRID;
+			homeGrid = zone == HOME_GRID ? std::clamp(idx, 0, BROWSE_TABS - 1) : 0;
+			homeCol = homeGrid % 2;
+			return;
+		}
+		homeZone = HOME_STRIP;
+		setStrip(idx, false);
+	}
+
+	void Ui::homeOpen(Player& p)
+	{
+		if (homeZone == HOME_GRID) { openSection(homeGrid, p); return; }
+		if (homeStrip < (int)recent.size()) { openFile(recent[homeStrip].path, p); return; }
+		// All recent: the list, from its top
+		enterFolder(RECENT, p);
+	}
+
+	bool Ui::homeKey(Button b, Player& p)
+	{
+		if (b == Button::B)
+		{
+			// over what plays: back to it; else twice leaves
+			if (p.playing()) { page = Page::Main; return false; }
+			if (quitArmed && SDL_GetTicks() - quitArmed < QUIT_WINDOW_MS) return true;
+			quitArmed = SDL_GetTicks();
+			return false;
+		}
+		if (b == Button::Start) { openMainMenu(p); return false; }
+		if (b == Button::X) { openHomeOptions(); return false; }
+		bool has = !recent.empty();
+		if (homeZone == HOME_STRIP && has)
+		{
+			switch (b)
+			{
+			case Button::Left: if (homeStrip > 0) setStrip(homeStrip - 1); break;
+			case Button::Right: if (homeStrip < stripCount() - 1) setStrip(homeStrip + 1); break;
+			// down to the column left last
+			case Button::Down: homeZone = HOME_GRID; homeGrid = homeCol; break;
+			case Button::A: homeOpen(p); break;
+			case Button::Y: if (homeStrip < (int)recent.size()) openRecentMenu(recent[homeStrip].path); break;
+			default: break;
+			}
+			return false;
+		}
+		homeZone = HOME_GRID;
+		int g = homeGrid;
+		switch (b)
+		{
+		case Button::Left: if (g % 2) homeGrid--; break;
+		case Button::Right: if (g % 2 == 0) homeGrid++; break;
+		case Button::Down: if (g < 2) homeGrid += 2; break;
+		// up from the top row: the strip, on the card left there
+		case Button::Up: if (g >= 2) homeGrid -= 2; else if (has) homeZone = HOME_STRIP; break;
+		case Button::A: homeOpen(p); break;
+		default: break;
+		}
+		if (homeZone == HOME_GRID) homeCol = homeGrid % 2;
+		return false;
+	}
+
+	bool Ui::homePointer(const Pointer& pt, int x, int y, Player& p)
+	{
+		bool has = !recent.empty();
+		auto cardAt = [&](int px, int py) {
+			if (!has || py < CARD_Y || py >= CARD_Y + CARD_H) return -1;
+			int rel = px - 16 + (int)std::lround(stripOff);
+			int i = rel >= 0 ? rel / STRIDE : -1;
+			return i >= 0 && i < stripCount() && rel - i * STRIDE < CARD_W ? i : -1;
+		};
+		if (pt.kind == Pointer::Down)
+		{
+			homeTouch = true;
+			homeMoved = false;
+			homeDownX = x;
+			homeDownOff = stripOff;
+			homePress = -1;
+			homeHoldAt = 0;
+			if (has && y >= STRIP_TOP && y < STRIP_TOP + STRIP_H)
+			{
+				// on the strip: a card (a hold on a file's opens its menu); a drag anywhere along it scrolls
+				homePress = cardAt(x, y);
+				if (homePress >= 0 && homePress < (int)recent.size()) homeHoldAt = SDL_GetTicks();
+				return false;
+			}
+			for (int g = 0; g < BROWSE_TABS; g++)
+				if (tileRect(g).hit(x, y)) homePress = HOME_TILE + g;
+			if (homePress < 0) homeTouch = false;
+			return false;
+		}
+		if (!homeTouch) return false;
+		bool onStrip = homePress < HOME_TILE;
+		if (pt.kind == Pointer::Move)
+		{
+			if (!homeMoved && std::abs(x - homeDownX) > 8)
+			{
+				homeMoved = true;
+				homeHoldAt = 0;
+				if (onStrip) homePress = -1;
+			}
+			if (homeMoved && onStrip)
+			{
+				stripT0 = 0;
+				stripOff = std::clamp(homeDownOff - (x - homeDownX), 0.0, (double)stripMax());
+			}
+			return false;
+		}
+		if (pt.kind != Pointer::Up) return false;
+		homeTouch = false;
+		homeHoldAt = 0;
+		int id = homePress;
+		homePress = -1;
+		if (homeMoved && onStrip)
+		{
+			// the focus follows a swipe: onto the card now in the second slot
+			homeZone = HOME_STRIP;
+			setStrip((int)std::lround(stripOff / STRIDE) + (stripOff > 0 ? 1 : 0));
+			return false;
+		}
+		if (id >= HOME_TILE)
+		{
+			if (!tileRect(id - HOME_TILE).hit(x, y)) return false;
+			homeZone = HOME_GRID;
+			homeGrid = id - HOME_TILE;
+			homeCol = homeGrid % 2;
+			homeOpen(p);
+		}
+		else if (id >= 0 && cardAt(x, y) == id)
+		{
+			homeZone = HOME_STRIP;
+			setStrip(id);
+			homeOpen(p);
+		}
+		return false;
+	}
+
+	void Ui::openFile(const std::string& path, Player& p)
+	{
+		(void)p;
+		// a network file whose folder wasn't listed (Recent): listed first, a moment, for the files that play after it,
+		// its subtitles and its cover (netListed opens it)
+		NetPath np;
+		const NetServer* sv = isNetPath(path) && parseNetPath(path, np) && netStore ? netStore->find(np.server) : nullptr;
+		if (sv && netWorker && netNames.find(netParent(path)) == netNames.end())
+		{
+			netOpenPending = path;
+			netWorker->list(++netSerial, *sv, netStore->password(*sv), netParent(path));
+		}
+		else openRequest = path;
+	}
+
+	void Ui::showInFolder(const std::string& path, Player& p)
+	{
+		// its folder, in Files or Network, the cursor on it (a network one's once the listing comes)
+		if (isNetPath(path))
+		{
+			setSection(TAB_NETWORK);
+			netSelect = path;
+			enterFolder(netParent(path), p);
+			return;
+		}
+		setSection(TAB_LOCAL);
+		enterFolder(parentFolder(path), p);
+		for (size_t i = 0; i < browsePaths.size(); i++)
+			if (browsePaths[i] == path) cursor = (int)i;
+		fitList();
+	}
+
+	void Ui::openRecentMenu(const std::string& path)
+	{
+		const RecentItem* it = nullptr;
+		for (auto& x : recent)
+			if (x.path == path) it = &x;
+		if (!it) return;
+		ctxRecent = path;
+		std::vector<int> items = {CTX_R_PLAY};
+		if (!it->at.empty()) items.push_back(CTX_R_START);
+		items.push_back(CTX_R_SHOW);
+		if (plStore && PlaylistStore::likable(path)) items.push_back(CTX_R_LIKE);
+		if (plStore) items.push_back(CTX_R_ADD);
+		items.push_back(CTX_R_REMOVE);
+		ctxOpen = true;
+		ctxCursor = 0;
+		ctxItems = items;
+		ctxServer.clear();
+		ctxStatus.clear();
+		ctxArmed = false;
+		ctxPath.clear();
+		ctxFolder.clear();
+		ctxTitle = it->name;
+		ctxNote.clear();
+		ctxPlFile.clear();
+		ctxPlItem = -1;
+		quitArmed = 0;
+	}
+
+	void Ui::openHomeOptions()
+	{
+		ctxRecent.clear();
+		ctxOpen = true;
+		ctxCursor = 0;
+		ctxItems = {CTX_CLEAR_RECENT, CTX_HIDDEN, CTX_SETTINGS};
+		ctxServer.clear();
+		ctxStatus.clear();
+		ctxArmed = false;
+		ctxPath.clear();
+		ctxFolder.clear();
+		ctxTitle = "Options";
+		ctxNote.clear();
+		ctxPlFile.clear();
+		ctxPlItem = -1;
+		quitArmed = 0;
+	}
+
+	void Ui::drawBorder(Rect r, SDL_Color c)
+	{
+		fill({r.x, r.y, r.w, 2}, c);
+		fill({r.x, r.y + r.h - 2, r.w, 2}, c);
+		fill({r.x, r.y, 2, r.h}, c);
+		fill({r.x + r.w - 2, r.y, 2, r.h}, c);
+	}
+
+	void Ui::drawHome(const Player& p)
+	{
+		drawHeader("Banana Player", p);
+		bool has = !recent.empty();
+		// the focus shows with nothing over the page
+		bool lit = !ctxOpen && !pickerOpen && !kbOpen && !popupShown(p);
+		if (has)
+		{
+			drawTextMid("Recent", 0, DIM, 16, SUB_Y);
+			// the strip: cards side by side, cut at the panel's edges
+			SDL_Rect clip{0, (int)std::lround(STRIP_TOP * sy), (int)std::lround(W * sx), (int)std::lround(STRIP_H * sy)};
+			SDL_RenderSetClipRect(ren, &clip);
+			int off = (int)std::lround(stripOff);
+			for (int i = 0; i < stripCount(); i++)
+			{
+				int x = 16 + i * STRIDE - off;
+				if (x + CARD_W < 0 || x > W) continue;
+				Rect r{x, CARD_Y, CARD_W, CARD_H};
+				bool at = lit && homeZone == HOME_STRIP && homeStrip == i;
+				fill(r, homePress == i ? PRESSED : at ? TEAL : SURFACE);
+				SDL_Color ink = at ? YELLOW : CREAM, soft = at ? DIM_TEAL : DIM;
+				if (i < (int)recent.size())
+				{
+					// the name on up to two lines; under it, what kind, how far, and a network mark; a bar along the foot
+					const RecentItem& it = recent[i];
+					auto lines = wrapText(it.name, 1, CARD_W - 28, 2);
+					for (size_t k = 0; k < lines.size(); k++)
+						drawTextMid(lines[k], 1, ink, x + 14, CARD_Y + (lines.size() == 1 ? 34 : 24) + (int)k * 26, CARD_W - 28);
+					drawGlyphMid(*it.kind, x + 25, CARD_Y + 78, soft);
+					// a liked one: a small heart, left of the network mark
+					bool liked = plStore && plStore->isLiked(it.path);
+					drawTextMid(it.sub, 0, soft, x + 44, CARD_Y + 78, CARD_W - 58 - (it.net ? 30 : 0) - (liked ? 22 : 0));
+					int mx = x + CARD_W - 22;
+					if (it.net) { drawGlyphMid(G_NETWORK, mx - 3, CARD_Y + 78, soft); mx -= 30; }
+					if (liked) drawGlyphMid(G_HEART_S, mx, CARD_Y + 78, YELLOW);
+					Rect bar{x + 2, CARD_Y + CARD_H - 6, CARD_W - 4, 4};
+					fill(bar, at ? SDL_Color{0x1A, 0x31, 0x34, 255} : SCREEN);
+					int w = (int)std::lround(bar.w * it.frac);
+					if (w > 0) fill({bar.x, bar.y, w, bar.h}, it.at.empty() ? DIM : YELLOW);
+				}
+				else
+				{
+					// the last: the whole list
+					drawGlyphMid(G_CLOCK, x + CARD_W / 2, CARD_Y + 30, at ? YELLOW : DIM, 3);
+					drawTextMid("All recent", 1, ink, x + CARD_W / 2, CARD_Y + 66, CARD_W - 20, 2);
+					drawTextMid(std::to_string(recent.size()) + " played", 0, soft, x + CARD_W / 2, CARD_Y + 88, CARD_W - 20, 2);
+				}
+				if (at) drawBorder(r, YELLOW);
+			}
+			SDL_RenderSetClipRect(ren, nullptr);
+		}
+		else
+		{
+			// nothing played yet: a line in the strip's place, the tiles taller
+			drawGlyphMid(G_CLOCK, 30, SUB_Y + 4, DIM);
+			drawTextMid(p.settings.keepHistory ? "Nothing played yet \xC2\xB7 what you play shows up here"
+				: "Play history is off \xC2\xB7 Settings, Files", 0, DIM, 50, SUB_Y + 4, 570);
+		}
+		for (int g = 0; g < BROWSE_TABS; g++)
+		{
+			Rect t = tileRect(g);
+			bool at = lit && homeZone == HOME_GRID && homeGrid == g, soon = g == TAB_EXT;
+			fill(t, homePress == HOME_TILE + g ? PRESSED : at ? TEAL : SURFACE);
+			if (at) drawBorder(t, YELLOW);
+			SDL_Color ink = at ? YELLOW : CREAM, soft = at ? DIM_TEAL : DIM, mark = at ? YELLOW : soon ? DIM : CREAM;
+			const Glyph& gl = *SECTION_GLYPHS[g];
+			if (has)
+			{
+				// side by side: the mark, then the name over what's in it
+				drawGlyphMid(gl, t.x + 54, t.y + t.h / 2, mark, 4);
+				drawTextMid(SECTION_NAMES[g], 2, ink, t.x + 104, t.y + t.h / 2 - 14, t.w - 114);
+				drawTextMid(tileSub(g), 0, soft, t.x + 104, t.y + t.h / 2 + 20, t.w - 114);
+			}
+			else
+			{
+				// taller: stacked and centred
+				drawGlyphMid(gl, t.x + t.w / 2, t.y + 52, mark, 5);
+				drawTextMid(SECTION_NAMES[g], 2, ink, t.x + t.w / 2, t.y + 106, t.w - 20, 2);
+				drawTextMid(tileSub(g), 0, soft, t.x + t.w / 2, t.y + 138, t.w - 20, 2);
+			}
+		}
+		if (quitArmed) { drawFooterText("Press B again to quit", YELLOW); return; }
+		if (homeZone == HOME_STRIP && has && homeStrip < (int)recent.size())
+			drawHints({{"A", "Play"}, {"Y", "Menu"}, {"X", "Options"}, {"B", "Quit"}, {"START", "Menu"}});
+		else if (homeZone == HOME_STRIP && has) drawHints({{"A", "Open"}, {"X", "Options"}, {"B", "Quit"}, {"START", "Menu"}});
+		else drawHints({{"D-PAD", "Move"}, {"A", "Open"}, {"X", "Options"}, {"B", "Quit"}, {"START", "Menu"}});
+	}
+
+	Ui::Rect Ui::pipRect(int k, const Player& p) const
+	{
+		// as the mock-up has them (x 344..500, R at 508), moved left only when the battery, the web's globe and the
+		// clock need it
+		int left = statusLeft(p);
+		int rw = (int)std::lround(textWidth("R", 0) / sx);
+		int x0 = std::min(344, left - 8 - rw - 8 - 156);
+		return {x0 + k * 40, 14, 36, 36};
+	}
+
+	void Ui::drawSectionHeader(const Player& p)
+	{
+		// "<", the section's name, its markers (L, Files Playlists Network Extensions, R: this one lit), the battery
+		drawBackIcon();
+		Rect first = pipRect(0, p);
+		// (inside Liked: its name, as its line has no place to say it)
+		bool liked = isPlDir(browseDir) && plIsLiked(plFileOf(browseDir));
+		drawTextMid(liked ? PlaylistStore::LIKED_NAME : SECTION_NAMES[browseTab], 2, CREAM, 72, 32, std::max(40, first.x - 22 - 72));
+		drawTextMid("L", 0, YELLOW, first.x - 10, 32, 0, 1);
+		for (int k = 0; k < BROWSE_TABS; k++)
+		{
+			Rect r = pipRect(k, p);
+			bool on = k == browseTab;
+			fill(r, on ? YELLOW : SURFACE);
+			drawGlyphMid(*SECTION_GLYPHS[k], r.x + r.w / 2, r.y + r.h / 2, on ? BG : DIM);
+		}
+		drawTextMid("R", 0, YELLOW, first.x + 164, 32);
+		drawBattery(616, 24, p);
 	}
 }

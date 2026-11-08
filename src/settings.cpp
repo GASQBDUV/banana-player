@@ -28,6 +28,7 @@ namespace bp
 	static const char* VIS_IDS[VISUALIZERS] = {"bars", "waves", "spectrum", "circle"};
 	static const char* VIS_LABELS[VISUALIZERS] = {"Bars", "Waves", "Spectrum", "Circle"};
 	static const char* LOOP_IDS[LOOPS] = {"off", "all", "one"};
+	static const char* CLOCK_IDS[CLOCKS] = {"24h", "12h", "off"};
 	static const char* LOOP_LABELS[LOOPS] = {"No loop", "Loop all", "Loop one"};
 
 	const char* musicShowLabel(int v) { return SHOW_LABELS[v >= 0 && v < SHOWS ? v : 0]; }
@@ -182,6 +183,7 @@ namespace bp
 		out += std::string("visualizer = ") + VIS_IDS[s.visualizer] + "\n";
 		out += std::string("loop = ") + LOOP_IDS[s.loop] + "\n";
 		for (auto& r : REMEMBER) out += std::string(r.key) + " = " + (s.*r.field ? "yes" : "no") + "\n";
+		out += std::string("clock = ") + CLOCK_IDS[s.clock] + "\n";
 		out += std::string("pan-area = ") + (s.panRight ? "right" : "left") + "\n";
 		out += std::string("pan-drag = ") + (s.dragBox ? "box" : "photo") + "\n";
 		out += std::string("eq = ") + (s.eqOn ? "on" : "off") + "\n";
@@ -189,6 +191,7 @@ namespace bp
 		out += "eq-origin = " + s.eqOrigin + "\n";
 		out += "eq-gains = " + formatEqGains(s.eqGains) + "\n";
 		out += std::string("sound-effect = ") + soundFxKey(s.soundFx) + "\n";
+		out += std::string("web-dashboard = ") + (s.webDashboard ? "on" : "off") + "\n";
 		if (s.updateRemindAfter > 0) out += "update-remind-after = " + std::to_string(s.updateRemindAfter) + "\n";
 		return out;
 	}
@@ -216,6 +219,8 @@ namespace bp
 				if (key == "visualizer" && value == VIS_IDS[v]) s.visualizer = v;
 			for (int v = 0; v < LOOPS; v++)
 				if (key == "loop" && value == LOOP_IDS[v]) s.loop = v;
+			for (int v = 0; v < CLOCKS; v++)
+				if (key == "clock" && value == CLOCK_IDS[v]) s.clock = v;
 			if (key == "pan-area" && (value == "left" || value == "right")) s.panRight = value == "right";
 			if (key == "pan-drag" && (value == "photo" || value == "box")) s.dragBox = value == "box";
 			if (key == "eq" && (value == "on" || value == "off")) s.eqOn = value == "on";
@@ -223,6 +228,7 @@ namespace bp
 			if (key == "eq-origin") s.eqOrigin = value;
 			if (key == "eq-gains") parseEqGains(value, s.eqGains);
 			if (key == "sound-effect") s.soundFx = soundFxFromKey(value);
+			if (key == "web-dashboard" && (value == "on" || value == "off")) s.webDashboard = value == "on";
 			if (key == "update-remind-after") s.updateRemindAfter = atoll(value.c_str());
 			// the one setting before 0.1.1, kept: auto, cover-bars, bars, waves, spectrum, cover
 			if (key == "audio-display")

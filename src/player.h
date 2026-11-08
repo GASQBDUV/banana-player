@@ -52,6 +52,10 @@ namespace bp
 		// names (all of them), where its subtitles and cover are found (mpv can't look in it itself). The source is the
 		// folder (Folder, or NetFolder for a bpnet:// one)
 		void open(const std::vector<std::string>& list, int index, const std::vector<std::string>& folderNames = {});
+		// the next file opened (the next load: open, openPlaylist, a play request) with this audio track (mpv's aid, 1
+		// on), as loadfile's own option, never a property: the web's "Change it on the handheld". Once, then 0. A song
+		// under a filter graph takes its first track whatever this says
+		int64_t nextAid = 0;
 		// a playlist's items (local and bpnet:// mixed, in its order: shuffled already for Shuffle play) from paths[index].
 		// Photos are dropped. A local item that isn't there is skipped, here and by next/prev/advance. A network item's
 		// subtitles and cover need its folder's listing, which the caller fetches: see netFolderWanted
@@ -109,6 +113,13 @@ namespace bp
 
 		void togglePause();
 		void unpause();
+		// paused, however often it's asked (a toggle twice would play): async, as the rest
+		void pause();
+		// paused before it ever sounds (a page plays it; the handheld shows it): the sound output then opens paused, and
+		// on the handheld it stayed silent once played (the picture and the visualizer ran on). The first play after
+		// this reopens the output
+		void holdPaused();
+		bool heldUnplayed = false;
 		// from any thread: the lid closed, the handheld slept
 		void pauseNow();
 		void seekRelative(double seconds);
@@ -145,6 +156,9 @@ namespace bp
 		bool deleteEqPreset(const std::string& name);
 		// the card over the top panel: "Equalizer · Rock" and the curve, or "Equalizer off" (1.5 s, see takeCardShown)
 		void showEqCard();
+		// a card in the same place (Like, Add to playlist): a glyph (rows of '#' cells, ink as &HBBGGRR&), a line, and
+		// under it a dim one (the title it was for). 1.5 s, see takeCardShown
+		void showNoteCard(const char* const* rows, int h, const char* ink, const std::string& line1, const std::string& line2);
 		void osd(const std::string& text, int ms = 1500);
 		// the volume/brightness card over the top panel ("Volume", 85), till hideLevel
 		void showLevel(const std::string& label, int percent);
@@ -162,13 +176,16 @@ namespace bp
 		// previous (dir < 0) or next (dir > 0): seeks and shows the card; returns chapterTarget's answer (an index,
 		// CHAPTER_FILE_START or CHAPTER_NONE, which also shows the card's first/last note). A file with no chapters
 		// says so; a photo, a file not started or an error does nothing
-		int stepChapter(int dir);
+		int stepChapter(int dir, double at = -1);	// at: count from there (a page playing it), not this copy's position
 		// the card over the top panel for chapter `index`; edge < 0: "This is the first chapter", > 0: "...last"
 		void showChapterCard(int index, int edge = 0);
 		// once after a card was shown: how long the caller keeps it up (its levelUntil), then hideLevel(); 0: none
 		int takeCardShown() { int ms = cardMs; cardMs = 0; return ms; }
 		// the top panel with nothing playing: the icon, the name, where to pick something
 		void showIdle(bool on);
+		// the top panel while a web page plays the music instead: the paused picture dimmed, and why (a paused
+		// visualizer looks frozen otherwise)
+		void showElsewhere(bool on);
 		// the top panel's output made with nothing playing: mpv 0.40 makes force-window's only as it goes idle, and
 		// it's idle from the start, before force-window could be set (it needs the render context): black, logo and
 		// level cards unseen, till a file had played. An empty load fails at once and sends it through idle again
@@ -182,6 +199,9 @@ namespace bp
 		const ResumeStore& resumeStore() const { return resume; }
 		const PlayHistory& history() const { return played; }
 		void clearHistory();
+		// Home's Recent: one taken out of the play history; one played from its start next time (its tracks kept)
+		void removeFromHistory(const std::string& path);
+		void forgetPosition(const std::string& path);
 		// the browser's folder, kept (in resume.tsv) only while Remember last folder is on
 		void setLastFolder(const std::string& dir);
 
@@ -239,6 +259,7 @@ namespace bp
 		bool thumbPending() const { return isPhoto && !thumbW && error.empty() && thumbTries < 10; }
 
 	private:
+		void wakeHeld();	// heldUnplayed: the sound output reopened (mpv's ao-reload) as it starts to play
 		void load();
 		// load()'s loadfile, with the network file's options (its folder's sidecars): at once, or once the folder's
 		// listing is in (or its wait is over)
@@ -271,6 +292,10 @@ namespace bp
 		// the file opened and its track list known: the art's choice, the title, tracks gone missing
 		void fileReady();
 		bool readyPending = false;	// opened, its track list still to come
+		// the playlist entry mpv made of this file's loadfile (its answer), the last one mpv started, and whether
+		// the track list is this file's: one that comes before it starts is the last file's, read before it closed
+		int64_t loadEntry = -1, startedEntry = -1;
+		bool tracksMine = false;
 		int wakeLoads = 0;			// wakeOutput's loads still to end (their failure is no file's)
 		void prop(const char* name, const std::string& value);
 		// an audio file: the visualizer (Audio display) and the title, artist and album over the top panel

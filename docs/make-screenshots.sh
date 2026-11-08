@@ -28,18 +28,18 @@ run prop:pause,shot:browser "$DEMO/Movies"    # the browser, opened in Movies
 run prop:pause,prop:pause,shot:playing "$MOVIE"
 run prop:pause,prop:pause,X,X,shot:subs "$MOVIE"    # X opens Audio & Subtitles on Audio; X again, Subtitles
 run Right,shot:music "$SONG"
-run Start,R,A,Down,Down,shot:settings "$MOVIE"	# Settings › Subtitles
+run Start,R,A,Down,Down,shot:settings "$MOVIE"	# Settings › Subtitles (START opens on Playing over a video)
 run prop:pause,prop:pause,tap:242:450,Down,Down,Down,Down,Down,Down,shot:info "$MOVIE"
 run Up,Up,shot:photo "$DEMO/Photos/Sintel/Sintel 02.jpg"	# a still of the trailer, at 2x
 
-# the Network tab, in a folder of a local test server (Samba in Docker: share "Media" with Movies/ Music/ Photos/ on
+# Network (Home's tile, below Files with no Recent), in a folder of a local test server (Samba in Docker: share "Media" with Movies/ Music/ Photos/ on
 # 127.0.0.1:1445, user tony, password banana). Its own state folder, so the connections stay out of the other scenes;
 # the passwords are sealed in servers.conf and never drawn.
 NET="$WORK/netstate"
 mkdir -p "$NET"
 "$R/build/bp-servers" "$NET" add smb "Living room PC" 127.0.0.1 1445 tony banana > /dev/null
 "$R/build/bp-servers" "$NET" add ftp "Home server" 127.0.0.1 2121 tony banana > /dev/null
-"$BIN" --state-dir "$NET" --press R,A,A,Down,A,shot:network > "$WORK/log.txt" 2>&1 || true
+"$BIN" --state-dir "$NET" --press Down,A,A,A,Down,A,shot:network > "$WORK/log.txt" 2>&1 || true
 
 # each pair stacked: top over bottom with a hinge between, on a dark frame
 for s in browser playing subs music settings info photo network; do

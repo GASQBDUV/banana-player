@@ -348,6 +348,18 @@ namespace bp
 		return reorder(v, order);
 	}
 
+	std::vector<int> moveEntriesTo(std::vector<PlaylistEntry>& v, const std::set<int>& sel, int at)
+	{
+		std::vector<int> rest, picked;
+		for (size_t i = 0; i < v.size(); i++)
+			(sel.count(int(i)) ? picked : rest).push_back(int(i));
+		size_t pos = at < 0 ? 0 : std::min(size_t(at), rest.size());
+		std::vector<int> order(rest.begin(), rest.begin() + pos);
+		order.insert(order.end(), picked.begin(), picked.end());
+		order.insert(order.end(), rest.begin() + pos, rest.end());
+		return reorder(v, order);
+	}
+
 	std::vector<int> gatherSelection(std::vector<PlaylistEntry>& v, const std::set<int>& sel)
 	{
 		size_t n = v.size();
@@ -474,12 +486,15 @@ namespace bp
 	std::vector<PlaylistStore::Info> PlaylistStore::list() const
 	{
 		std::vector<Info> out;
-		DIR* d = dir_.empty() ? nullptr : opendir(dir_.c_str());
-		if (!d) return out;
+		if (dir_.empty()) return out;
+		DIR* d = opendir(dir_.c_str());
 		std::vector<std::string> files;
-		while (dirent* e = readdir(d))
-			if (isM3uName(e->d_name)) files.push_back(e->d_name);
-		closedir(d);
+		if (d)
+		{
+			while (dirent* e = readdir(d))
+				if (isM3uName(e->d_name)) files.push_back(e->d_name);
+			closedir(d);
+		}
 		std::sort(files.begin(), files.end());	// a stable pick of which 500 when there are more
 		if (files.size() > PL_MAX_LISTED) files.resize(PL_MAX_LISTED);
 		for (const auto& f : files)
@@ -493,7 +508,89 @@ namespace bp
 			out.push_back({path, p.name, int(p.entries.size())});
 		}
 		std::stable_sort(out.begin(), out.end(), [](const Info& a, const Info& b) { return naturalLess(a.name, b.name); });
+		if (dir_.empty()) return out;
+		Playlist liked;
+		int skipped;
+		load(likedFile(), liked, skipped);	// no file yet is an empty one
+		out.insert(out.begin(), {likedFile(), LIKED_NAME, int(liked.entries.size()), true});
 		return out;
+	}
+
+	std::vector<PlaylistStore::Info> PlaylistStore::addTargets() const
+	{
+		std::vector<Info> out = list();
+		out.erase(std::remove_if(out.begin(), out.end(), [](const Info& i) { return i.builtin; }), out.end());
+		return out;
+	}
+
+	bool PlaylistStore::isBuiltinFile(const std::string& file) const { return !dir_.empty() && file == likedFile(); }
+
+	bool PlaylistStore::likable(const std::string& path)
+	{
+		return !path.empty() && !isPhotoFile(path) && (isVideoFile(path) || isAudioFile(path)) &&
+			(isNetPath(path) || path[0] == '/');
+	}
+
+	void PlaylistStore::likedRefresh() const
+	{
+		if (likedSerial_ == serial_) return;
+		likedSet_.clear();
+		Playlist p;
+		int skipped;
+		if (!dir_.empty() && load(likedFile(), p, skipped))
+			for (const auto& e : p.entries) likedSet_.insert(e.path);
+		likedSerial_ = serial_;
+	}
+
+	bool PlaylistStore::isLiked(const std::string& path) const
+	{
+		likedRefresh();
+		return likedSet_.count(path) > 0;
+	}
+
+	int PlaylistStore::likedCount() const
+	{
+		likedRefresh();
+		return int(likedSet_.size());
+	}
+
+	bool PlaylistStore::setLiked(const std::string& path, const std::string& title, double duration, bool on, int at,
+		std::string* dropped)
+	{
+		if (dropped) dropped->clear();
+		if (dir_.empty()) return false;
+		if (on && !likable(path)) return false;
+		Playlist p;
+		int skipped;
+		if (!load(likedFile(), p, skipped)) { p = Playlist(); p.file = likedFile(); }
+		p.name = LIKED_NAME;
+		bool has = std::any_of(p.entries.begin(), p.entries.end(), [&](const PlaylistEntry& e) { return e.path == path; });
+		if (on == has) return true;
+		if (on)
+		{
+			PlaylistEntry e;
+			e.path = path;
+			e.title = title.empty() ? entryTitle(path) : title;
+			e.duration = duration;
+			p.entries.insert(p.entries.begin() + std::clamp(at, 0, (int)p.entries.size()), e);
+			if (p.entries.size() > PL_MAX_ENTRIES)
+			{
+				if (dropped) *dropped = p.entries.back().path;
+				p.entries.resize(PL_MAX_ENTRIES);
+			}
+		}
+		else
+			p.entries.erase(std::remove_if(p.entries.begin(), p.entries.end(), [&](const PlaylistEntry& e) { return e.path == path; }),
+				p.entries.end());
+		return save(p);
+	}
+
+	bool PlaylistStore::containsPath(const std::string& file, const std::string& path) const
+	{
+		Playlist p;
+		int skipped;
+		if (!load(file, p, skipped)) return false;
+		return std::any_of(p.entries.begin(), p.entries.end(), [&](const PlaylistEntry& e) { return e.path == path; });
 	}
 
 	bool PlaylistStore::save(const Playlist& p)
@@ -534,6 +631,7 @@ namespace bp
 
 	PlNameError PlaylistStore::rename(const std::string& file, const std::string& newName, std::string& newFileOut)
 	{
+		if (isBuiltinFile(file)) return PlNameError::Builtin;
 		Playlist p;
 		int skipped;
 		if (!load(file, p, skipped)) return PlNameError::Empty;
@@ -552,6 +650,7 @@ namespace bp
 
 	bool PlaylistStore::remove(const std::string& file)
 	{
+		if (isBuiltinFile(file)) return false;
 		bool ok = unlink(file.c_str()) == 0;
 		serial_++;
 		return ok;

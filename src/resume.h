@@ -13,6 +13,7 @@ namespace bp
 		double position = -1;	// < 0: from the start
 		int64_t aid = -1;		// mpv's track id; -1: not kept
 		int64_t sid = -1;		// 0: subtitles off; -1: not kept
+		double duration = -1;	// its length as last played (Home's Recent cards: "0:27 / 0:52"); < 0: not known
 	};
 
 	class ResumeStore

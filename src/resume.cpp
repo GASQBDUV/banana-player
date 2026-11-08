@@ -5,7 +5,8 @@
 namespace bp
 {
 	// resume.tsv: "position<TAB>aid<TAB>sid<TAB>path" a line (the path last: it may hold a tab), and "#last-audio",
-	// "#last-sub" lines for the languages
+	// "#last-sub" lines for the languages. A file's length is a "#duration<TAB>seconds<TAB>path" line after its own:
+	// a comment to a version from before it, which reads the file as it always did
 	void ResumeStore::parse(const std::string& text)
 	{
 		entries.clear();
@@ -20,6 +21,18 @@ namespace bp
 				std::string v = line.substr(10);
 				lastSubOff = v == "-";
 				lastSubLang = lastSubOff ? "" : v;
+				continue;
+			}
+			if (line.rfind("#duration\t", 0) == 0)
+			{
+				size_t t = line.find('\t', 10);
+				if (t == std::string::npos) continue;
+				std::string path = line.substr(t + 1);
+				// (its entry is the line before, as written; else wherever it is)
+				ResumeEntry* e = !entries.empty() && entries.back().path == path ? &entries.back() : nullptr;
+				for (size_t i = 0; !e && i < entries.size(); i++)
+					if (entries[i].path == path) e = &entries[i];
+				if (e) e->duration = atof(line.substr(10, t - 10).c_str());
 				continue;
 			}
 			if (line.empty() || line[0] == '#') continue;
@@ -47,6 +60,11 @@ namespace bp
 			char buf[64];
 			snprintf(buf, sizeof buf, "%.3f\t%lld\t%lld\t", e.position, (long long)e.aid, (long long)e.sid);
 			out += buf + e.path + "\n";
+			if (e.duration > 0)
+			{
+				snprintf(buf, sizeof buf, "#duration\t%.3f\t", e.duration);
+				out += buf + e.path + "\n";
+			}
 		}
 		return out;
 	}

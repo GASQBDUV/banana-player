@@ -16,19 +16,29 @@ ctest --test-dir build                               # or ./build/core-test (all
 BP_BROWSE=dir1:dir2 ./build/banana-player            # the browser's top-level places
 packaging/build-bundle.sh                            # aarch64 bundle for the handheld (Docker, arm64 Debian 12)
 docs/make-screenshots.sh <library>                   # the README's docs/img/screen-*.png (library layout: the script's header)
+python3 tools/web-mock.py [port]                     # the web dashboard's app without the player (http://127.0.0.1:8099/)
+tools/web-smoke.sh                                   # the web dashboard end to end with curl (needs a running player, BP_WEB_FORCE=1)
+tools/make-sprite.py                                 # regenerates web/sprite.svg from the G_* glyphs in ui.cpp
 ```
 
 - **Scripted runs** are the end-to-end test harness: `--press STEPS` runs comma-separated steps 0.8 s apart and prints
   the state after each, then quits; real keyboard/mouse/touch input is ignored meanwhile. Steps are button names
   (`A,B,X,Y,L,R,L2,R2,Up,Down,Left,Right,Start,Select,L3`), `tap:X:Y`, `dtap:X:Y`, `drag:X1:Y1:X2:Y2`, `hold:X:Y` (in the
-  bottom panel's 640×480 layout units), `info`, `page`, `rows` (the browser's rows, in view or not), `prop:NAME` (any mpv property),
-  `shot:NAME` (both panels to `$BP_SHOTS/NAME-{top,bottom}.png`), `screenshot`. Use `--state-dir` with a scratch dir
+  bottom panel's 640×480 layout units), `info`, `page`, `rows` (the browser's rows, in view or not; on Home the Recent cards, `card …`, then the tiles, `tile …`, `>` on the focus), `prop:NAME` (any mpv property),
+  `shot:NAME` (both panels to `$BP_SHOTS/NAME-{top,bottom}.png`), `screenshot`, `web` (the dashboard's URL, PIN and
+  clients). Use `--state-dir` with a scratch dir
   so runs don't share settings/resume/history. The state line can lag a step behind (mpv is asynchronous; the
   harness doesn't wait for it, as a loop that stops drawing holds mpv up). Steps wait for the file to open, 3 s at
   most. The log's `timing: <file> started in N ms` lines give how long each file took to start, on the handheld too.
+- **How much to test** (the owner finds the real bugs on the handheld and in Safari, which headless runs miss):
+  every change: build, `core-test`, and one check aimed at the change; before a card copy: `tools/web-smoke.sh`,
+  one phone-size browser run (WebKit for the browser player) and one scripted handheld run, then copy the card
+  first and let the owner test while anything longer runs; the full multi-size browser suite only before a
+  release, in the background. Subagents don't run long suites unless asked. When a bug can't be pinned from
+  `log.txt`, add logging that would pin it next time.
 - **Test variables** that stand in for the handheld: `BP_POWER_SUPPLY` (a fake `/sys/class/power_supply`),
   `BP_OSD_FILE` (bananad's level file), `BP_FONT_PROVIDER=none` (libass with no system fonts, as on BananaOS),
-  `BP_SCREENSHOTS`.
+  `BP_SCREENSHOTS`, `BP_AO_PCM=FILE` (the sound out recorded as raw 44.1 kHz s16 stereo, untimed: silence is checkable).
 - **Linux-only code** (evdev touch, lid switch, inotify, backlight) only compiles on Linux. Check it with the arm64 Docker
   command in DEVELOPMENT.md ("Linux check") after touching `touch.*`, `sleepwatch.*`, `levelwatch.*` or `panel.*`.
 - `build-bundle.sh` caches FFmpeg/libplacebo/libass/mpv source builds in `.cache/bundle`; reruns rebuild only the
@@ -107,7 +117,18 @@ docs/make-screenshots.sh <library>                   # the README's docs/img/scr
 - **Chapters** come by `observe_property` (`chapter-list`, `chapter`), as the track list does; `chapterTarget` in bpcore
   computes each L2/R2 jump, a pending chapter covers quick repeated presses, and the L2/R2 card shares `osd-overlay` id 2 with the volume card.
 - **`Ui`** is the whole bottom panel: pages (Main, Tracks (Audio & Subtitles tabs), Chapters, Settings, Browse, Info, About, Exit, Sound (Equalizer & Effects tabs)), START's tabbed
-  menu (`inMenu`: Recent, Settings, About, Quit), the Options menu (X), Lock, Screen off. Main over a photo is
+  menu (`inMenu`: Playing (`Page::Playing`, while a song or video plays: Like, Add to playlist…; `menuTabs`), Settings, About, Quit), the Options menu (X), Lock, Screen off. The browser's first page is **Home**
+  (`browseDir` `HOMEDIR`, `drawHome`, `homeKey`, `homePointer`): the Recent strip (`recent`, built by `listRecent` from the
+  history and resume.tsv's positions and `#duration` lines; cards `CARD_W` wide, `STRIDE` apart, the focused one kept in
+  the second slot by `stripTarget`; `setStrip` eases `stripOff` over 120 ms, stepped in `tick()` while `stripT0` is set,
+  which is what `animating()` reports) over the four sections' tiles (`homeZone`/`homeStrip`/`homeGrid`, `homeCol` for
+  coming back down). The sections are `browseTab` (Files `""`, Playlists `PLROOT`, Network `NETROOT`, Extensions `EXTDIR`,
+  a placeholder); `drawSectionHeader` draws their markers (`pipRect`) where tabs were; `openSection` (L/R, a tile, a
+  marker) opens one at its top, `setSection` moves to one without entering (Show in folder, back from a video);
+  `atFirstPage()` (a section's top, or All recent, `RECENT`) is where B goes Home. Home's menus are `ctxItems` from
+  `CTX_R_PLAY` on (`ctxWide()`). The header's right end is `drawBattery`: the battery, the web's globe, then the clock
+  (`clockText`, not over a photo; the minute is in `signature()`); `statusLeft()` is where they start, and titles and
+  the section markers end before it. Main over a photo is
   `drawPhoto` (the pan area and `photoBtn`s, ids from `PHOTO_BTN`; `photoPointer`, a flick's glide in `tick()`; a
   drag moves the photo or, `dragBox`, the box). `BACK_ICON` ("<", top left of every page) is B by touch, except
   over what plays, where one tap closes it; no page has another Back. `dropTouch()` (on `showPlayer`/`showBrowser`) swallows only a finger still down:
@@ -124,6 +145,27 @@ docs/make-screenshots.sh <library>                   # the README's docs/img/scr
   the m3u's path) are pseudo-dirs that `pseudoDir()` recognises, so a new path check must go through it. Select, add and
   move are `selMode` states of the browser page, not pages of their own. Edits are debounced 1 s (a dirty flag checked in
   `tick()`) and flushed on leaving and on quit (`flushPlaylist`).
+- **Web dashboard** (`BP_WEB`, default ON at build time, off at run time; `src/web/`, `web/`): cpp-httplib (split into
+  `third_party/httplib/`), nayuki qrcodegen (`third_party/qrcodegen/`), Preact+htm and SortableJS vendored in `web/vendor/`
+  (`third_party/README.md` has versions, hashes, licences). `web/` is embedded at build time by `cmake/EmbedWeb.cmake`
+  into `web_assets.cpp`; env `BP_WEB_DIR` serves it from disk instead (a reload shows an edit). `WebServer` exists only
+  while `Settings::webDashboard` is on: made on first turn-on, never destroyed (like the Updater), so off means no
+  object, thread or socket. Server threads never touch `Player` or `Ui`: `WebServer::call` posts an `evWeb` SDL event
+  carrying a `WebCall`, which `main` runs on the main thread and the server thread waits for (503 on timeout); only
+  async Player calls there, as with mpv. Fire-and-forget news goes by `post` (FsChanged, ClientConnected, PinRotated,
+  ClientsChanged). Live updates are SSE on `/api/events`: `webSnapshot` (`main.cpp`, `api_player.cpp`) is built in the
+  loop only while clients exist, and published at most 4/s when anything but the clock changed; `notify` carries fs,
+  playlists and handheld-play events. Pre-routing gate in
+  `server.cpp`: private remote address, Host an IP literal or localhost (DNS rebinding), `X-BP: 1` and a matching Origin
+  on non-GET, and the `bp_s` session cookie on every `/api/*` but login. Sessions and the PIN (`webauth`: PinGate,
+  SessionStore) live in `<state>/web-sessions.tsv` and `web.conf`. Paths are virtual `<rootIndex>/<rel>` through
+  `webpath`'s `resolveVirtual`; the deny list holds the state dir (it has `servers.key`), `/data/home`, `/data/banana`
+  and `/data/store`. httplib's keep-alive poll interval is overridden to 1 s (`CMakeLists.txt`) for battery, and httplib
+  ignores SIGPIPE process-wide. bpcore gains `webauth`, `webpath`, `json`, `webmedia`, `webstate`; the app links
+  libavformat/libavcodec/libavutil for the file probe (`src/web/probe.cpp`) when BP_WEB. Test hooks: `BP_WEB_FORCE=1`
+  (on at start), `BP_WEB_PIN`, `BP_WEB_PORT`, `BP_WEB_DIR`, `BP_WEB_IP` (`none` = no Wi-Fi), `BP_WEB_FAIL` (the server
+  won't start), `BP_WEB_KEEPALIVE` (idle seconds), and the scripted `web` step. Icons in `web/sprite.svg` come from the
+  same `G_*` glyphs as the bottom panel: regenerate with `tools/make-sprite.py` after changing one.
 - **Updater** (`updater.*`, Ports installs; a Store install, under `/data/store`, is the Store's): a thread runs
   BananaOS's `curl` against GitHub's `/releases/latest` (`update.cpp` parses it), downloads the zip and its
   `.sha256`, checks the hash (SHA-256 in `update.cpp`), unpacks it (`unzip`, else `python3 -m zipfile`) and renames it
@@ -149,7 +191,7 @@ docs/make-screenshots.sh <library>                   # the README's docs/img/scr
   first.
 - **Library code with no window** (`aspect`, `tracks`, `format`, `substyle`, `settings`, `resume`, `history`,
   `playlist`, `browser`, `png`, `battery`, `photo`, `update`, `backlight`, `netpath`, `servers`, `secret`, `netstore`,
-  `sidecar`, `keyboard`, `ftplist`, `eq`, `soundfx`, `playlists`) builds as `bpcore` and is covered by `tests/core_test.cpp` (a hand-rolled `CHECK_EQ`).
+  `sidecar`, `keyboard`, `ftplist`, `eq`, `soundfx`, `playlists`, `webauth`, `webpath`, `json`, `webmedia`, `webstate`) builds as `bpcore` and is covered by `tests/core_test.cpp` (a hand-rolled `CHECK_EQ`).
   Keep window/mpv-handle code out of these.
 - **Settings** are an INI-ish `key = value` file. New switches go in `Settings` plus the `REMEMBER` table in
   `settings.cpp`. In `ui.cpp`, the `REMEMBER`/`REMEMBER_LABELS` arrays, `TOGGLES` and the row ids (`TOGGLE_ROW`,

@@ -44,7 +44,8 @@ tested and laid out.
 | `src/touch.*` | The bottom touchscreen from evdev, one finger |
 | `src/sleepwatch.*` | Pause on the lid's `SW_LID` and on `SIGCONT` |
 | `src/panel.*` | The bottom backlight on/off, restored on quit and on a crash |
-| `src/aspect.*`, `tracks.*`, `format.*`, `substyle.*`, `settings.*`, `resume.*`, `history.*`, `playlist.*`, `playlists.*`, `browser.*`, `photo.*` | No window code; covered by `tests/core_test.cpp` |
+| `src/web/*`, `web/` | The web dashboard (`BP_WEB`): the server (cpp-httplib, the gate, PIN sign-in, SSE), its API for files, the player and playlists, the file probe (libavformat) and the address list. `web/` is the browser app, embedded at build time |
+| `src/aspect.*`, `tracks.*`, `format.*`, `substyle.*`, `settings.*`, `resume.*`, `history.*`, `playlist.*`, `playlists.*`, `browser.*`, `photo.*`, `webauth.*`, `webpath.*`, `json.*`, `webmedia.*`, `webstate.*` | No window code; covered by `tests/core_test.cpp` |
 
 ### BananaOS integration
 
@@ -66,7 +67,9 @@ tested and laid out.
 ## Build and run on a computer
 
 macOS (Homebrew): `brew install cmake pkg-config mpv sdl2 sdl2_ttf`. Debian/Ubuntu:
-`apt install cmake g++ pkg-config libmpv-dev libsdl2-dev libsdl2-ttf-dev`.
+`apt install cmake g++ pkg-config libmpv-dev libsdl2-dev libsdl2-ttf-dev libavformat-dev libavcodec-dev libavutil-dev`.
+The web dashboard (`BP_WEB`, on by default) needs FFmpeg's libavformat, libavcodec and libavutil through pkg-config (on
+macOS they come with mpv); `-DBP_WEB=OFF` builds without it.
 
 ```sh
 cmake -S . -B build
@@ -121,7 +124,7 @@ Docker:
 
 ```sh
 docker run --rm -v "$PWD":/src:ro debian:trixie bash -c "apt-get update -qq && \
-  apt-get install -y -qq g++ cmake make pkg-config libmpv-dev libsdl2-dev libsdl2-ttf-dev libssl-dev libcurl4-openssl-dev >/dev/null && \
+  apt-get install -y -qq g++ cmake make pkg-config libmpv-dev libsdl2-dev libsdl2-ttf-dev libssl-dev libcurl4-openssl-dev libavformat-dev libavcodec-dev libavutil-dev >/dev/null && \
   cmake -S /src -B /tmp/b -DCMAKE_CXX_FLAGS='-Wall -Wextra' && cmake --build /tmp/b -j && /tmp/b/core-test"
 ```
 
@@ -186,6 +189,15 @@ build/bp-net cancel-ls|cancel-cat ...                      # with the server `do
     picture), a stalled read while quitting (immediate). FTP paths are relative to the login folder.
   - [ ] On the handheld: Wi-Fi drop and recovery, discovery on a home LAN with a Windows PC (WS-Discovery untested),
         FTPS against a real NAS, MLSD (the test server has none).
+- [x] **Web dashboard, phase 1** (`src/web/`, `web/`, `BP_WEB`; off until turned on in Settings, quick settings or the
+      Network tab's X menu): a phone or computer on the same Wi-Fi signs in by QR code or PIN (lockout, 7-day sessions,
+      private addresses only). Playing: control the handheld, or play in the browser; Files on the card (browse, upload
+      files and folders, rename, move, download, delete, multi-select); Playlists (edit, reorder, add from Files); edits
+      show live both ways over SSE. Design and layout: `CLAUDE.md` (Architecture).
+  - [ ] Phase 2: network folders in the browser, a photo thumbnail grid, saving EQ presets from the web, subtitles when
+        playing in the browser.
+  - [ ] On the handheld: the QR code scanned by a phone, sleep and wake with a browser open, a Wi-Fi drop, the globe
+        indicator, and the battery cost of a browser watching.
 - [x] **Redesign** (0.3.0): one header (`<`, title, battery) and one footer (button names) on every page
       (`drawHeader`, `drawHints`), bitmap icons (`drawGlyph`), Settings as tiles with help lines (Y/X between groups),
       one dialog style, error and locked states, Pixelify's broken "fi" ligature split. `BP_BOTTOM_SIZE=1024x768`
@@ -231,9 +243,22 @@ build/bp-net cancel-ls|cancel-cat ...                      # with the server `do
 - [ ] **Later:** an audio delay setting for Bluetooth, holding off idle sleep while playing, music with the lid closed
       (bananad would need to hold the lid's sleep), translations, CJK file names on the bottom panel.
 
+- [ ] **On-device debug mode** (backlog): a Settings switch, off by default, that adds to the web dashboard's API
+      (behind its PIN and private-network gate, read-only) a live tail of `log.txt` and reads of mpv properties
+      (`current-ao`, `af`, `lavfi-complex`, `audio-out-params`, pause, position), so a bug on the handheld can be
+      watched with `curl` from a computer while it's reproduced, with no card swaps.
+- [ ] **iPhone and iPad:** playing in the page is off there (`NO_HERE` in `web/app.js`). Safari skipped a history
+      entry made without a tap (the player opened by itself after the QR's link) and the chevron left the page;
+      also check its audio session and the swipe Back, then turn it on again.
+
 ## Licences
 
 The code is [MIT](LICENSE) © tonywei92. The fonts are under the SIL OFL 1.1 (`assets/fonts/licenses/`): Pixelify Sans
 and Fusion Pixel come from BananaLinux's `ui/assets/rnds/fonts`, and Inter from its `ui/assets/banana/fonts`. libmpv
 is GPL-2.0+ by default and LGPL-2.1+ when built with `-Dgpl=false`. MIT is compatible with either, but the Store
 package must ship the licence of each bundled library and the source offer the GPL requires.
+
+Vendored third-party code keeps its own licences: cpp-httplib (MIT) and nayuki's QR-Code-generator (MIT) in
+`third_party/`, and htm with Preact (Apache-2.0 and MIT) and SortableJS (MIT) in `web/vendor/`. `third_party/README.md`
+lists each one's version, source, file hashes and licence file. The bundle copies these licences into
+`share/banana-player/licenses/`, with the fonts the web dashboard serves (SIL OFL 1.1).

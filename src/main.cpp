@@ -16,6 +16,12 @@
 #include "networker.h"
 #include "netstream.h"
 #include "netpath.h"
+#ifdef BP_WEB
+#include "browser.h"
+#include "webstate.h"
+#include "web/netif.h"
+#include "web/server.h"
+#endif
 #include <SDL.h>
 #include <SDL_ttf.h>
 #include <algorithm>
@@ -31,7 +37,20 @@
 
 using namespace bp;
 
-static Uint32 evMpv, evRender, evTouch, evLevel, evNet, evFound;
+#ifdef BP_WEB
+namespace bp
+{
+	// api_player.cpp: the playback state as the web dashboard shows it, and as its pages get it
+	WebSnapshot webSnapshot(WebServer& ws, Player& p, Ui& u);
+	std::string webSnapshotJson(const WebSnapshot& s, const Ui& u);
+}
+#endif
+
+static Uint32 evMpv, evRender, evTouch, evLevel, evNet, evFound, evWeb;
+#ifdef BP_WEB
+// the dashboard's server for the sleep watch's thread (made on the main thread, never destroyed)
+static std::atomic<bp::WebServer*> webForWatch{nullptr};
+#endif
 static std::atomic<bool> mpvPending{false}, renderPending{false};
 
 static void onMpvWakeup(void*)
@@ -140,7 +159,7 @@ int main(int argc, char** argv)
 			{
 				int n = 0;
 				float v[4];
-				bool ok = buttonFromName(step) != Button::None || step == "info" || step == "page" || step == "update" || step == "F" || step == "rows" || step == "screenshot" || step.rfind("prop:", 0) == 0 || step.rfind("shot:", 0) == 0 ||
+				bool ok = buttonFromName(step) != Button::None || step == "info" || step == "page" || step == "update" || step == "web" || step == "F" || step == "rows" || step == "screenshot" || step.rfind("prop:", 0) == 0 || step.rfind("shot:", 0) == 0 ||
 					(sscanf(step.c_str(), "tap:%f:%f%n", &v[0], &v[1], &n) == 2 && n == (int)step.size()) ||
 					(sscanf(step.c_str(), "dtap:%f:%f%n", &v[0], &v[1], &n) == 2 && n == (int)step.size()) ||
 					(sscanf(step.c_str(), "hold:%f:%f%n", &v[0], &v[1], &n) == 2 && n == (int)step.size()) ||
@@ -174,12 +193,13 @@ int main(int argc, char** argv)
 		fprintf(stderr, "SDL: %s\n", SDL_GetError());
 		return 1;
 	}
-	evMpv = SDL_RegisterEvents(6);
+	evMpv = SDL_RegisterEvents(7);
 	evRender = evMpv + 1;
 	evTouch = evMpv + 2;
 	evLevel = evMpv + 3;
 	evNet = evMpv + 4;
 	evFound = evMpv + 5;
+	evWeb = evMpv + 6;	// the web dashboard's calls and news (WebCall)
 
 	// On the handheld (SDL's KMSDRM) each panel is a display and each window fills one; elsewhere, two windows
 	if (windowed < 0) windowed = strcmp(SDL_GetCurrentVideoDriver(), "KMSDRM") != 0;
@@ -313,15 +333,66 @@ int main(int argc, char** argv)
 		// looked for once, a little after the start, in the background (Settings › Updates › Check automatically)
 		Uint32 updateCheckAt = player.settings.checkUpdates ? SDL_GetTicks() + 4000 : 0;
 		if (bottom && !haveUi) fprintf(stderr, "the controls could not start: %s\n", SDL_GetError());
+
+#ifdef BP_WEB
+		// The web dashboard: made the first time it's turned on (no thread, socket or object before), never
+		// destroyed (stop() ends what it can in a second; a slow client's write ends with the process)
+		WebServer* webServer = nullptr;
+		auto webPower = [&](bool on) {
+			if (!on)
+			{
+				// the pages say why it went (`event: bye` "off"), not that the handheld can't be reached
+				if (webServer) webServer->stop("off");
+				return;
+			}
+			if (!webServer)
+			{
+				webServer = new WebServer;
+				ui.web = webServer;
+				webForWatch = webServer;
+			}
+			if (webServer->running()) return;
+			WebConfig wc;
+			wc.stateDir = opts.stateDir;
+			// the browser's places, the whole card ("/", a computer's) left out
+			for (auto& r : browseRoots())
+				if (r.path != "/") wc.roots.push_back({r.label, r.path});
+			wc.eventType = evWeb;
+			WebServer* ws = webServer;
+			wc.snapshot = [ws](Player& p, Ui& u) { return webSnapshotJson(webSnapshot(*ws, p, u), u); };
+			// tests: BP_WEB_FAIL=1 stands in for a server that couldn't start
+			if (!getenv("BP_WEB_FAIL")) webServer->start(wc);
+		};
+		ui.webPower = webPower;
+		// tests: BP_WEB_FORCE=1 starts it whatever the settings say (as if it were on, not written)
+		if (getenv("BP_WEB_FORCE") && atoi(getenv("BP_WEB_FORCE"))) player.settings.webDashboard = true;
+		if (player.settings.webDashboard) webPower(true);
+		WebSnapshot webLast;
+		bool webForce = true;	// publish at the next turn whatever changed (a browser came, the handheld woke)
+		Uint32 webPublishedAt = 0;
+		bool elsewhereShown = false;	// the top panel's "Playing in your browser"
+#endif
 		Uint32 bottomId = bottom ? SDL_GetWindowID(bottom) : 0;
 
 		// the lid closed, the handheld slept: paused at once (from the watch's thread), and the place kept
 		static std::atomic<bool> slept{false};
 		SleepWatch sleepWatch;
-		sleepWatch.start([&player] {
+		sleepWatch.start([&player](bool lid) {
 			player.pauseNow();
 			slept = true;
+#ifdef BP_WEB
+			// the pages told now, from this thread (notify is thread-safe): bananad stops the process in a moment, and
+			// the main loop may not come round before it. The streams stay open for the wake
+			if (WebServer* ws = webForWatch.load(); lid && ws && ws->running()) ws->notify("bye", "{\"reason\":\"sleep\"}");
+#else
+			(void)lid;
+#endif
 			onMpvWakeup(nullptr);
+		}, [] {
+#ifdef BP_WEB
+			// back (or never gone: lid sleep off): the pages' "asleep" undone; the state follows (woke: webForce)
+			if (WebServer* ws = webForWatch.load(); ws && ws->running()) ws->notify("awake", "{}");
+#endif
 		});
 
 		// the bottom touchscreen, read on its own thread; where there's none, SDL's mouse and touch stand in
@@ -532,6 +603,27 @@ int main(int argc, char** argv)
 					std::unique_ptr<FoundHost> h((FoundHost*)e.user.data1);
 					ui.hostFound(*h, player);
 				}
+#ifdef BP_WEB
+				else if (e.type == evWeb)
+				{
+					auto c = WebCall::take(e.user.data1);
+					// a toast over the top panel for 2 s, unless a video plays (it'd be over the picture) or the page that
+					// says it is open
+					auto toast = [&](const char* text) {
+						bool video = player.playing() && !player.playingAudio() && !player.playingPhoto();
+						if (video || ui.webPageShown()) return;
+						player.osd(text, 2000);
+						levelUntil = SDL_GetTicks() + 2000;	// (with nothing playing the top panel is drawn while a card is up)
+						renderPending = true;
+					};
+					if (!c) {}
+					else if (c->kind == WebCall::Kind::Call) c->run(player, ui);
+					else if (c->kind == WebCall::Kind::FsChanged) ui.folderChanged(c->arg, player);
+					else if (c->kind == WebCall::Kind::ClientConnected) toast("Web dashboard: a browser signed in");
+					else if (c->kind == WebCall::Kind::PinRotated) toast("PIN changed after too many wrong tries");
+					else if (c->kind == WebCall::Kind::ClientsChanged) webForce = true;
+				}
+#endif
 				else if (e.type == evTouch)
 				{
 					Pointer* pt = (Pointer*)e.user.data1;
@@ -596,6 +688,17 @@ int main(int argc, char** argv)
 			player.checkLoading();
 			if (haveUi) ui.tick(player);
 			if (player.quit || ui.quitRequested || ui.restartRequested) running = false;
+			// the web's Stop: back to the browser (started with a file: paused, as there's no browser to go back to)
+			if (ui.takeStopRequest())
+			{
+				if (browserMode && player.playing()) leave();
+				else if (player.playing() && !player.paused) player.togglePause();
+			}
+			if (int ms = ui.takeLevelShown())
+			{
+				levelUntil = SDL_GetTicks() + ms;
+				renderPending = true;
+			}
 			if (updateCheckAt && SDL_GetTicks() >= updateCheckAt)
 			{
 				updateCheckAt = 0;
@@ -611,6 +714,10 @@ int main(int argc, char** argv)
 			// the place is kept now and then too: a battery that runs out, a power-off after sleeping
 			bool woke = slept.exchange(false);
 			if (woke) freshUntil = SDL_GetTicks() + 2000;	// the panels back from a sleep: drawn again
+#ifdef BP_WEB
+			// the server was frozen with the rest: the pages watching get the state afresh
+			if (woke) webForce = true;
+#endif
 			// a photo has no Play: an animated one paused by the lid goes on at the wake (a video waits for A)
 			if (woke && player.playingPhoto()) player.unpause();
 			if (woke || (player.loaded && !player.paused && SDL_GetTicks() - savedAt > 60000))
@@ -736,6 +843,15 @@ int main(int argc, char** argv)
 							printf("    update: %s latest=%s progress=%d %s\n", names[(int)updater.state()], updater.available().c_str(),
 								updater.progress(), updater.message().c_str());
 						}
+#ifdef BP_WEB
+						else if (step == "web")
+						{
+							bool up = webServer && webServer->running();
+							printf("    web: %s url=http://%s:%d pin=%s clients=%d browserPlaying=%d screen=%s\n", up ? "running" : webServer ? "stopped" : "off",
+								deviceAddress().c_str(), up ? webServer->port() : 0, up ? webServer->pin().c_str() : "", up ? webServer->clients() : 0,
+								ui.browserPlaying, ui.screenOn() ? "on" : "off");
+						}
+#endif
 						else if (step == "page")
 						{
 							for (auto& l : ui.pageLines()) printf("    %s\n", l.c_str());
@@ -779,6 +895,56 @@ int main(int argc, char** argv)
 				}
 			}
 
+#ifdef BP_WEB
+			// the handheld paused for a page: said on the top panel (a paused visualizer looks frozen); gone with the
+			// dashboard too
+			{
+				bool elsewhere = webServer && webServer->running() && ui.browserPlaying && player.playing() && player.paused;
+				if (elsewhere != elsewhereShown) { player.showElsewhere(elsewhere); elsewhereShown = elsewhere; }
+			}
+			// the web dashboard's live state: made only while a browser watches, sent when something but the clock
+			// changed (or the clock drifted), at most 4 times a second
+			if (webServer && webServer->running())
+			{
+				// the handheld playing again after a page took over: the page pauses its own
+				// (a file still opening isn't playing yet: "Play in this browser" opens it here paused, and that takes a moment)
+				if (ui.browserPlaying && player.playing() && !player.loading())
+				{
+					if (player.paused) ui.browserSawPause = true;
+					else if (ui.browserSawPause || SDL_GetTicks() - ui.browserPlayAt > 1500)
+					{
+						ui.browserPlaying = false;
+						webServer->notify("handheld-play", "{}");
+					}
+				}
+				// a seek made here while a page plays the file (-5 s, +10 s, the bar): the page goes there too
+				if (ui.browserPlaying && player.paused && player.loaded && !player.loading()
+					&& player.currentPath() == ui.browserPos.path)
+				{
+					double pos = player.position;
+					if (ui.browserSeenPos >= 0 && std::fabs(pos - ui.browserSeenPos) > 0.5 && SDL_GetTicks() >= ui.browserSyncUntil)
+					{
+						char d[64];
+						snprintf(d, sizeof d, "{\"t\":%.3f}", pos);
+						webServer->notify("handheld-seek", d);
+						ui.browserPos = {ui.browserPos.path, pos, SDL_GetTicks(), ui.browserPos.playing};
+					}
+					ui.browserSeenPos = pos;
+				}
+				else ui.browserSeenPos = -1;
+				if (webServer->clients() > 0 && SDL_GetTicks() - webPublishedAt >= 250)
+				{
+					WebSnapshot snap = webSnapshot(*webServer, player, ui);
+					if (webForce || snapshotChanged(webLast, snap))
+					{
+						webServer->publish(webSnapshotJson(snap, ui));
+						webLast = snap;
+						webForce = false;
+						webPublishedAt = SDL_GetTicks();
+					}
+				}
+			}
+#endif
 			Uint32 now = SDL_GetTicks();
 			// a chapter or equalizer card shown: it goes the way the volume card does, after its time
 			if (int ms = player.takeCardShown())
@@ -842,6 +1008,17 @@ int main(int argc, char** argv)
 		if (!player.error.empty()) rc = 1;
 		// "Restart now": launch.sh starts again, the update put in place
 		if (ui.restartRequested) rc = Updater::RESTART_CODE;
+#ifdef BP_WEB
+		// waiting calls answered 503, the streams ended, the listener stopped: a second at most
+		if (webServer)
+		{
+			Uint32 t0 = SDL_GetTicks();
+			// (a restart for an update too: to a page, the player closed; it comes back as a new boot id)
+			webServer->stop("quit");
+			fprintf(stderr, "web: stopped in %u ms\n", SDL_GetTicks() - t0);
+		}
+		ui.web = nullptr;
+#endif
 		sleepWatch.stop();
 		levelWatch.stop();
 		bottomTouch.stop();

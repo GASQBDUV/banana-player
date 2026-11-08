@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(banana-player VERSION 0.4.0 LANGUAGES CXX)
+project(banana-player VERSION 0.5.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -33,9 +33,13 @@ endif()
 find_package(OpenSSL REQUIRED)
 
 # what doesn't need a window: unit-tested on its own
-add_library(bpcore STATIC src/aspect.cpp src/tracks.cpp src/format.cpp src/substyle.cpp src/settings.cpp src/resume.cpp src/playlist.cpp src/browser.cpp src/history.cpp src/png.cpp src/battery.cpp src/photo.cpp src/update.cpp src/backlight.cpp src/netstore.cpp src/netpath.cpp src/servers.cpp src/secret.cpp src/sidecar.cpp src/ftplist.cpp src/keyboard.cpp src/eq.cpp src/soundfx.cpp src/playlists.cpp)
+add_library(bpcore STATIC src/aspect.cpp src/tracks.cpp src/format.cpp src/substyle.cpp src/settings.cpp src/resume.cpp src/playlist.cpp src/browser.cpp src/history.cpp src/png.cpp src/battery.cpp src/photo.cpp src/update.cpp src/backlight.cpp src/netstore.cpp src/netpath.cpp src/servers.cpp src/secret.cpp src/sidecar.cpp src/ftplist.cpp src/keyboard.cpp src/eq.cpp src/soundfx.cpp src/playlists.cpp
+	src/webauth.cpp src/webpath.cpp src/json.cpp src/webmedia.cpp src/webstate.cpp)
 target_include_directories(bpcore PUBLIC src)
 target_link_libraries(bpcore PUBLIC PkgConfig::MPV PkgConfig::ZLIB OpenSSL::Crypto)
+if(APPLE)
+	target_link_libraries(bpcore PUBLIC iconv)	# glibc has iconv in libc; macOS has it apart
+endif()
 
 add_executable(banana-player src/main.cpp src/player.cpp src/ui.cpp src/input.cpp src/sleepwatch.cpp src/touch.cpp src/panel.cpp src/levelwatch.cpp src/updater.cpp src/volume.cpp src/networker.cpp src/netstream.cpp src/netresolve.cpp src/discovery.cpp)
 target_link_libraries(banana-player PRIVATE bpcore PkgConfig::SDL2 PkgConfig::SDL2_TTF)
@@ -60,6 +64,33 @@ target_compile_definitions(banana-player PRIVATE
 	BP_ASSETS_DIR="${CMAKE_SOURCE_DIR}/assets")
 if(BP_GLES)
 	target_compile_definitions(banana-player PRIVATE BP_GLES=1)
+endif()
+
+# the web dashboard: a server in the player (cpp-httplib, split into httplib.h/.cc), QR codes (nayuki), libavformat
+# for the file probe, and the web app compiled in (cmake/EmbedWeb.cmake writes web_assets.cpp from web/)
+option(BP_WEB "web dashboard" ON)
+if(BP_WEB)
+	find_package(Threads REQUIRED)
+	pkg_check_modules(AV REQUIRED IMPORTED_TARGET libavformat libavcodec libavutil)
+	file(GLOB_RECURSE BP_WEB_FILES CONFIGURE_DEPENDS ${CMAKE_SOURCE_DIR}/web/*)
+	add_custom_command(OUTPUT ${CMAKE_BINARY_DIR}/web_assets.cpp
+		COMMAND ${CMAKE_COMMAND} -DROOT=${CMAKE_SOURCE_DIR} -DOUT=${CMAKE_BINARY_DIR}/web_assets.cpp
+			-P ${CMAKE_SOURCE_DIR}/cmake/EmbedWeb.cmake
+		DEPENDS ${BP_WEB_FILES} ${CMAKE_SOURCE_DIR}/cmake/EmbedWeb.cmake
+			${CMAKE_SOURCE_DIR}/assets/fonts/PixelifySans-Regular.ttf ${CMAKE_SOURCE_DIR}/assets/fonts/Inter-Regular.ttf ${CMAKE_SOURCE_DIR}/assets/fonts/Inter-Bold.ttf
+			${CMAKE_SOURCE_DIR}/assets/fonts/licenses/PixelifySans-OFL.txt ${CMAKE_SOURCE_DIR}/assets/fonts/licenses/Inter-LICENSE.txt
+		COMMENT "Embedding the web dashboard"
+		VERBATIM)
+	target_sources(banana-player PRIVATE
+		third_party/httplib/httplib.cc third_party/qrcodegen/qrcodegen.cpp
+		src/web/server.cpp src/web/netif.cpp src/web/api_files.cpp src/web/api_player.cpp src/web/api_playlists.cpp
+		src/web/probe.cpp src/web/subs.cpp ${CMAKE_BINARY_DIR}/web_assets.cpp)
+	target_include_directories(banana-player PRIVATE third_party/httplib third_party/qrcodegen)
+	# both split files of httplib read these: the keep-alive check every second, and form bodies up to 256 KB
+	target_compile_definitions(banana-player PRIVATE BP_WEB=1
+		CPPHTTPLIB_KEEPALIVE_TIMEOUT_CHECK_INTERVAL_USECOND=1000000
+		CPPHTTPLIB_FORM_URL_ENCODED_PAYLOAD_MAX_LENGTH=262144)
+	target_link_libraries(banana-player PRIVATE PkgConfig::AV Threads::Threads)
 endif()
 
 option(BP_TOOLS "Build the command-line tools (bp-discover)" ON)

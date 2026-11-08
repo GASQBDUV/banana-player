@@ -4,7 +4,9 @@
 #include <cstdio>
 #include <fcntl.h>
 #include <poll.h>
+#include <algorithm>
 #include <string>
+#include <ctime>
 #include <unistd.h>
 #ifdef __linux__
 #include <cstring>
@@ -59,9 +61,10 @@ namespace bp
 	}
 #endif
 
-	bool SleepWatch::start(std::function<void()> cb)
+	bool SleepWatch::start(std::function<void(bool)> cb, std::function<void()> awake)
 	{
 		onSleep = std::move(cb);
+		onAwake = std::move(awake);
 		if (pipe(stopPipe) < 0) return false;
 		if (contPipe[0] < 0)
 		{
@@ -95,33 +98,43 @@ namespace bp
 		lidFd = -1;
 	}
 
+	static long long monoMs()
+	{
+		timespec t;
+		clock_gettime(CLOCK_MONOTONIC, &t);
+		return (long long)t.tv_sec * 1000 + t.tv_nsec / 1000000;
+	}
+
 	void SleepWatch::run()
 	{
+		// the lid closed and no SIGCONT since: when it's taken as never stopped (monoMs; 0 none)
+		long long awakeAt = 0;
 		for (;;)
 		{
 			pollfd fds[3] = {{stopPipe[0], POLLIN, 0}, {contPipe[0], POLLIN, 0}, {lidFd, POLLIN, 0}};
-			int n = poll(fds, lidFd >= 0 ? 3 : 2, -1);
+			int timeout = awakeAt ? (int)std::max(0LL, awakeAt - monoMs()) : -1;
+			int n = poll(fds, lidFd >= 0 ? 3 : 2, timeout);
 			if (n < 0)
 			{
 				if (errno == EINTR) continue;	// SIGCONT itself lands here too; its byte is in the pipe
 				return;
 			}
-			if (fds[0].revents) return;
-			bool sleep = false;
-			if (fds[1].revents)
+			if (n > 0 && fds[0].revents) return;
+			bool lid = false, cont = false;
+			if (n > 0 && fds[1].revents)
 			{
 				char buf[16];
 				while (read(contPipe[0], buf, sizeof buf) > 0) {}
-				sleep = true;
+				cont = true;
 			}
 #ifdef __linux__
-			if (lidFd >= 0 && fds[2].revents)
+			if (n > 0 && lidFd >= 0 && fds[2].revents)
 			{
 				input_event ev[16];
 				ssize_t r;
 				while ((r = read(lidFd, ev, sizeof ev)) > 0)
 					for (size_t i = 0; i < r / sizeof *ev; i++)
-						if (ev[i].type == EV_SW && ev[i].code == SW_LID && ev[i].value == 1) sleep = true;
+						if (ev[i].type == EV_SW && ev[i].code == SW_LID && ev[i].value == 1) lid = true;
 				if (r < 0 && errno != EAGAIN)
 				{
 					close(lidFd);	// the device went away: SIGCONT still covers the sleeps
@@ -129,7 +142,20 @@ namespace bp
 				}
 			}
 #endif
-			if (sleep && onSleep) onSleep();
+			if ((lid || cont) && onSleep) onSleep(lid && !cont);
+			if (cont)
+			{
+				// back from a stop (a timer of the lid's with it: it was a sleep)
+				awakeAt = 0;
+				if (onAwake) onAwake();
+			}
+			else if (lid) awakeAt = monoMs() + 1500;
+			else if (awakeAt && monoMs() >= awakeAt)
+			{
+				// never stopped: closing the lid only darkened the panels (lid sleep off)
+				awakeAt = 0;
+				if (onAwake) onAwake();
+			}
 		}
 	}
 }

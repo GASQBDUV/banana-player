@@ -31,6 +31,13 @@ namespace bp
 		if (paths.size() > MAX) paths.resize(MAX);
 	}
 
+	bool PlayHistory::remove(const std::string& path)
+	{
+		size_t before = paths.size();
+		paths.erase(std::remove(paths.begin(), paths.end(), path), paths.end());
+		return paths.size() != before;
+	}
+
 	void PlayHistory::removeIf(bool (*drop)(const std::string&))
 	{
 		std::vector<std::string> kept;

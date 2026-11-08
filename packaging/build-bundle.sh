@@ -113,7 +113,8 @@ fi
 
 echo "== banana-player"
 rm -rf /tmp/bp-build
-cmake -S /src -B /tmp/bp-build -DCMAKE_BUILD_TYPE=Release -DBP_GLES=ON -DBP_NET=ON -DBP_TOOLS=OFF \
+# BP_WEB: libavformat from the FFmpeg above (its .pc files are in $PREFIX/lib/pkgconfig, on PKG_CONFIG_PATH)
+cmake -S /src -B /tmp/bp-build -DCMAKE_BUILD_TYPE=Release -DBP_GLES=ON -DBP_NET=ON -DBP_WEB=ON -DBP_TOOLS=OFF \
 	-DCMAKE_INSTALL_RPATH='$ORIGIN/../lib' -DCMAKE_BUILD_WITH_INSTALL_RPATH=ON >/dev/null
 cmake --build /tmp/bp-build -j$JOBS 2>&1 | grep -E "error|warning" || true
 /tmp/bp-build/core-test
@@ -136,6 +137,15 @@ cat > "$B/share/banana-player/fonts.conf" <<'CONF'
 </fontconfig>
 CONF
 cp /src/LICENSE /src/README.md "$B/"
+# licences of what's compiled in: the web dashboard's libraries (cpp-httplib, qrcodegen, htm, Sortable) and the fonts it serves
+L="$B/share/banana-player/licenses"
+mkdir -p "$L"
+cp /src/third_party/httplib/LICENSE "$L/cpp-httplib-LICENSE.txt"
+cp /src/third_party/qrcodegen/LICENSE "$L/qrcodegen-LICENSE.txt"
+cp /src/web/vendor/LICENSE-htm.txt "$L/htm-LICENSE.txt"
+cp /src/web/vendor/LICENSE-Sortable.txt "$L/Sortable-LICENSE.txt"
+cp /src/assets/fonts/licenses/PixelifySans-OFL.txt "$L/Pixelify-Sans-OFL.txt"
+cp /src/assets/fonts/licenses/Inter-LICENSE.txt "$L/Inter-LICENSE.txt"
 # the launcher (the Store's menu.launch, and what the Ports shelf's script runs), the version the Store reads
 # (package.version_file) and the tile's picture (menu.media.image)
 cp /src/packaging/launch.sh "$B/launch.sh"

@@ -15,6 +15,8 @@ namespace bp
 	enum Visualizer { VIS_BARS, VIS_WAVES, VIS_SPECTRUM, VIS_CIRCLE, VISUALIZERS };
 	// music only (a video never loops): all = back to the folder's first file after its last
 	enum Loop { LOOP_OFF, LOOP_ALL, LOOP_ONE, LOOPS };
+	// the clock in the bottom panel's header
+	enum ClockMode { CLOCK_24, CLOCK_12, CLOCK_OFF, CLOCKS };
 	const char* musicShowLabel(int v);
 	const char* visualizerLabel(int v);
 	const char* loopLabel(int v);
@@ -52,6 +54,8 @@ namespace bp
 		bool showHiddenFolders = false;
 		// the battery's percent beside its icon on the bottom panel (the icon is always there)
 		bool batteryPercent = false;
+		// the time left of the battery (Settings › Controls & screen): 24-hour, 12-hour or none
+		int clock = CLOCK_24;
 		// photos: the next one opens at the zoom (and the place in it) the last was left at; off: each at its size
 		bool keepPhotoZoom = true;
 		// the photo's pan area on the bottom panel: the left half (the default) or the right
@@ -72,6 +76,9 @@ namespace bp
 		EqGains eqGains{};
 		// music's sound effect (reverb, wide stereo...), whether or not the equalizer is on
 		SoundFx soundFx = SoundFx::None;
+		// the web dashboard (Settings › Web dashboard, quick settings): its server runs from the start while this is
+		// on, across restarts. Not a row of the switches: its page turns it on and off
+		bool webDashboard = false;
 	};
 
 	std::string serializeSettings(const Settings& s);

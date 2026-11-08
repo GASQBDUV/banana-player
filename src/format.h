@@ -18,4 +18,6 @@ namespace bp
 	std::string formatBytes(long long bytes);
 	// bits a second: 128000 -> "128 kb/s", 4500000 -> "4.5 Mb/s"
 	std::string formatBitrate(double bps);
+	// the header's clock: 14:32 -> "14:32", or "2:32 PM" (h12); midnight "0:05" / "12:05 AM"
+	std::string formatClock(int hour, int minute, bool h12);
 }

@@ -49,6 +49,14 @@ namespace bp
 		return buf;
 	}
 
+	std::string formatClock(int hour, int minute, bool h12)
+	{
+		char buf[16];
+		if (h12) snprintf(buf, sizeof buf, "%d:%02d %s", (hour + 11) % 12 + 1, minute, hour < 12 ? "AM" : "PM");
+		else snprintf(buf, sizeof buf, "%d:%02d", hour, minute);
+		return buf;
+	}
+
 	std::string formatBitrate(double bps)
 	{
 		char buf[32];

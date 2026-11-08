@@ -20,6 +20,11 @@
 #include "resume.h"
 #include "settings.h"
 #include "tracks.h"
+#include "json.h"
+#include "webauth.h"
+#include "webmedia.h"
+#include "webpath.h"
+#include "webstate.h"
 #include <chrono>
 #include <cmath>
 #include <cstdint>
@@ -30,6 +35,8 @@
 #include <iterator>
 #include <sys/stat.h>
 #include <unistd.h>
+#include <climits>
+#include <functional>
 #include <map>
 #include <set>
 #include <string>
@@ -368,6 +375,25 @@ static void testSettings()
 	CHECK_EQ(parseSettings("keep-network-history = no\n").keepNetHistory, false);
 	CHECK_EQ(parseSettings(serializeSettings(d)).keepNetHistory, true);
 	CHECK_EQ(parseSettings("remember-folder = yes\n").rememberFolder, true);
+	// the clock: 24-hour unless set; its three values kept; anything else the default
+	CHECK_EQ(d.clock, (int)CLOCK_24);
+	CHECK_EQ(parseSettings("clock = 12h\n").clock, (int)CLOCK_12);
+	CHECK_EQ(parseSettings("clock = off\n").clock, (int)CLOCK_OFF);
+	CHECK_EQ(parseSettings("clock = sundial\n").clock, (int)CLOCK_24);
+	Settings c12;
+	c12.clock = CLOCK_12;
+	CHECK_EQ(parseSettings(serializeSettings(c12)).clock, (int)CLOCK_12);
+}
+
+static void testClock()
+{
+	CHECK_EQ(formatClock(0, 5, false), std::string("0:05"));
+	CHECK_EQ(formatClock(12, 0, false), std::string("12:00"));
+	CHECK_EQ(formatClock(23, 59, false), std::string("23:59"));
+	CHECK_EQ(formatClock(0, 5, true), std::string("12:05 AM"));
+	CHECK_EQ(formatClock(12, 0, true), std::string("12:00 PM"));
+	CHECK_EQ(formatClock(23, 59, true), std::string("11:59 PM"));
+	CHECK_EQ(formatClock(14, 32, true), std::string("2:32 PM"));
 }
 
 static void testResume()
@@ -382,6 +408,7 @@ static void testResume()
 	ResumeEntry b;
 	b.path = "/data/roms/videos/tab\there.mp4";	// a tab in the name survives: the path is last
 	b.sid = 3;
+	b.duration = 52.25;
 	r.put(b);
 	r.lastAudioLang = "jpn";
 	r.lastFolder = "/data/roms/videos/Show";
@@ -399,6 +426,20 @@ static void testResume()
 	}
 	e = back.find(b.path);
 	CHECK_EQ(e != nullptr && e->position < 0 && e->aid == -1 && e->sid == 3, true);
+	CHECK_EQ(e ? e->duration : 0, 52.25);	// its length: a #duration line, after its own
+	e = back.find(a.path);
+	CHECK_EQ(e ? e->duration : 0, -1.0);	// none known: none written
+	CHECK_EQ(back.serialize(), r.serialize());
+	{
+		// a length with no entry before it is left out (and a broken line); after its entry, further down, it counts
+		ResumeStore old;
+		old.parse("#duration\t30.000\t/v/x.mkv\n12.000\t-1\t-1\t/v/x.mkv\n#duration\tbad\n");
+		CHECK_EQ(old.all().size(), (size_t)1);
+		CHECK_EQ(old.find("/v/x.mkv") ? old.find("/v/x.mkv")->duration : 0, -1.0);
+		old.parse("12.000\t-1\t-1\t/v/x.mkv\n5.000\t-1\t-1\t/v/y.mkv\n#duration\t30.000\t/v/x.mkv\n");
+		CHECK_EQ(old.find("/v/x.mkv") ? old.find("/v/x.mkv")->duration : 0, 30.0);
+		CHECK_EQ(old.find("/v/y.mkv") ? old.find("/v/y.mkv")->duration : 0, -1.0);
+	}
 	CHECK_EQ(back.lastAudioLang, std::string("jpn"));
 	CHECK_EQ(back.lastSubOff, true);
 	CHECK_EQ(back.lastFolder, std::string("/data/roms/videos/Show"));
@@ -494,6 +535,12 @@ static void testHistory()
 	PlayHistory back;
 	back.parse(h.serialize() + "/v/39\n");	// a repeat in the file is read once
 	CHECK_EQ(back.items() == h.items(), true);
+	// Remove from Recent: that one, the rest in their order
+	CHECK_EQ(back.remove("/v/38"), true);
+	CHECK_EQ(back.remove("/v/38"), false);
+	CHECK_EQ(back.items().size(), PlayHistory::MAX - 1);
+	CHECK_EQ(back.items()[0], std::string("/v/39"));
+	CHECK_EQ(back.items()[1], std::string("/v/37"));
 	back.clear();
 	CHECK_EQ(back.items().empty(), true);
 }
@@ -603,6 +650,13 @@ static void testPhoto()
 {
 	CHECK_EQ(isPhotoFile("IMG_0001.JPG"), true);
 	CHECK_EQ(isPhotoFile("a.webp"), true);
+	CHECK_EQ(yearFromDate("2021-05-03"), "2021");
+	CHECK_EQ(yearFromDate("20210503"), "2021");
+	CHECK_EQ(yearFromDate("May 1999"), "1999");
+	CHECK_EQ(yearFromDate("12"), "");
+	CHECK_EQ(yearFromDate("0000"), "");
+	CHECK_EQ(trackText(" 3/12 "), "3/12");
+	CHECK_EQ(trackText("x"), "");
 	CHECK_EQ(isPhotoFile("a.mkv"), false);
 	CHECK_EQ(isMediaFile("cover.jpg"), true);
 
@@ -1258,6 +1312,101 @@ static std::string plr(const std::vector<int>& r)
 	return s;
 }
 
+static void testLiked(PlaylistStore& st, const std::string& dir)
+{
+	using namespace bp;
+	CHECK_EQ(st.likedFile(), dir + "/.liked.m3u");
+	CHECK_EQ(st.isBuiltinFile(st.likedFile()), true);
+	CHECK_EQ(st.isBuiltinFile(dir + "/Extra.m3u8"), false);
+	auto li = st.list();
+	CHECK_EQ(li[0].builtin, true);
+	CHECK_EQ(li[0].name, std::string("Liked"));
+	for (size_t i = 1; i < li.size(); i++) CHECK_EQ(li[i].builtin, false);
+	CHECK_EQ(st.addTargets().size(), li.size() - 1);
+	for (const auto& i : st.addTargets()) CHECK_EQ(i.file != st.likedFile(), true);
+	// a user's own "Liked" is refused (the built-in holds the name), and can't land on the reserved file
+	std::string f;
+	CHECK_EQ(st.create("liked", f) == PlNameError::Taken, true);
+	// ...but one that already exists as a file coexists with it
+	writeFileAtomic(dir + "/Liked.m3u", "#EXTM3U\n/m/own.mp4\n");
+	CHECK_EQ(st.isLiked("/m/own.mp4"), false);
+	CHECK_EQ(st.list().size(), li.size() + 1);
+
+	CHECK_EQ(st.isLiked("/m/a.mp3"), false);
+	CHECK_EQ(st.setLiked("/m/a.mp3", "A", 10, true), true);
+	CHECK_EQ(st.setLiked("/m/b.mkv", "", -1, true), true);
+	CHECK_EQ(st.setLiked("/m/a.mp3", "A", 10, true), true);	// twice: nothing
+	CHECK_EQ(st.isLiked("/m/a.mp3"), true);
+	CHECK_EQ(st.likedCount(), 2);
+	CHECK_EQ(st.list()[0].count, 2);
+	Playlist pl;
+	int skp;
+	CHECK_EQ(st.load(st.likedFile(), pl, skp), true);
+	CHECK_EQ(pl.entries.size(), size_t(2));
+	CHECK_EQ(pl.entries[0].path, std::string("/m/b.mkv"));	// newest first
+	CHECK_EQ(pl.entries[0].title, std::string("b"));
+	CHECK_EQ(pl.entries[1].path, std::string("/m/a.mp3"));
+	CHECK_EQ(pl.entries[1].title, std::string("A"));
+	CHECK_EQ(st.containsPath(st.likedFile(), "/m/a.mp3"), true);
+	CHECK_EQ(st.containsPath(st.likedFile(), "/m/zz.mp3"), false);
+	// photos, non-media, relative paths
+	CHECK_EQ(st.setLiked("/m/p.jpg", "", -1, true), false);
+	CHECK_EQ(st.setLiked("/m/notes.txt", "", -1, true), false);
+	CHECK_EQ(st.setLiked("rel/a.mp3", "", -1, true), false);
+	CHECK_EQ(st.setLiked("", "", -1, true), false);
+	CHECK_EQ(st.isLiked("/m/p.jpg"), false);
+	// network
+	CHECK_EQ(st.setLiked("bpnet://srv/Music/s.flac", "S", -1, true), true);
+	CHECK_EQ(st.isLiked("bpnet://srv/Music/s.flac"), true);
+	CHECK_EQ(st.setLiked("bpnet://srv/Music/s.flac", "", -1, false), true);
+	CHECK_EQ(st.isLiked("bpnet://srv/Music/s.flac"), false);
+	// unlike removes every copy (a hand-edited file may hold two)
+	Playlist dup;
+	dup.file = st.likedFile();
+	dup.name = "Liked";
+	dup.entries = {{"/m/d.mp3", "d", -1}, {"/m/e.mp3", "e", -1}, {"/m/d.mp3", "d", -1}};
+	CHECK_EQ(st.save(dup), true);
+	CHECK_EQ(st.isLiked("/m/d.mp3"), true);	// the cache followed the save
+	CHECK_EQ(st.setLiked("/m/d.mp3", "", -1, false), true);
+	CHECK_EQ(st.isLiked("/m/d.mp3"), false);
+	CHECK_EQ(st.likedCount(), 1);
+	CHECK_EQ(st.setLiked("/m/never.mp3", "", -1, false), true);	// unliking what isn't liked: nothing
+	// at: back in its place (an Undo), clamped to the end; nothing fell off
+	std::string none2 = "x";
+	CHECK_EQ(st.setLiked("/m/u.mp3", "", -1, true, 1, &none2), true);
+	CHECK_EQ(none2, std::string());
+	CHECK_EQ(st.setLiked("/m/v.mp3", "", -1, true, 99), true);
+	CHECK_EQ(st.load(st.likedFile(), pl, skp), true);
+	CHECK_EQ(pl.entries.size(), size_t(3));
+	CHECK_EQ(pl.entries[0].path, std::string("/m/e.mp3"));
+	CHECK_EQ(pl.entries[1].path, std::string("/m/u.mp3"));
+	CHECK_EQ(pl.entries[2].path, std::string("/m/v.mp3"));
+	st.setLiked("/m/u.mp3", "", -1, false);
+	st.setLiked("/m/v.mp3", "", -1, false);
+	// can't be renamed or deleted
+	std::string nf;
+	CHECK_EQ(st.rename(st.likedFile(), "Faves", nf) == PlNameError::Builtin, true);
+	CHECK_EQ(st.remove(st.likedFile()), false);
+	CHECK_EQ(access(st.likedFile().c_str(), F_OK) == 0, true);
+	// the cap: the oldest fall off
+	dup.entries.clear();
+	for (size_t i = 0; i < PL_MAX_ENTRIES; i++) dup.entries.push_back({"/m/s" + std::to_string(i) + ".mp3", "", -1});
+	CHECK_EQ(st.save(dup), true);
+	std::string fell;
+	CHECK_EQ(st.setLiked("/m/new.mp3", "", -1, true, 0, &fell), true);
+	CHECK_EQ(fell, "/m/s" + std::to_string(PL_MAX_ENTRIES - 1) + ".mp3");	// said, for the web
+	CHECK_EQ(st.likedCount(), int(PL_MAX_ENTRIES));
+	CHECK_EQ(st.isLiked("/m/new.mp3"), true);
+	CHECK_EQ(st.isLiked("/m/s" + std::to_string(PL_MAX_ENTRIES - 1) + ".mp3"), false);
+	// a fresh store reads the same file; with no folder, nothing
+	PlaylistStore again(dir);
+	CHECK_EQ(again.isLiked("/m/new.mp3"), true);
+	PlaylistStore none("");
+	CHECK_EQ(none.list().size(), size_t(0));
+	CHECK_EQ(none.setLiked("/m/a.mp3", "", -1, true), false);
+	CHECK_EQ(none.isLiked("/m/a.mp3"), false);
+}
+
 static void testPlaylists()
 {
 	// round trip, quoted commas
@@ -1453,7 +1602,7 @@ static void testPlaylists()
 	std::string dir = root + "/playlists";
 	{
 		PlaylistStore st(dir);
-		CHECK_EQ(st.list().size(), size_t(0));
+		CHECK_EQ(st.list().size(), size_t(1));	// Liked, always
 		int ser = st.serial();
 		std::string f1, f2, f3, fx;
 		CHECK_EQ(st.create("beta 10", f1) == PlNameError::None, true);
@@ -1466,19 +1615,20 @@ static void testPlaylists()
 		CHECK_EQ(f4 != f3, true);
 		CHECK_EQ(st.serial() > ser, true);
 		auto li = st.list();
-		CHECK_EQ(li.size(), size_t(4));
-		CHECK_EQ(li[0].name, std::string("a:b"));
-		CHECK_EQ(li[1].name, std::string("a_b"));
-		CHECK_EQ(li[2].name, std::string("Beta 2"));	// natural order: 2 before 10
-		CHECK_EQ(li[3].name, std::string("beta 10"));
-		CHECK_EQ(li[0].count, 0);
+		CHECK_EQ(li.size(), size_t(5));
+		CHECK_EQ(li[0].builtin, true);
+		CHECK_EQ(li[1].name, std::string("a:b"));
+		CHECK_EQ(li[2].name, std::string("a_b"));
+		CHECK_EQ(li[3].name, std::string("Beta 2"));	// natural order: 2 before 10
+		CHECK_EQ(li[4].name, std::string("beta 10"));
+		CHECK_EQ(li[1].count, 0);
 
 		Playlist pl;
 		int skp;
 		CHECK_EQ(st.load(f2, pl, skp), true);
 		pl.entries = plv("abc");
 		CHECK_EQ(st.save(pl), true);
-		CHECK_EQ(st.list()[2].count, 3);
+		CHECK_EQ(st.list()[3].count, 3);
 		Playlist back;
 		CHECK_EQ(st.load(f2, back, skp), true);
 		CHECK_EQ(back.entries.size(), size_t(3));
@@ -1494,13 +1644,13 @@ static void testPlaylists()
 		CHECK_EQ(st.load(nf, back, skp), true);
 		CHECK_EQ(back.entries.size(), size_t(3));
 		CHECK_EQ(back.name, std::string("Gamma"));
-		CHECK_EQ(st.list().size(), size_t(4));
+		CHECK_EQ(st.list().size(), size_t(5));
 
 		// a stray .m3u8 and a non-playlist
 		writeFileAtomic(dir + "/Extra.m3u8", "#EXTM3U\n/m/a.mp4\n");
 		writeFileAtomic(dir + "/notes.txt", "x");
 		auto l2 = st.list();
-		CHECK_EQ(l2.size(), size_t(5));
+		CHECK_EQ(l2.size(), size_t(6));
 		bool seen = false;
 		for (const auto& i : l2)
 			if (i.name == "Extra" && i.count == 1) seen = true;
@@ -1509,8 +1659,9 @@ static void testPlaylists()
 		int ser2 = st.serial();
 		CHECK_EQ(st.remove(nf), true);
 		CHECK_EQ(st.serial() > ser2, true);
-		CHECK_EQ(st.list().size(), size_t(4));
+		CHECK_EQ(st.list().size(), size_t(5));
 		CHECK_EQ(st.remove(nf), false);
+		testLiked(st, dir);
 	}
 	{
 		std::string cmd = "rm -rf '" + root + "'";
@@ -1532,8 +1683,778 @@ static void testPlaylists()
 	printf("playlists: parse+serialize of 1000 entries took %.2f ms\n", ms);
 }
 
+
+static void testWeb()
+{
+	// PIN alphabet, uniformity, injected rng
+	CHECK_EQ(std::string(WEB_PIN_ALPHABET), std::string("34679ACDEFHJKMNPRTWXY"));
+	CHECK_EQ(strlen(WEB_PIN_ALPHABET), size_t(21));
+	{
+		uint32_t n = 0;
+		CHECK_EQ(makePin([&] { return n++; }), std::string("3467"));
+		CHECK_EQ(makePin([&] { return uint32_t(20); }), std::string("YYYY"));
+		// values at or past the largest multiple of 21 are skipped, not folded onto the first characters
+		const uint32_t limit = uint32_t(0x100000000ull - (0x100000000ull % 21));
+		std::vector<uint32_t> seq = {0xFFFFFFFFu, limit, limit - 1, 0, 1, 2};
+		size_t k = 0;
+		CHECK_EQ(makePin([&] { return seq[k++]; }), std::string("Y346"));
+		std::map<char, int> hist;
+		uint64_t x = 88172645463325252ull;
+		auto xr = [&] { x ^= x << 13; x ^= x >> 7; x ^= x << 17; return uint32_t(x >> 16); };
+		for (int i = 0; i < 21000; i++)
+			for (char c : makePin(xr)) hist[c]++;
+		CHECK_EQ(hist.size(), size_t(21));
+		for (auto& kv : hist) CHECK_EQ(kv.second > 3600 && kv.second < 4400, true);	// 4000 each
+		for (int i = 0; i < 50; i++) CHECK_EQ(validPin(makePin()), true);
+	}
+	CHECK_EQ(validPin("34AY"), true);
+	CHECK_EQ(validPin("34ay"), true);
+	CHECK_EQ(validPin("34A"), false);
+	CHECK_EQ(validPin("34AY3"), false);
+	CHECK_EQ(validPin("0OIL"), false);
+	CHECK_EQ(validPin("34A5"), false);
+	CHECK_EQ(validPin(""), false);
+	CHECK_EQ(validPin(std::string("34A\0", 4)), false);
+	CHECK_EQ(pinMatches("34ay", "34AY"), true);
+	CHECK_EQ(pinMatches("34AY", "34ay"), true);
+	CHECK_EQ(pinMatches("34AX", "34AY"), false);
+	CHECK_EQ(pinMatches("34A", "34AY"), false);
+	CHECK_EQ(pinMatches("34AYY", "34AY"), false);
+	CHECK_EQ(pinMatches("", "34AY"), false);
+	CHECK_EQ(pinMatches("", ""), true);
+
+	// PinGate
+	{
+		PinGate g;
+		int64_t t = 1000000;
+		PinResult r = g.attempt("1.1.1.1", true, t);
+		CHECK_EQ(r.ok, true);
+		CHECK_EQ(r.left, 5);
+		for (int i = 1; i <= 4; i++)
+		{
+			r = g.attempt("1.1.1.1", false, t += 1000);
+			CHECK_EQ(r.ok, false);
+			CHECK_EQ(r.left, 5 - i);
+			CHECK_EQ(r.retryAfterS, 0);
+		}
+		r = g.attempt("1.1.1.1", false, t += 1000);	// the 5th
+		int64_t lockT = t;
+		CHECK_EQ(r.left, 0);
+		CHECK_EQ(r.retryAfterS, 60);
+		CHECK_EQ(g.lockedFor("1.1.1.1", t), 60);
+		CHECK_EQ(g.lockedFor("1.1.1.1", t + 59001), 1);
+		CHECK_EQ(g.lockedFor("1.1.1.1", t + 60000), 0);
+		CHECK_EQ(g.lockedFor("2.2.2.2", t), 0);
+		// locked: the right PIN is refused too, and nothing is counted
+		r = g.attempt("1.1.1.1", true, t + 10000);
+		CHECK_EQ(r.ok, false);
+		CHECK_EQ(r.retryAfterS, 50);
+		// another address is untouched
+		r = g.attempt("2.2.2.2", false, t);
+		CHECK_EQ(r.left, 4);
+		// after it: 5 more, and the next lockout doubles
+		t = lockT + 60000;
+		for (int i = 0; i < 4; i++) g.attempt("1.1.1.1", false, t += 100);
+		r = g.attempt("1.1.1.1", false, t += 100);
+		CHECK_EQ(r.retryAfterS, 120);
+		t += 120000;
+		for (int i = 0; i < 4; i++) g.attempt("1.1.1.1", false, t += 100);
+		CHECK_EQ(g.attempt("1.1.1.1", false, t += 100).retryAfterS, 240);
+		// up to 15 minutes
+		int last = 0;
+		for (int round = 0; round < 6; round++)
+		{
+			t += 16 * 60 * 1000;
+			for (int i = 0; i < 5; i++) last = g.attempt("1.1.1.1", false, t += 100).retryAfterS;
+		}
+		CHECK_EQ(last, 900);
+		// a success resets that address
+		t += 16 * 60 * 1000;
+		g.attempt("1.1.1.1", false, t);
+		CHECK_EQ(g.attempt("1.1.1.1", true, t + 1).ok, true);
+		for (int i = 0; i < 4; i++) g.attempt("1.1.1.1", false, t += 100);
+		CHECK_EQ(g.attempt("1.1.1.1", false, t += 100).retryAfterS, 60);
+		// reset() forgets the lockouts
+		g.reset();
+		CHECK_EQ(g.lockedFor("1.1.1.1", t), 0);
+		CHECK_EQ(g.attempt("1.1.1.1", false, t).left, 4);
+	}
+	{
+		// 30 failures from many addresses within 10 minutes: rotate once
+		PinGate g;
+		int64_t t = 0;
+		int rotates = 0, at = -1;
+		for (int i = 0; i < 29; i++)
+		{
+			PinResult r = g.attempt("10.0.0." + std::to_string(i), false, t += 1000);
+			if (r.rotate) { rotates++; at = i; }
+		}
+		CHECK_EQ(rotates, 0);
+		PinResult r = g.attempt("10.0.1.1", false, t += 1000);
+		CHECK_EQ(r.rotate, true);
+		CHECK_EQ(at, -1);
+		// the window starts again
+		for (int i = 0; i < 29; i++) CHECK_EQ(g.attempt("10.0.2." + std::to_string(i), false, t += 1000).rotate, false);
+		CHECK_EQ(g.attempt("10.0.3.1", false, t += 1000).rotate, true);
+		// spread over more than 10 minutes: no rotation
+		PinGate h;
+		t = 0;
+		bool any = false;
+		for (int i = 0; i < 100; i++) any = h.attempt("10.1.0." + std::to_string(i), false, t += 30000).rotate || any;
+		CHECK_EQ(any, false);
+		// one address that locks out doesn't count attempts it's refused
+		PinGate k;
+		t = 0;
+		for (int i = 0; i < 100; i++) any = k.attempt("9.9.9.9", false, t += 10).rotate || any;
+		CHECK_EQ(any, false);
+	}
+
+	// tokens, sessions
+	{
+		uint32_t n = 0;
+		std::string tk = newToken([&] { return n++; });
+		CHECK_EQ(tk.size(), size_t(64));
+		CHECK_EQ(tk.substr(0, 16), std::string("0000000001000000"));
+		std::string t1 = newToken(), t2 = newToken();
+		CHECK_EQ(t1.size(), size_t(64));
+		CHECK_EQ(t1 != t2, true);
+		CHECK_EQ(t1.find_first_not_of("0123456789abcdef"), std::string::npos);
+		CHECK_EQ(hashToken("abc"), std::string("ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"));
+		CHECK_EQ(hashToken(""), std::string("e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"));
+
+		SessionStore s;
+		std::string h1 = hashToken("one"), h2 = hashToken("two");
+		s.add(h1, 1000 + WEB_SESSION_S);
+		s.add(h2, 500);
+		CHECK_EQ(s.size(), size_t(2));
+		bool renew = true;
+		CHECK_EQ(s.check(h1, 1000, renew), true);
+		CHECK_EQ(renew, false);
+		CHECK_EQ(s.check(h1, 1000 + WEB_SESSION_S / 2 + 1, renew), true);
+		CHECK_EQ(renew, true);
+		CHECK_EQ(s.check(h1, 1000 + WEB_SESSION_S, renew), false);	// expired exactly now
+		CHECK_EQ(s.check(h2, 500, renew), false);
+		CHECK_EQ(s.check(h2, 499, renew), true);
+		CHECK_EQ(s.check("nope", 0, renew), false);
+		CHECK_EQ(renew, false);
+		s.renew(h2, 9000);
+		CHECK_EQ(s.check(h2, 8000, renew), true);
+		s.renew("unknown", 9000);
+		CHECK_EQ(s.size(), size_t(2));
+		std::string text = s.serialize();
+		SessionStore s2;
+		s2.add(hashToken("stale"), 1);
+		s2.parse(text);
+		CHECK_EQ(s2.size(), size_t(2));
+		CHECK_EQ(s2.serialize(), text);
+		CHECK_EQ(s2.check(h1, 1000, renew), true);
+		s2.parse("garbage\n" + h1 + "\t12x\n" + h1 + "\t77\nshort\t5\n\n" + h2 + "\n");
+		CHECK_EQ(s2.size(), size_t(1));
+		CHECK_EQ(s2.serialize(), h1 + "\t77\n");
+		s2.remove(h1);
+		CHECK_EQ(s2.size(), size_t(0));
+		s.clear();
+		CHECK_EQ(s.size(), size_t(0));
+		CHECK_EQ(s.serialize(), std::string());
+	}
+
+	// cookies
+	CHECK_EQ(cookieValue("bp_s=abc", "bp_s"), std::string("abc"));
+	CHECK_EQ(cookieValue("a=1; bp_s=abc; b=2", "bp_s"), std::string("abc"));
+	CHECK_EQ(cookieValue("a=1;bp_s=abc;b=2", "bp_s"), std::string("abc"));
+	CHECK_EQ(cookieValue("a=1;   bp_s=abc  ", "bp_s"), std::string("abc"));
+	CHECK_EQ(cookieValue("xbp_s=zzz; bp_s=abc", "bp_s"), std::string("abc"));
+	CHECK_EQ(cookieValue("bp_s2=zzz", "bp_s"), std::string(""));
+	CHECK_EQ(cookieValue("bp_s=", "bp_s"), std::string(""));
+	CHECK_EQ(cookieValue("bp_s", "bp_s"), std::string(""));
+	CHECK_EQ(cookieValue("", "bp_s"), std::string(""));
+	CHECK_EQ(cookieValue("a=1; b=2", "bp_s"), std::string(""));
+	CHECK_EQ(cookieValue("bp_s=first; bp_s=second", "bp_s"), std::string("first"));
+	CHECK_EQ(cookieValue("a=b=c", "a"), std::string("b=c"));
+
+	// resolveVirtual on a real tree
+	{
+		char tpl[] = "/tmp/bp-web-XXXXXX";
+		char* made = mkdtemp(tpl);
+		CHECK_EQ(made != nullptr, true);
+		std::string base = made ? made : "/tmp/bp-web-none";
+		auto sh = [](const std::string& c) { return system(c.c_str()); };
+		sh("mkdir -p '" + base + "/card/Music/sub' '" + base + "/card2' '" + base + "/outside' '" + base + "/card/state' '" +
+			base + "/card/.hidden' '" + base + "/cardx'");
+		sh("echo a > '" + base + "/card/Music/a.mp3'; echo s > '" + base + "/outside/secret.mp3'; echo x > '" + base +
+			"/card/state/web.conf'; echo h > '" + base + "/card/.hidden/h.mp3'; echo b > '" + base + "/cardx/b.mp3'");
+		sh("ln -s '" + base + "/outside' '" + base + "/card/Music/escape'; ln -s '" + base + "/card/Music/a.mp3' '" + base +
+			"/card/Music/inlink.mp3'; ln -s '" + base + "/outside/secret.mp3' '" + base + "/card/Music/leak.mp3'; ln -s '" +
+			base + "/nowhere' '" + base + "/card/Music/dangling'; ln -s '" + base + "/cardx' '" + base + "/card/sib'");
+		std::string card, card2;
+		{
+			char b[PATH_MAX];
+			card = realpath((base + "/card").c_str(), b) ? b : "";
+			card2 = realpath((base + "/card2").c_str(), b) ? b : "";
+		}
+		std::vector<WebRoot> roots = {{"This card", base + "/card"}, {"Second", base + "/card2"}};
+		std::vector<std::string> deny = {base + "/card/state", "/data/home"};
+		std::string real;
+		auto ok = [&](const std::string& v, bool create = false) { real.clear(); return resolveVirtual(roots, deny, v, real, create); };
+
+		CHECK_EQ(ok("0"), true);
+		CHECK_EQ(real, card);
+		CHECK_EQ(ok("0/"), true);
+		CHECK_EQ(real, card);
+		CHECK_EQ(ok("1"), true);
+		CHECK_EQ(real, card2);
+		CHECK_EQ(ok("0/Music"), true);
+		CHECK_EQ(real, card + "/Music");
+		CHECK_EQ(ok("0/Music/"), true);
+		CHECK_EQ(real, card + "/Music");
+		CHECK_EQ(ok("0/Music/a.mp3"), true);
+		CHECK_EQ(real, card + "/Music/a.mp3");
+		CHECK_EQ(ok("0/Music/inlink.mp3"), true);	// a link that stays inside is fine
+		CHECK_EQ(real, card + "/Music/a.mp3");
+		// refusals
+		for (const char* bad : {"", "/", "/0", "0//Music", "0/Music//a.mp3", "0/../outside", "0/Music/../../outside",
+			"0/..", "0/.", "0/./Music", "0/.hidden", "0/.hidden/h.mp3", "0/Music/.x", "2", "2/", "99/Music", "-1", "x/Music",
+			"+0", " 0", "0 ", "00000000000/x", "0/missing", "0/Music/escape", "0/Music/escape/secret.mp3", "0/Music/leak.mp3",
+			"0/Music/dangling", "0/sib", "0/sib/b.mp3", "0/state", "0/state/web.conf", "0/state/"})
+		{
+			CHECK_EQ(ok(bad), false);
+			if (ok(bad)) fprintf(stderr, "  accepted: %s\n", bad);
+		}
+		CHECK_EQ(ok(std::string("0/Music/a.mp3\0x", 15)), false);
+		CHECK_EQ(ok(std::string("0/Mu\0sic", 8)), false);
+		real = "unchanged";
+		CHECK_EQ(resolveVirtual(roots, deny, "0/..", real, false), false);
+		CHECK_EQ(real, std::string("unchanged"));
+		// a root whose name is a prefix of a sibling (card vs cardx) doesn't leak through "card/../cardx"
+		CHECK_EQ(ok("0/../cardx/b.mp3"), false);
+		// deny matches the real path: a link into the state folder is refused too
+		sh("ln -s '" + base + "/card/state' '" + base + "/card/Music/tolink'");
+		CHECK_EQ(ok("0/Music/tolink/web.conf"), false);
+		CHECK_EQ(ok("0/Music/tolink"), false);
+		// deny with a trailing slash, and one that doesn't exist yet
+		CHECK_EQ(resolveVirtual(roots, {base + "/card/Music/"}, "0/Music/a.mp3", real, false), false);
+		CHECK_EQ(resolveVirtual(roots, {base + "/card/Mus"}, "0/Music/a.mp3", real, false), true);	// "/Mus" isn't "/Music"
+		CHECK_EQ(resolveVirtual(roots, {base + "/card/Later"}, "0/Later", real, true), false);	// not made, and under deny
+		// a root that is missing refuses
+		CHECK_EQ(resolveVirtual({{"gone", base + "/missing"}}, deny, "0", real, false), false);
+		CHECK_EQ(resolveVirtual({}, deny, "0", real, false), false);
+
+		// forCreate
+		CHECK_EQ(ok("0/Music/new.mp3", true), true);
+		CHECK_EQ(real, card + "/Music/new.mp3");
+		CHECK_EQ(ok("0/Music/a.mp3", true), true);	// existing is fine: the caller checks the clash
+		CHECK_EQ(real, card + "/Music/a.mp3");
+		CHECK_EQ(ok("0/Top.srt", true), true);
+		CHECK_EQ(real, card + "/Top.srt");
+		CHECK_EQ(ok("0/Music/new folder/", true), true);
+		CHECK_EQ(real, card + "/Music/new folder");
+		CHECK_EQ(ok("0/Music/inlink.mp3", true), true);	// a link inside stays
+		for (const char* bad : {"0", "0/", "0/Music/sub/x/y.mp3", "0/nope/x.mp3", "0/Music/.new", "0/Music/a:b.mp3",
+			"0/Music/a?.mp3", "0/Music/ ", "0/Music/escape/new.mp3", "0/Music/leak.mp3", "0/Music/dangling", "0/Music/../x.mp3",
+			"0/Music//x.mp3", "0/state/new.mp3", "0/Music/a\\b", "2/x.mp3", "0/.hidden/new.mp3", "0/sib/new.mp3"})
+		{
+			CHECK_EQ(ok(bad, true), false);
+			if (ok(bad, true)) fprintf(stderr, "  create accepted: %s\n", bad);
+		}
+		CHECK_EQ(ok(std::string("0/Music/a\0.mp3", 14), true), false);
+		CHECK_EQ(ok(std::string(300, 'a').insert(0, "0/Music/"), true), false);	// too long a name
+
+		// toVirtual
+		CHECK_EQ(toVirtual(roots, card), std::string("0"));
+		CHECK_EQ(toVirtual(roots, card + "/Music/a.mp3"), std::string("0/Music/a.mp3"));
+		CHECK_EQ(toVirtual(roots, base + "/card/Music/a.mp3"), std::string("0/Music/a.mp3"));	// unresolved base too
+		CHECK_EQ(toVirtual(roots, card2 + "/x/y.mp3"), std::string("1/x/y.mp3"));	// not there: still by name
+		CHECK_EQ(toVirtual(roots, card + "/Music/escape/secret.mp3"), std::string(""));	// resolves outside
+		CHECK_EQ(toVirtual(roots, base + "/cardx/b.mp3"), std::string(""));
+		CHECK_EQ(toVirtual(roots, base), std::string(""));
+		CHECK_EQ(toVirtual(roots, "/etc/passwd"), std::string(""));
+		CHECK_EQ(toVirtual(roots, ""), std::string(""));
+		CHECK_EQ(toVirtual({}, card), std::string(""));
+		// the most specific root wins when one sits in another
+		CHECK_EQ(toVirtual({{"a", base + "/card"}, {"b", base + "/card/Music"}}, card + "/Music/a.mp3"), std::string("1/a.mp3"));
+
+		sh("rm -rf '" + base + "'");
+	}
+
+	// names
+	CHECK_EQ(validName("a.mp3"), true);
+	CHECK_EQ(validName("My Song (live) [2020] #1 & more, 'ok'.flac"), true);
+	CHECK_EQ(validName("caf\xC3\xA9 \xE6\x97\xA5\xE6\x9C\xAC.mp3"), true);
+	CHECK_EQ(validName(std::string(255, 'a')), true);
+	CHECK_EQ(validName(std::string(256, 'a')), false);
+	CHECK_EQ(validName(std::string(86, '\xE6') ), true);	// 86 bytes, bytes not characters
+	CHECK_EQ(validName(std::string(128, '\xC3') + std::string(128, 'a')), false);
+	CHECK_EQ(validName(""), false);
+	CHECK_EQ(validName(" "), false);
+	CHECK_EQ(validName("   "), false);
+	CHECK_EQ(validName("."), false);
+	CHECK_EQ(validName(".."), false);
+	CHECK_EQ(validName("..."), true);
+	CHECK_EQ(validName(" a "), true);
+	for (char c : std::string("/\\<>:\"|?*"))
+	{
+		CHECK_EQ(validName(std::string("a") + c + "b"), false);
+		CHECK_EQ(validName(std::string(1, c)), false);
+	}
+	CHECK_EQ(validName("a\tb"), false);
+	CHECK_EQ(validName("a\nb"), false);
+	CHECK_EQ(validName(std::string("a\0b", 3)), false);
+	CHECK_EQ(validName("a\x7f"), false);
+	CHECK_EQ(validName("a\x1f"), false);
+	CHECK_EQ(allowedFileType("a.mp3"), true);
+	CHECK_EQ(allowedFileType("A.MKV"), true);
+	CHECK_EQ(allowedFileType("a.jpg"), true);
+	CHECK_EQ(allowedFileType("cover.PNG"), true);
+	for (const char* e : {"srt", "ass", "ssa", "vtt", "sub", "idx", "lrc", "SRT"})
+		CHECK_EQ(allowedFileType(std::string("x.") + e), true);
+	for (const char* n : {"x.exe", "x.sh", "x.txt", "x.m3u", "x", "x.", ".mp3x", "a.mp3.exe", "x.html", "x.zip"})
+		CHECK_EQ(allowedFileType(n), false);
+
+	// addresses
+	for (const char* ip : {"127.0.0.1", "127.255.255.255", "10.0.0.1", "10.255.255.255", "172.16.0.1", "172.31.255.255",
+		"192.168.0.1", "192.168.255.255", "169.254.1.1", "::1", "fe80::1", "fe80::abcd%wlan0", "febf::1", "fc00::1",
+		"fd12:3456::1", "fdff::1", "::ffff:192.168.1.5", "::ffff:127.0.0.1", "::ffff:10.1.1.1"})
+	{
+		CHECK_EQ(privateAddress(ip), true);
+		if (!privateAddress(ip)) fprintf(stderr, "  not private: %s\n", ip);
+	}
+	for (const char* ip : {"8.8.8.8", "172.15.255.255", "172.32.0.1", "192.167.1.1", "192.169.1.1", "11.0.0.1", "169.253.1.1",
+		"0.0.0.0", "100.64.0.1", "1.1.1.1", "2001:db8::1", "2606:4700::1111", "fec0::1", "fe00::1", "fb00::1", "fe::1",
+		"::", "::2", "::ffff:8.8.8.8", "::ffff:172.32.0.1", "", "localhost", "evil.com", "192.168.1", "192.168.1.256",
+		"192.168.1.1.1", "not an ip", "[::1]", "::1x", " 10.0.0.1"})
+	{
+		CHECK_EQ(privateAddress(ip), false);
+		if (privateAddress(ip)) fprintf(stderr, "  private: %s\n", ip);
+	}
+	for (const char* h : {"192.168.1.5", "192.168.1.5:8080", "localhost", "localhost:8080", "LOCALHOST:80", "127.0.0.1:8081",
+		"[::1]", "[::1]:8080", "[fe80::1]:80", "10.0.0.1:1", "8.8.8.8", "[2001:db8::1]:8080"})
+	{
+		CHECK_EQ(hostAllowed(h), true);
+		if (!hostAllowed(h)) fprintf(stderr, "  host refused: %s\n", h);
+	}
+	for (const char* h : {"", "evil.com", "evil.com:8080", "192.168.1.5.evil.com", "localhost.evil.com", "localhost.", "foo.localhost",
+		"banana.local", "192.168.1.5:", "192.168.1.5:abc", "192.168.1.5:123456", "192.168.1.5:80:80", "::1", "[::1", "[::1]8080",
+		"[::1]:", "[::1]:x", "[192.168.1.5]", "[evil]", ":8080", "192.168.1", "192.168.1.256", "1.2.3", " 192.168.1.5",
+		"192.168.1.5 ", "0x7f.0.0.1", "2130706433", "192.168.1.5/", "user@192.168.1.5", "[::1]:8080:1"})
+	{
+		CHECK_EQ(hostAllowed(h), false);
+		if (hostAllowed(h)) fprintf(stderr, "  host allowed: %s\n", h);
+	}
+	CHECK_EQ(interfaceRank("wlan0"), 3);
+	CHECK_EQ(interfaceRank("wlan1"), 3);
+	CHECK_EQ(interfaceRank("eth0"), 2);
+	CHECK_EQ(interfaceRank("enp3s0"), 2);
+	CHECK_EQ(interfaceRank("en0"), 2);
+	CHECK_EQ(interfaceRank("br0"), 1);
+	CHECK_EQ(interfaceRank("tun0"), 1);
+	CHECK_EQ(interfaceRank("wwan0"), 1);
+	CHECK_EQ(interfaceRank("lo"), 0);
+	CHECK_EQ(interfaceRank("usb0"), 0);
+	CHECK_EQ(interfaceRank("docker0"), 0);
+	CHECK_EQ(interfaceRank("veth1a2b"), 0);
+	CHECK_EQ(interfaceRank(""), 1);
+
+	// JSON
+	{
+		JsonWriter j;
+		j.obj().key("a").num(1).key("b").str("x").key("c").arr().num(1.5).num(int64_t(-7)).boolean(true).null().end()
+			.key("d").obj().end().key("e").arr().end().key("f").obj().key("g").boolean(false).end().end();
+		CHECK_EQ(j.out(), std::string("{\"a\":1,\"b\":\"x\",\"c\":[1.5,-7,true,null],\"d\":{},\"e\":[],\"f\":{\"g\":false}}"));
+		JsonWriter k;
+		k.arr().obj().key("p").str("q").end().obj().end().arr().num(1).end().end();
+		CHECK_EQ(k.out(), std::string("[{\"p\":\"q\"},{},[1]]"));
+		JsonWriter r;
+		r.obj().key("x").raw("{\"y\":[1,2]}").key("z").raw("").key("w").num(2).end();
+		CHECK_EQ(r.out(), std::string("{\"x\":{\"y\":[1,2]},\"z\":null,\"w\":2}"));
+		JsonWriter u;
+		u.arr().num(size_t(5)).num(int(-1)).num(uint64_t(1) << 40).num(3.0f).num(0.1).num(1e20).num(-0.0).end();
+		CHECK_EQ(u.out(), std::string("[5,-1,1099511627776,3,0.1,1e+20,-0]"));
+		JsonWriter n;
+		n.arr().num(std::nan("")).num(INFINITY).num(-INFINITY).end();
+		CHECK_EQ(n.out(), std::string("[null,null,null]"));
+		JsonWriter v;
+		v.arr().num(123456789.123456789).num(1.0 / 3).end();
+		CHECK_EQ(v.out(), std::string("[123456789.12345679,0.3333333333333333]"));
+		JsonWriter e;
+		CHECK_EQ(e.out(), std::string());
+		e.str("x");
+		CHECK_EQ(e.out(), std::string("\"x\""));
+	}
+	CHECK_EQ(JsonWriter::escape("a\"b\\c/d"), std::string("\"a\\\"b\\\\c/d\""));
+	CHECK_EQ(JsonWriter::escape("\b\f\n\r\t"), std::string("\"\\b\\f\\n\\r\\t\""));
+	CHECK_EQ(JsonWriter::escape(std::string("\x01\x1f\x00", 3)), std::string("\"\\u0001\\u001f\\u0000\""));
+	CHECK_EQ(JsonWriter::escape("\x7f"), std::string("\"\x7f\""));
+	CHECK_EQ(JsonWriter::escape("caf\xC3\xA9 \xE6\x97\xA5 \xF0\x9F\x8E\xB5"), std::string("\"caf\xC3\xA9 \xE6\x97\xA5 \xF0\x9F\x8E\xB5\""));
+	const std::string FFFD = "\xEF\xBF\xBD";
+	CHECK_EQ(JsonWriter::escape("a\xFF" "b"), "\"a" + FFFD + "b\"");
+	CHECK_EQ(JsonWriter::escape("\x80"), "\"" + FFFD + "\"");
+	CHECK_EQ(JsonWriter::escape("a\xC3"), "\"a" + FFFD + "\"");	// cut short
+	CHECK_EQ(JsonWriter::escape("\xC3("), "\"" + FFFD + "(\"");
+	CHECK_EQ(JsonWriter::escape("\xC0\xAF"), "\"" + FFFD + FFFD + "\"");	// overlong
+	CHECK_EQ(JsonWriter::escape("\xE0\x80\x80"), "\"" + FFFD + FFFD + FFFD + "\"");
+	CHECK_EQ(JsonWriter::escape("\xED\xA0\x80"), "\"" + FFFD + FFFD + FFFD + "\"");	// a surrogate
+	CHECK_EQ(JsonWriter::escape("\xF4\x90\x80\x80"), "\"" + FFFD + FFFD + FFFD + FFFD + "\"");	// past U+10FFFF
+	CHECK_EQ(JsonWriter::escape("\xF0\x9F\x8E"), "\"" + FFFD + FFFD + FFFD + "\"");
+	CHECK_EQ(JsonWriter::escape("\xE2\x82\xAC\xE2\x82"), "\"\xE2\x82\xAC" + FFFD + FFFD + "\"");
+
+	// playability
+	CHECK_EQ(std::string(mimeFor("a.mp3")), std::string("audio/mpeg"));
+	CHECK_EQ(std::string(mimeFor("A.MP3")), std::string("audio/mpeg"));
+	CHECK_EQ(std::string(mimeFor("a.m4a")), std::string("audio/mp4"));
+	CHECK_EQ(std::string(mimeFor("a.flac")), std::string("audio/flac"));
+	CHECK_EQ(std::string(mimeFor("a.opus")), std::string("audio/ogg"));
+	CHECK_EQ(std::string(mimeFor("a.wav")), std::string("audio/wav"));
+	CHECK_EQ(std::string(mimeFor("a.mp4")), std::string("video/mp4"));
+	CHECK_EQ(std::string(mimeFor("a.webm")), std::string("video/webm"));
+	CHECK_EQ(std::string(mimeFor("a.mkv")), std::string("video/x-matroska"));
+	CHECK_EQ(std::string(mimeFor("a.jpg")), std::string("image/jpeg"));
+	CHECK_EQ(std::string(mimeFor("a.jpeg")), std::string("image/jpeg"));
+	CHECK_EQ(std::string(mimeFor("a.png")), std::string("image/png"));
+	CHECK_EQ(std::string(mimeFor("a.vtt")), std::string("text/vtt; charset=utf-8"));
+	CHECK_EQ(std::string(mimeFor("index.html")), std::string("text/html; charset=utf-8"));
+	CHECK_EQ(std::string(mimeFor("app.js")), std::string("text/javascript; charset=utf-8"));
+	CHECK_EQ(std::string(mimeFor("style.css")), std::string("text/css; charset=utf-8"));
+	CHECK_EQ(std::string(mimeFor("sprite.svg")), std::string("image/svg+xml"));
+	CHECK_EQ(std::string(mimeFor("Inter.ttf")), std::string("font/ttf"));
+	CHECK_EQ(std::string(mimeFor("x.woff2")), std::string("font/woff2"));
+	CHECK_EQ(std::string(mimeFor("OFL.txt")), std::string("text/plain; charset=utf-8"));
+	CHECK_EQ(std::string(mimeFor("a.json")), std::string("application/json; charset=utf-8"));
+	CHECK_EQ(std::string(mimeFor("a.xyz")), std::string("application/octet-stream"));
+	CHECK_EQ(std::string(mimeFor("noext")), std::string("application/octet-stream"));
+	CHECK_EQ(std::string(mimeFor("")), std::string("application/octet-stream"));
+
+	CHECK_EQ(playableByName("a.mp3") == Playable::Yes, true);
+	CHECK_EQ(playableByName("a.M4A") == Playable::Yes, true);
+	CHECK_EQ(playableByName("a.flac") == Playable::Yes, true);
+	CHECK_EQ(playableByName("a.jpg") == Playable::Yes, true);
+	CHECK_EQ(playableByName("a.mp4") == Playable::Maybe, true);
+	CHECK_EQ(playableByName("a.mkv") == Playable::Maybe, true);
+	CHECK_EQ(playableByName("a.webm") == Playable::Maybe, true);
+	CHECK_EQ(playableByName("a.ape") == Playable::No, true);
+	CHECK_EQ(playableByName("a.wma") == Playable::No, true);
+	CHECK_EQ(playableByName("a.avi") == Playable::No, true);
+	CHECK_EQ(playableByName("a.xyz") == Playable::No, true);
+	CHECK_EQ(playableByName("noext") == Playable::No, true);
+
+	const char* MP4 = "mov,mp4,m4a,3gp,3g2,mj2";
+	const char* MKV = "matroska,webm";
+	auto P = [](const char* c, const char* v, const char* a) { return playability(c, v, a); };
+	// yes
+	CHECK_EQ(P("mp3", "", "mp3") == Playable::Yes, true);
+	CHECK_EQ(P("mp3", "mjpeg", "mp3") == Playable::Maybe, true);	// cover art counts as a video stream: left to the browser
+	CHECK_EQ(P("aac", "", "aac") == Playable::Yes, true);
+	CHECK_EQ(P(MP4, "", "aac") == Playable::Yes, true);
+	CHECK_EQ(P("flac", "", "flac") == Playable::Yes, true);
+	CHECK_EQ(P("ogg", "", "vorbis") == Playable::Yes, true);
+	CHECK_EQ(P("ogg", "", "opus") == Playable::Yes, true);
+	CHECK_EQ(P("wav", "", "pcm_s16le") == Playable::Yes, true);
+	CHECK_EQ(P("wav", "", "pcm_s24le") == Playable::Yes, true);
+	CHECK_EQ(P(MP4, "h264", "aac") == Playable::Yes, true);
+	CHECK_EQ(P(MP4, "h264", "") == Playable::Yes, true);
+	CHECK_EQ(P(MP4, "vp9", "opus") == Playable::Yes, true);
+	CHECK_EQ(P(MP4, "av1", "aac") == Playable::Yes, true);
+	CHECK_EQ(P(MKV, "vp8", "vorbis") == Playable::Yes, true);
+	CHECK_EQ(P(MKV, "vp9", "opus") == Playable::Yes, true);
+	CHECK_EQ(P(MKV, "av1", "opus") == Playable::Yes, true);
+	CHECK_EQ(P("MOV,MP4", "H264", "AAC") == Playable::Yes, true);
+	// maybe
+	CHECK_EQ(P(MP4, "hevc", "aac") == Playable::Maybe, true);
+	CHECK_EQ(P(MKV, "h264", "aac") == Playable::Maybe, true);
+	CHECK_EQ(P(MKV, "h264", "opus") == Playable::Maybe, true);
+	CHECK_EQ(P(MKV, "vp9", "aac") == Playable::Maybe, true);
+	CHECK_EQ(P(MKV, "", "flac") == Playable::Maybe, true);
+	CHECK_EQ(P(MP4, "", "alac") == Playable::Maybe, true);
+	CHECK_EQ(P(MP4, "h264", "alac") == Playable::Maybe, true);
+	CHECK_EQ(P("ogg", "theora", "vorbis") == Playable::Maybe, true);
+	CHECK_EQ(P("whatever", "h264", "aac") == Playable::Maybe, true);
+	CHECK_EQ(P(MP4, "h264", "ac3") == Playable::No, true);	// silent in Chrome and Firefox
+	CHECK_EQ(P(MP4, "h264", "eac3") == Playable::No, true);
+	CHECK_EQ(P(MKV, "h264", "ac3") == Playable::No, true);
+	CHECK_EQ(P("ac3", "", "ac3") == Playable::No, true);
+	CHECK_EQ(P("eac3", "", "eac3") == Playable::No, true);
+	// no
+	CHECK_EQ(P("ape", "", "ape") == Playable::No, true);
+	CHECK_EQ(P("asf", "wmv3", "wmav2") == Playable::No, true);
+	CHECK_EQ(P("asf", "", "wmav2") == Playable::No, true);
+	CHECK_EQ(P(MP4, "h264", "wmapro") == Playable::No, true);
+	CHECK_EQ(P(MKV, "h264", "dts") == Playable::No, true);
+	CHECK_EQ(P("dts", "", "dts") == Playable::No, true);
+	CHECK_EQ(P(MKV, "h264", "truehd") == Playable::No, true);
+	CHECK_EQ(P(MP4, "mpeg4", "aac") == Playable::No, true);
+	CHECK_EQ(P("avi", "mpeg4", "mp3") == Playable::No, true);
+	CHECK_EQ(P("avi", "h264", "aac") == Playable::No, true);
+	CHECK_EQ(P("mpeg", "mpeg2video", "mp2") == Playable::No, true);
+	CHECK_EQ(P(MP4, "mpeg2video", "aac") == Playable::No, true);
+	CHECK_EQ(P("mpegts", "h264", "aac") == Playable::No, true);
+	CHECK_EQ(P("avi", "msmpeg4v3", "mp3") == Playable::No, true);
+	CHECK_EQ(P(MP4, "", "") == Playable::No, true);
+	CHECK_EQ(P("", "", "") == Playable::No, true);
+	CHECK_EQ(P(MP4, "none", "none") == Playable::No, true);
+
+	// subtitles as WebVTT
+	CHECK_EQ(vttTimestamp(3723.4567), std::string("01:02:03.457"));
+	CHECK_EQ(vttTimestamp(-1), std::string("00:00:00.000"));
+	CHECK_EQ(vttTimestamp(0.5), std::string("00:00:00.500"));
+	CHECK_EQ(assCueText("{\\an8}Hello\\Nworld"), std::string("Hello\nworld"));
+	CHECK_EQ(assCueText("a\\hb"), std::string("a b"));
+	CHECK_EQ(assCueText("{\\i1}Hi{\\i0} there"), std::string("<i>Hi</i> there"));
+	CHECK_EQ(assCueText("x{\\p1}m 0 0 l 10 0 10 10{\\p0}y"), std::string("xy"));
+	CHECK_EQ(assCueText("a < b & c, d"), std::string("a &lt; b &amp; c, d"));
+	CHECK_EQ(vttCue(1, 2, "Hi"), std::string("WEBVTT\n\n00:00:01.000 --> 00:00:02.000\nHi\n\n"));
+	CHECK_EQ(vttCue(1, 1, "Hi"), std::string(""));
+	CHECK_EQ(vttCue(1, 2, " \n"), std::string(""));
+	CHECK_EQ(vttCue(1, 2, "a\n\nb"), std::string("WEBVTT\n\n00:00:01.000 --> 00:00:02.000\na\nb\n\n"));
+	CHECK_EQ(subtitleFileToVtt("srt", "\xEF\xBB\xBF" "1\r\n00:00:01,000 --> 00:00:02,500\r\n{\\an8}<i>Hi</i> <font color=red>x</font>\r\nthere\r\n\r\n2\r\n0:00:03,5 --> 0:00:04,000 X1:1\r\n&\r\n"),
+		std::string("WEBVTT\n\n00:00:01.000 --> 00:00:02.500\n<i>Hi</i> x\nthere\n\n00:00:03.500 --> 00:00:04.000\n&amp;\n\n"));
+	CHECK_EQ(subtitleFileToVtt("SRT", "1\n00:00:01,000 --> 00:00:02,000\ncaf\xE9" "\n"),
+		std::string("WEBVTT\n\n00:00:01.000 --> 00:00:02.000\ncaf\xC3\xA9" "\n\n"));	// Latin-1
+	CHECK_EQ(subtitleFileToVtt("ass",
+		"[Script Info]\nTitle: x\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n"
+		"Dialogue: 0,0:00:05.00,0:00:06.50,Default,,0,0,0,,Late, with comma\\Nline2\n"
+		"Dialogue: 0,0:00:01.00,0:00:02.00,Default,,0,0,0,,{\\b1}First{\\b0}\nComment: 0,0:00:09.00,0:00:10.00,Default,,0,0,0,,no\n"),
+		std::string("WEBVTT\n\n00:00:01.000 --> 00:00:02.000\n<b>First</b>\n\n00:00:05.000 --> 00:00:06.500\nLate, with comma\nline2\n\n"));
+	CHECK_EQ(subtitleFileToVtt("vtt", "WEBVTT\n\n00:00:01.000 --> 00:00:02.000\nx\n"), std::string("WEBVTT\n\n00:00:01.000 --> 00:00:02.000\nx\n"));
+	CHECK_EQ(subtitleFileToVtt("sup", "x"), std::string(""));
+	{
+		// Shift-JIS "こんにちは" (82 B1 82 F1 82 C9 82 BF 82 CD) with the ja hint; CP1252 "café" by default; UTF-16LE with a BOM
+		std::string head = "1\n00:00:01,000 --> 00:00:02,000\n", tail = "\n";
+		CHECK_EQ(subtitleFileToVtt("srt", head + "\x82\xB1\x82\xF1\x82\xC9\x82\xBF\x82\xCD" + tail, "ja"),
+			std::string("WEBVTT\n\n00:00:01.000 --> 00:00:02.000\n\xE3\x81\x93\xE3\x82\x93\xE3\x81\xAB\xE3\x81\xA1\xE3\x81\xAF\n\n"));
+		CHECK_EQ(subtitleFileToVtt("srt", head + "caf\xE9 \x93q\x94" + tail),
+			std::string("WEBVTT\n\n00:00:01.000 --> 00:00:02.000\ncaf\xC3\xA9 \xE2\x80\x9Cq\xE2\x80\x9D\n\n"));
+		std::string u16 = "\xFF\xFE";
+		for (char c : head + "Hi" + tail)
+		{
+			u16 += c;
+			u16 += '\0';
+		}
+		CHECK_EQ(subtitleFileToVtt("srt", u16), std::string("WEBVTT\n\n00:00:01.000 --> 00:00:02.000\nHi\n\n"));
+	}
+	CHECK_EQ(imageSubtitleCodec("hdmv_pgs_subtitle"), true);
+	CHECK_EQ(imageSubtitleCodec("dvd_subtitle"), true);
+	CHECK_EQ(imageSubtitleCodec("subrip"), false);
+
+	// snapshotChanged
+	{
+		WebSnapshot a;
+		a.path = "0/a.mp3";
+		a.title = "T";
+		a.duration = 200;
+		a.position = 10;
+		a.positionAtMs = 100000;
+		a.volume = 50;
+		a.loop = "no";
+		a.chapters = {{"One", 0}, {"Two", 60}};
+		WebSnapshot b = a;
+		CHECK_EQ(snapshotChanged(a, b), false);
+		// time passes at the normal speed: the position follows, no push
+		b.positionAtMs = 105000;
+		b.position = 15;
+		CHECK_EQ(snapshotChanged(a, b), false);
+		b.position = 16.4;
+		CHECK_EQ(snapshotChanged(a, b), false);
+		b.position = 16.6;
+		CHECK_EQ(snapshotChanged(a, b), true);
+		b.position = 13.4;
+		CHECK_EQ(snapshotChanged(a, b), true);
+		b.position = 13.6;
+		CHECK_EQ(snapshotChanged(a, b), false);
+		// a seek
+		b.position = 100;
+		CHECK_EQ(snapshotChanged(a, b), true);
+		// position and its clock alone, no time between: a small move is fine, a jump isn't
+		b = a;
+		b.position = 11;
+		CHECK_EQ(snapshotChanged(a, b), false);
+		b.position = 12;
+		CHECK_EQ(snapshotChanged(a, b), true);
+		// nothing playing: time passing is no change
+		{
+			WebSnapshot idle, idle2;
+			idle.positionAtMs = 1000;
+			idle2.positionAtMs = 20000;
+			CHECK_EQ(snapshotChanged(idle, idle2), false);
+		}
+		// speed multiplies the elapsed time
+		a.speed = 2;
+		b = a;
+		b.positionAtMs = 105000;
+		b.position = 20;
+		CHECK_EQ(snapshotChanged(a, b), false);
+		b.position = 15;
+		CHECK_EQ(snapshotChanged(a, b), true);
+		a.speed = 1;
+		// paused: the position stays put
+		a.paused = true;
+		b = a;
+		b.positionAtMs = 105000;
+		b.position = 10.5;
+		CHECK_EQ(snapshotChanged(a, b), false);
+		b.position = 15;
+		CHECK_EQ(snapshotChanged(a, b), true);
+		a.paused = false;
+		// the clock going backwards counts as no time
+		b = a;
+		b.positionAtMs = 90000;
+		b.position = 10;
+		CHECK_EQ(snapshotChanged(a, b), false);
+		// every other field
+		auto differs = [&](const std::function<void(WebSnapshot&)>& f)
+		{
+			WebSnapshot c = a;
+			f(c);
+			return snapshotChanged(a, c);
+		};
+		CHECK_EQ(differs([](WebSnapshot& s) { s.path = "x"; }), true);
+		CHECK_EQ(differs([](WebSnapshot& s) { s.title = "x"; }), true);
+		CHECK_EQ(differs([](WebSnapshot& s) { s.artist = "x"; }), true);
+		CHECK_EQ(differs([](WebSnapshot& s) { s.album = "x"; }), true);
+		CHECK_EQ(differs([](WebSnapshot& s) { s.kind = "x"; }), true);
+		CHECK_EQ(differs([](WebSnapshot& s) { s.sourceKind = "x"; }), true);
+		CHECK_EQ(differs([](WebSnapshot& s) { s.sourceTitle = "x"; }), true);
+		CHECK_EQ(differs([](WebSnapshot& s) { s.sourceId = "x"; }), true);
+		CHECK_EQ(differs([](WebSnapshot& s) { s.index = 1; }), true);
+		CHECK_EQ(differs([](WebSnapshot& s) { s.count = 1; }), true);
+		CHECK_EQ(differs([](WebSnapshot& s) { s.loading = true; }), true);
+		CHECK_EQ(differs([](WebSnapshot& s) { s.paused = true; }), true);
+		CHECK_EQ(differs([](WebSnapshot& s) { s.duration = 201; }), true);
+		CHECK_EQ(differs([](WebSnapshot& s) { s.speed = 1.5; }), true);
+		CHECK_EQ(differs([](WebSnapshot& s) { s.volume = 51; }), true);
+		CHECK_EQ(differs([](WebSnapshot& s) { s.eqOn = true; }), true);
+		CHECK_EQ(differs([](WebSnapshot& s) { s.eqPreset = "x"; }), true);
+		CHECK_EQ(differs([](WebSnapshot& s) { s.eqGains[9] = 1; }), true);
+		CHECK_EQ(differs([](WebSnapshot& s) { s.fx = "room"; }), true);
+		CHECK_EQ(differs([](WebSnapshot& s) { s.loop = "all"; }), true);
+		CHECK_EQ(differs([](WebSnapshot& s) { s.shuffled = true; }), true);
+		CHECK_EQ(differs([](WebSnapshot& s) { s.chapters[1].title = "x"; }), true);
+		CHECK_EQ(differs([](WebSnapshot& s) { s.chapters[1].start = 61; }), true);
+		CHECK_EQ(differs([](WebSnapshot& s) { s.chapters.pop_back(); }), true);
+		CHECK_EQ(differs([](WebSnapshot& s) { s.chapter = 1; }), true);
+		CHECK_EQ(differs([](WebSnapshot& s) { s.browserPlaying = true; }), true);
+		CHECK_EQ(differs([](WebSnapshot& s) { s.clients = 2; }), true);
+		CHECK_EQ(differs([](WebSnapshot& s) { s.playlistSerial = 3; }), true);
+		CHECK_EQ(differs([](WebSnapshot& s) { s.showHiddenFolders = true; }), true);
+
+		WebSnapshot j;
+		j.path = "0/M\"x\\.mp3";
+		j.kind = "audio";
+		j.sourceKind = "playlist";
+		j.sourceId = "Road.m3u";
+		j.count = 2;
+		j.position = 1.5;
+		j.positionAtMs = 42;
+		j.speed = 1;
+		j.eqGains[0] = -3;
+		j.chapters = {{"A", 0}};
+		j.chapter = 0;
+		j.loop = "one";
+		j.clients = 1;
+		CHECK_EQ(toJson(j), std::string("{\"path\":\"0/M\\\"x\\\\.mp3\",\"title\":\"\",\"artist\":\"\",\"album\":\"\",\"kind\":\"audio\","
+			"\"source\":{\"kind\":\"playlist\",\"title\":\"\",\"id\":\"Road.m3u\",\"index\":0,\"count\":2},\"loading\":false,"
+			"\"paused\":false,\"position\":1.5,\"positionAt\":42,\"duration\":0,\"speed\":1,\"volume\":0,"
+			"\"eq\":{\"on\":false,\"preset\":\"\",\"gains\":[-3,0,0,0,0,0,0,0,0,0]},\"fx\":\"\",\"loop\":\"one\","
+			"\"shuffled\":false,\"chapters\":[{\"title\":\"A\",\"start\":0}],\"chapter\":0,\"tracks\":null,\"browserPlaying\":false,"
+			"\"clients\":1,\"playlistSerial\":0,\"liked\":false,\"showHiddenFolders\":false}"));
+
+		// a video's tracks: listed, and a change of choice is news
+		WebSnapshot v;
+		v.hasTracks = true;
+		v.audioTracks = {{1, "English", true, true, false, false}, {2, "Track 2", false, false, false, false}};
+		v.subTracks = {{1, "French \u00b7 SRT", false, false, true, true}};
+		v.aid = 1;
+		std::string vj = toJson(v);
+		CHECK_EQ(vj.find("\"tracks\":{\"audio\":[{\"id\":1,\"label\":\"English\",\"selected\":true,\"default\":true,"
+			"\"forced\":false,\"external\":false},{\"id\":2,") != std::string::npos, true);
+		CHECK_EQ(vj.find("\"forced\":true,\"external\":true}],\"aid\":1,\"sid\":0}") != std::string::npos, true);
+		WebSnapshot v2 = v;
+		CHECK_EQ(snapshotChanged(v, v2), false);
+		v2.audioTracks[0].selected = false;
+		v2.audioTracks[1].selected = true;
+		v2.aid = 2;
+		CHECK_EQ(snapshotChanged(v, v2), true);
+		v2 = v;
+		v2.sid = 1;
+		CHECK_EQ(snapshotChanged(v, v2), true);
+	}
+
+	// webTitle: the name less its extension, and a song's less its track number
+	{
+		CHECK_EQ(webTitle("/m/01 Sunny Peel.mp3"), std::string("Sunny Peel"));
+		CHECK_EQ(webTitle("/m/01. Sunny Peel.flac"), std::string("Sunny Peel"));
+		CHECK_EQ(webTitle("/m/01 - Sunny Peel.ogg"), std::string("Sunny Peel"));
+		CHECK_EQ(webTitle("/m/1 - Intro.mp3"), std::string("Intro"));
+		CHECK_EQ(webTitle("/m/07_Outro.mp3"), std::string("Outro"));
+		CHECK_EQ(webTitle("/m/2 Fast.mp3"), std::string("2 Fast"));
+		CHECK_EQ(webTitle("/m/1984.mp3"), std::string("1984"));
+		CHECK_EQ(webTitle("/m/01.mp3"), std::string("01"));
+		CHECK_EQ(webTitle("/m/Song.mp3"), std::string("Song"));
+		CHECK_EQ(webTitle("/v/01 Pilot.mkv"), std::string("01 Pilot"));	// a video keeps its number
+		CHECK_EQ(webTitle("/v/.hidden"), std::string(".hidden"));
+		CHECK_EQ(webTitle("/m/01 Sunny Peel.mp3", "01 Sunny Peel.mp3"), std::string("Sunny Peel"));	// mpv's name: no tag
+		CHECK_EQ(webTitle("/m/01 Sunny Peel.mp3", "Sunny Peel (Live)"), std::string("Sunny Peel (Live)"));
+		CHECK_EQ(webTitle("/m/01 Sunny Peel.mp3", ""), std::string("Sunny Peel"));
+	}
+
+	// moveEntriesTo
+	{
+		auto mk = [](const std::string& order)
+		{
+			std::vector<PlaylistEntry> v;
+			for (char c : order) { PlaylistEntry e; e.path = std::string("/") + c; v.push_back(e); }
+			return v;
+		};
+		auto str = [](const std::vector<PlaylistEntry>& v) { std::string s; for (auto& e : v) s += e.path.back(); return s; };
+		auto v = mk("abcdef");
+		auto remap = moveEntriesTo(v, {1, 3}, 0);
+		CHECK_EQ(str(v), std::string("bdacef"));
+		CHECK_EQ(remap, (std::vector<int>{2, 0, 3, 1, 4, 5}));
+		v = mk("abcdef");
+		remap = moveEntriesTo(v, {1, 3}, 2);	// starting at index 2 of the final list
+		CHECK_EQ(str(v), std::string("acbdef"));
+		CHECK_EQ(remap, (std::vector<int>{0, 2, 1, 3, 4, 5}));
+		v = mk("abcdef");
+		moveEntriesTo(v, {0, 1}, 4);	// 4 of the 4 left: the end
+		CHECK_EQ(str(v), std::string("cdefab"));
+		v = mk("abcdef");
+		moveEntriesTo(v, {0, 1}, 2);
+		CHECK_EQ(str(v), std::string("cdabef"));
+		v = mk("abcdef");
+		moveEntriesTo(v, {4, 5}, 100);	// clamped
+		CHECK_EQ(str(v), std::string("abcdef"));
+		v = mk("abcdef");
+		moveEntriesTo(v, {0}, 100);
+		CHECK_EQ(str(v), std::string("bcdefa"));
+		v = mk("abcdef");
+		moveEntriesTo(v, {5}, -5);
+		CHECK_EQ(str(v), std::string("fabcde"));
+		v = mk("abcdef");
+		moveEntriesTo(v, {2, 4, 0}, 1);	// order kept (a, c, e), not the set's insertion order
+		CHECK_EQ(str(v), std::string("bacedf"));
+		v = mk("abcdef");
+		remap = moveEntriesTo(v, {}, 2);
+		CHECK_EQ(str(v), std::string("abcdef"));
+		CHECK_EQ(remap, (std::vector<int>{0, 1, 2, 3, 4, 5}));
+		v = mk("abc");
+		moveEntriesTo(v, {0, 1, 2}, 1);	// everything selected: nothing moves
+		CHECK_EQ(str(v), std::string("abc"));
+		v = mk("abc");
+		moveEntriesTo(v, {7, -1}, 1);	// out of range ones are ignored
+		CHECK_EQ(str(v), std::string("abc"));
+		v = mk("");
+		remap = moveEntriesTo(v, {0}, 0);
+		CHECK_EQ(v.size(), size_t(0));
+		CHECK_EQ(remap.size(), size_t(0));
+		// the remap lines up with the old indexes
+		v = mk("abcdef");
+		auto before = v;
+		remap = moveEntriesTo(v, {3, 5}, 1);
+		for (size_t i = 0; i < before.size(); i++) CHECK_EQ(v[remap[i]].path, before[i].path);
+	}
+}
+
 int main()
 {
+	testWeb();
 	testChapters();
 	testSpeed();
 	testSubStyle();
@@ -1551,6 +2472,7 @@ int main()
 	testFtpList();
 	testBrowser();
 	testHistory();
+	testClock();
 	testBattery();
 	testAspect();
 	testTime();
