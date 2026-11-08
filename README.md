@@ -39,7 +39,7 @@ photos with a finger. When a new version is out, it installs in one tap.
 - 📡 **From your computer or NAS:** play straight from shared folders on your Wi-Fi (SMB or FTP), with nothing copied to the card.
 - 👆 **Built for two screens:** the picture on top, every control a big button under your thumb below. Every page has the same header and a footer that names the buttons, and an on-screen keyboard takes care of typing.
 - 💾 **Remembers for you:** where you stopped a film, which subtitles you chose, what you played recently.
-- 🔄 **One-tap updates** when a new version is out (Wi-Fi on), with no re-copying files to the SD card. Your settings stay put.
+- 🔄 **One-tap updates** when a new version is out, with no re-copying files to the SD card. Your settings stay put.
 
 Videos play on the handheld's CPU. The various 1080p videos we tested play well; very high bitrates, and HEVC (x265) especially, may drop frames.
 
@@ -54,8 +54,8 @@ Videos play on the handheld's CPU. The various 1080p videos we tested play well;
    and a `media` folder there. (On a Mac, if the zip opens into a folder of its own, move those three out of it.)
 3. **Play:** put the card back in, open the **Ports** shelf and choose **Banana Player**.
 
-Your videos, music and photos can live anywhere on the card. From then on, with Wi-Fi on, Banana Player tells you
-when a new version is out and installs it for you.
+Your videos, music and photos can live anywhere on the card. From then on, Banana Player tells you when a new
+version is out and installs it for you.
 
 ## The basics
 
