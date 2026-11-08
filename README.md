@@ -16,7 +16,7 @@
 Banana Player is a free video, music and photo player for [BananaOS](https://github.com/JorreFog/BananaLinux) on the
 Anbernic RG DS and RG DS Plus. Drop your files on the SD card, pick one, and watch. It remembers where you stopped a film,
 switches subtitles and audio tracks in a tap, turns a folder of songs into an album, and lets you zoom around your
-photos with a finger. When a new version is out, it updates itself.
+photos with a finger. When a new version is out, it installs in one tap.
 
 <table>
   <tr>
@@ -39,7 +39,7 @@ photos with a finger. When a new version is out, it updates itself.
 - 📡 **From your computer or NAS:** play straight from shared folders on your Wi-Fi (SMB or FTP), with nothing copied to the card. "Find on the network" finds computers by name, with no addresses to type, and passwords are saved encrypted.
 - 👆 **Built for two screens:** the picture on top, every control a big button under your thumb below. Every page has the same header and a footer that names the buttons, and an on-screen keyboard takes care of typing.
 - 💾 **Remembers for you:** where you stopped a film, which subtitles you chose, what you played recently.
-- 🔄 **Updates itself** when a new version is out (Wi-Fi on). Your settings stay put.
+- 🔄 **One-tap updates** when a new version is out (Wi-Fi on), with no re-copying files to the SD card. Your settings stay put.
 
 Videos play on the handheld's CPU. The various 1080p videos we tested play well; very high bitrates, and HEVC (x265) especially, may drop frames.
 
