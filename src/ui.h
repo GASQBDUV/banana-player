@@ -724,7 +724,7 @@ namespace bp
 			const std::string& note = "", SDL_Color noteInk = {0, 0, 0, 0});
 		std::vector<std::string> wrapText(const std::string& text, int size, int maxW, int maxLines) const;
 		// a button's face: a glyph and a label side by side, the hardware button's name under them (key: none)
-		void drawButton(Rect b, const Glyph* g, const std::string& label, const char* key, bool off, int size);
+		void drawButton(Rect b, const Glyph* g, const std::string& label, const char* key, bool off, int size, bool lit = false);	// lit: the glyph and label in yellow (on, as the heart once liked)
 		static constexpr int STATUS_Y = 100, LINE1_Y = 378, LINE2_Y = 403;	// the player's status line, its two track lines
 		// the Network tab with no connections: its page offers Add connection; Playlists with none, New playlist
 		bool emptyAction() const;

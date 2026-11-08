@@ -20,14 +20,14 @@ photos with a finger. When a new version is out, it installs in one tap.
 
 <table>
   <tr>
-    <td align="center" width="33%"><img src="docs/img/screen-browser.png?v=0.5.0-1" alt="The file list on the bottom screen, the Banana Player logo on the top"><br><sub><b>Your files.</b> Icons, sizes, and where you left off in each film</sub></td>
-    <td align="center" width="33%"><img src="docs/img/screen-playing.png?v=0.5.0-1" alt="A film playing on the top screen, the controls on the bottom"><br><sub><b>Watching.</b> Seek, skip, chapters, speed, subtitles and audio tracks, by button or by touch</sub></td>
-    <td align="center" width="33%"><img src="docs/img/screen-music.png?v=0.5.0-1" alt="A song with its album art inside the Circle visualizer"><br><sub><b>Music.</b> Album art, a visualizer, or both (here: Circle)</sub></td>
+    <td align="center" width="33%"><img src="docs/img/screen-browser.png?v=0.5.0-2" alt="The file list on the bottom screen, the Banana Player logo on the top"><br><sub><b>Your files.</b> Icons, sizes, and where you left off in each film</sub></td>
+    <td align="center" width="33%"><img src="docs/img/screen-playing.png?v=0.5.0-2" alt="A film playing on the top screen, the controls on the bottom"><br><sub><b>Watching.</b> Seek, skip, chapters, speed, subtitles and audio tracks, by button or by touch</sub></td>
+    <td align="center" width="33%"><img src="docs/img/screen-music.png?v=0.5.0-2" alt="A song with its album art inside the Circle visualizer"><br><sub><b>Music.</b> Album art, a visualizer, or both (here: Circle)</sub></td>
   </tr>
   <tr>
-    <td align="center"><img src="docs/img/screen-sound.png?v=0.5.0-1" alt="The equalizer on the bottom screen, ten bands set to the Rock preset, under a song with the Circle visualizer"><br><sub><b>Sound.</b> A 10-band equalizer with presets, and room effects like Concert hall</sub></td>
-    <td align="center"><img src="docs/img/screen-photo.png?v=0.5.0-1" alt="A photo zoomed in on the top screen, the pan area and its buttons on the bottom"><br><sub><b>Photos.</b> Zoom in and drag the box to look around</sub></td>
-    <td align="center"><img src="docs/img/screen-settings.png?v=0.5.0-1" alt="Settings › Subtitles, with a subtitle preview"><br><sub><b>Settings</b> as tiles, with a help line for each and a live subtitle preview</sub></td>
+    <td align="center"><img src="docs/img/screen-sound.png?v=0.5.0-2" alt="The equalizer on the bottom screen, ten bands set to the Rock preset, under a song with the Circle visualizer"><br><sub><b>Sound.</b> A 10-band equalizer with presets, and room effects like Concert hall</sub></td>
+    <td align="center"><img src="docs/img/screen-photo.png?v=0.5.0-2" alt="A photo zoomed in on the top screen, the pan area and its buttons on the bottom"><br><sub><b>Photos.</b> Zoom in and drag the box to look around</sub></td>
+    <td align="center"><img src="docs/img/screen-settings.png?v=0.5.0-2" alt="Settings › Subtitles, with a subtitle preview"><br><sub><b>Settings</b> as tiles, with a help line for each and a live subtitle preview</sub></td>
   </tr>
 </table>
 
@@ -69,8 +69,8 @@ The buttons follow the Nintendo layout: **A** confirms, **B** goes back.
 - **Open something:** tap it, or press **A**. A folder plays as a playlist.
 - **Play / pause:** **A**. **L / R** go to the previous or next file.
 - **Close it:** tap **<** at the top left, or press **B** twice.
-- **Like it:** tap the heart beside the title (or click **L3** on the RG DS Plus); it goes to **Liked**. The square
-  beside it adds it to a playlist.
+- **Like it:** tap **Like** (or click **L3** on the RG DS Plus); it goes to **Liked**. **Add** puts it in a playlist.
+- **Skip back or ahead:** **LEFT** goes back 5 seconds, **RIGHT** forward 10, or drag the bar.
 - **Network:** **X** then **Find on the network** finds your computer.
 - **Options** (refresh, hide a folder; on Network, add a connection): **X**.
 - **Menu** (what's playing, Settings, About, Quit): **START**. **L / R** switch its tabs.

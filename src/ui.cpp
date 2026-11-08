@@ -143,8 +143,11 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 #undef GLYPH
 
 	// the two rows of buttons: what each does is the button it stands for
+	// LEFT/RIGHT (-5 s, +10 s) have no button of their own: their keys, and the bar, seek. Their places hold Like (L3
+	// on the RG DS Plus) and Add to playlist (no key: START › Playing has it), around Play, with Prev and Next under
+	// the shoulders they answer to
 	static const struct { Button button; const char* hint; } GRID[2][5] = {
-		{{Button::L, "L"}, {Button::Left, "LEFT"}, {Button::A, "A"}, {Button::Right, "RIGHT"}, {Button::R, "R"}},
+		{{Button::L, "L"}, {Button::L3, "L3"}, {Button::A, "A"}, {Button::None, nullptr}, {Button::R, "R"}},
 		{{Button::X, "X"}, {Button::Y, "Y"}, {Button::Select, "SELECT"}, {Button::Up, "UP/DOWN"}, {Button::Start, "START"}},
 	};
 
@@ -2375,8 +2378,6 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 		if (id == BUSY_CANCEL) return {152, 224, 336, 46};
 		if (id == WEB_NEWPIN) return {296, 384, 152, 52};
 		if (id == WEB_OFF) return {464, 384, 152, 52};
-		if (id == ADD_BTN) return {404, 8, 48, 48};
-		if (id == LIKE_BTN) return {460, 8, 48, 48};
 		if (id >= PLAY_ROW && id < PLAY_ROW + 4) return playingRowRect(id - PLAY_ROW);
 		if (id >= PHOTO_BTN) return {0, 0, 0, 0};	// photoBtn's: they move with the pan area
 		if (id == QUIT_BTN) return {468, 428, 148, 44};
@@ -2445,6 +2446,8 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 			infoAt = 0;	// read at once
 			return false;
 		}
+		// the grid's Like and Add (L3's place and the one with no key)
+		if (page == Page::Main && (id == 1 || id == 3)) return act(id == 1 ? LIKE_BTN : ADD_BTN, p);
 		Button b = GRID[id / 5][id % 5].button;
 		if (b != Button::Up) return pressAnyway(b, p);
 		if (!p.error.empty()) return false;
@@ -2787,9 +2790,6 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 		}
 		for (int id : {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, QUIT_BTN, SCREEN_BTN, INFO_BTN, LOCK_BTN})
 			if (buttonRect(id).hit(x, y)) pressedBtn = id;
-		if (headerActions(p))
-			for (int id : {ADD_BTN, LIKE_BTN})
-				if (buttonRect(id).hit(x, y)) pressedBtn = id;
 		return false;
 	}
 
@@ -4387,12 +4387,12 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 		return lines;
 	}
 
-	void Ui::drawButton(Rect b, const Glyph* g, const std::string& label, const char* key, bool off, int size)
+	void Ui::drawButton(Rect b, const Glyph* g, const std::string& label, const char* key, bool off, int size, bool lit)
 	{
 		// a label (a glyph before it), the button that does the same under it in yellow (Button hotkeys on)
 		bool hint = key && *key;
 		int mid = hint ? b.y + b.h * 2 / 5 : b.y + b.h / 2;
-		SDL_Color ink = off ? DIM : CREAM;
+		SDL_Color ink = off ? DIM : lit ? YELLOW : CREAM;
 		int tw = label.empty() ? 0 : std::min(b.w - 12, (int)std::lround(textWidth(label, size) / sx));
 		int gw = g ? glyphW(*g) : 0, gap = g && tw ? 8 : 0;
 		int x = b.x + b.w / 2 - (gw + gap + tw) / 2;
@@ -4414,20 +4414,7 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 		std::string name = p.currentPath().substr(p.currentPath().rfind('/') + 1);
 		bool err = !p.error.empty();
 		bool actions = headerActions(p);
-		drawHeader(!p.title.empty() ? p.title : err ? name : "Opening...", p, actions ? buttonRect(ADD_BTN).x : 0);
-		if (actions)
-		{
-			// Add to playlist, then the heart (the outer one: the right thumb's, the one used most). Both work on a file
-			// that didn't open (it's still a file); locked, dim with the rest
-			Uint32 now = SDL_GetTicks();
-			Rect a = buttonRect(ADD_BTN), l = buttonRect(LIKE_BTN);
-			fill(a, pressedBtn == ADD_BTN ? PRESSED : TEAL);
-			if (addFlashUntil && now < addFlashUntil) drawGlyphMid(G_CHECK, a.x + 24, a.y + 24, YELLOW, 3);
-			else drawGlyphMid(G_PL_ADD, a.x + 25, a.y + 24, touchLocked ? DIM : CREAM, 3);
-			bool on = likedNow(p), popping = likePopAt && now - likePopAt < 110;
-			fill(l, pressedBtn == LIKE_BTN ? PRESSED : TEAL);
-			drawGlyphMid(on ? G_HEART : G_HEART_O, l.x + 24, l.y + 24, touchLocked ? DIM : on ? YELLOW : CREAM, popping ? 4 : 3);
-		}
+		drawHeader(!p.title.empty() ? p.title : err ? name : "Opening...", p);
 		if (roots.empty()) roots = browseRoots();	// (started with a file: the browser never read them)
 		drawSource(p);
 		const char* leave = browserMode ? "close" : "quit";
@@ -4532,9 +4519,10 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 				switch (which)
 				{
 				case Button::L: label = "Prev"; g = &G_PREV; off = p.index() == 0; break;
-				case Button::Left: label = "-5s"; break;
+				// Like and Add work on a file that didn't open too (it's still a file)
+				case Button::L3: label = likedNow(p) ? "Liked" : "Like"; g = likedNow(p) ? &G_HEART : &G_HEART_O; off = !actions; break;
 				case Button::A: label = p.paused || err ? "Play" : "Pause"; g = p.paused || err ? &G_PLAY : &G_PAUSE; break;
-				case Button::Right: label = "+10s"; break;
+				case Button::None: label = "Add"; g = addFlashUntil && SDL_GetTicks() < addFlashUntil ? &G_CHECK : &G_PL_ADD; off = !actions; break;
 				case Button::R: label = "Next"; g = &G_NEXT; off = p.index() + 1 >= p.count(); break;
 				// music: loop, Sound (or chapters), the Display popup; a video: audio, subtitles, picture size
 				case Button::X:
@@ -4548,8 +4536,8 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 				case Button::Up: label = speedLabel(p.speed); break;
 				default: label = "Menu"; break;
 				}
-				// a file that didn't open: only what leads elsewhere (the next file, the menu)
-				if (err && which != Button::L && which != Button::R && which != Button::Start) off = true;
+				// a file that didn't open: only what leads elsewhere (the next file, the menu), and Like / Add
+				if (err && which != Button::L && which != Button::R && which != Button::Start && which != Button::L3 && which != Button::None) off = true;
 				fill(b, pressedBtn == r * 5 + c && !off ? PRESSED : TEAL);
 				const char* key = hotkeys ? GRID[r][c].hint : nullptr;
 				if (which == Button::X && !p.playingAudio())
@@ -4580,6 +4568,18 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 					// is on the line under the buttons
 					drawButton({b.x, b.y, b.w, b.h * 4 / 5}, &G_EQ, "FX", nullptr, off, 1);
 					drawTextMid("Sound", 0, off ? DIM : DIM_TEAL, b.x + b.w / 2, b.y + b.h * 4 / 5 - 2, b.w - 6, 2);
+				}
+				else if (which == Button::L3)
+				{
+					// the heart: yellow once liked; its key only where there's an L3 (the RG DS Plus, the 1024x768 one)
+					bool hasL3 = sx > 1.2f;
+					drawButton(b, g, label, hasL3 ? key : nullptr, off, 1, likedNow(p) && !off);
+				}
+				else if (which == Button::None)
+				{
+					// Add to playlist: no key of its own, so what it adds to under it, as Sound's button says Sound
+					drawButton({b.x, b.y, b.w, b.h * 4 / 5}, g, label, nullptr, off, 1, g == &G_CHECK);
+					drawTextMid("Playlist", 0, off ? DIM : DIM_TEAL, b.x + b.w / 2, b.y + b.h * 4 / 5 - 2, b.w - 6, 2);
 				}
 				// the button it stands for, while the buttons work here (Button hotkeys); else the name alone, centred
 				else drawButton(b, g, label, key, off, 1);

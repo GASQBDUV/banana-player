@@ -130,13 +130,13 @@ Playlists.
 
 Like a song or a video to keep it in **Liked**, a playlist of its own. Photos and folders can't be liked.
 
-- **Like:** the **heart** at the top of the bottom screen while something plays, **START** → **Like** (the menu opens on
-  it), or **L3** on the RG DS Plus. The heart turns yellow and the top screen says **Added to Liked** with the title
+- **Like:** the **Like** button (the heart, left of Play) while something plays, **START** → **Like** (the menu opens
+  on it), or **L3** on the RG DS Plus. The heart turns yellow and the top screen says **Added to Liked** with the title
   (**Removed from Liked** when you press it again). A like is the file's, wherever it plays from.
-- **Add to playlist:** the square left of the heart, or **START** → **Add to playlist…**. **New playlist…** comes
+- **Add to playlist:** the **Add** button (right of Play), or **START** → **Add to playlist…**. **New playlist…** comes
   first, then the playlists you changed last. A playlist that already has it says **✓ Added**: choosing it asks
   **Add again?**, and a second **A** adds another copy. **New playlist…** names one on the keyboard and adds to it. The
-  square shows a check and the top screen says where it went.
+  button shows a check and the top screen says where it went.
 - **Liked** is always first in **Playlists**, with a yellow heart. It's newest first and can't be reordered, renamed or
   deleted, and only Like adds to it. Inside it, an item's **Y** menu has **Play from here**, **Unlike**, **Add to
   playlist…** and **Show in folder**; select mode's **X** is **Unlike** (press it twice).
@@ -152,7 +152,7 @@ Like a song or a video to keep it in **Liked**, a playlist of its own. Photos an
 | Button | What it does |
 |---|---|
 | **A** | Play / pause |
-| **LEFT / RIGHT** | Back 5 seconds / forward 10 seconds (hold to keep going) |
+| **LEFT / RIGHT** | Back 5 seconds / forward 10 seconds (hold to keep going; there's no on-screen button for these: drag the bar) |
 | **L / R** | Previous / next file in the folder |
 | **L2 / R2** | Previous / next chapter (**F + L2** is still the screenshot) |
 | **UP / DOWN** | Faster / slower (0.5x, 1x, 1.5x, 2x, 2.5x) |
