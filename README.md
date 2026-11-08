@@ -36,7 +36,7 @@ photos with a finger. When a new version is out, it installs in one tap.
 - 🎬 **Videos:** MP4, MKV, AVI and more, with subtitles and audio tracks you can switch mid-film, and chapters you can jump between with L2 and R2.
 - 🎵 **Music:** a folder plays as an album, with the cover art, a visualizer, or both. Audiobooks (M4B) keep their chapters.
 - 🖼️ **Photos:** zoom in, look around, step through a folder; scanned comics keep your zoom from page to page.
-- 📡 **From your computer or NAS:** play straight from shared folders on your Wi-Fi (SMB or FTP), with nothing copied to the card. "Find on the network" finds computers by name, with no addresses to type, and passwords are saved encrypted.
+- 📡 **From your computer or NAS:** play straight from shared folders on your Wi-Fi (SMB or FTP), with nothing copied to the card.
 - 👆 **Built for two screens:** the picture on top, every control a big button under your thumb below. Every page has the same header and a footer that names the buttons, and an on-screen keyboard takes care of typing.
 - 💾 **Remembers for you:** where you stopped a film, which subtitles you chose, what you played recently.
 - 🔄 **One-tap updates** when a new version is out (Wi-Fi on), with no re-copying files to the SD card. Your settings stay put.
