@@ -29,6 +29,19 @@ namespace bp
 	static const char* VIS_LABELS[VISUALIZERS] = {"Bars", "Waves", "Spectrum", "Circle"};
 	static const char* LOOP_IDS[LOOPS] = {"off", "all", "one"};
 	static const char* CLOCK_IDS[CLOCKS] = {"24h", "12h", "off"};
+	static const char* SCREEN_OFF_IDS[SCREEN_OFFS] = {"never", "15s", "30s", "1m", "2m", "5m"};
+
+	int screenOffSeconds(int v)
+	{
+		static const int SECS[SCREEN_OFFS] = {0, 15, 30, 60, 120, 300};
+		return v >= 0 && v < SCREEN_OFFS ? SECS[v] : 0;
+	}
+
+	const char* screenOffLabel(int v)
+	{
+		static const char* L[SCREEN_OFFS] = {"Never", "15 seconds", "30 seconds", "1 minute", "2 minutes", "5 minutes"};
+		return v >= 0 && v < SCREEN_OFFS ? L[v] : L[0];
+	}
 	static const char* LOOP_LABELS[LOOPS] = {"No loop", "Loop all", "Loop one"};
 
 	const char* musicShowLabel(int v) { return SHOW_LABELS[v >= 0 && v < SHOWS ? v : 0]; }
@@ -184,6 +197,7 @@ namespace bp
 		out += std::string("loop = ") + LOOP_IDS[s.loop] + "\n";
 		for (auto& r : REMEMBER) out += std::string(r.key) + " = " + (s.*r.field ? "yes" : "no") + "\n";
 		out += std::string("clock = ") + CLOCK_IDS[s.clock] + "\n";
+		out += std::string("screen-off = ") + SCREEN_OFF_IDS[s.screenOffAfter] + "\n";
 		out += std::string("pan-area = ") + (s.panRight ? "right" : "left") + "\n";
 		out += std::string("pan-drag = ") + (s.dragBox ? "box" : "photo") + "\n";
 		out += std::string("eq = ") + (s.eqOn ? "on" : "off") + "\n";
@@ -221,6 +235,8 @@ namespace bp
 				if (key == "loop" && value == LOOP_IDS[v]) s.loop = v;
 			for (int v = 0; v < CLOCKS; v++)
 				if (key == "clock" && value == CLOCK_IDS[v]) s.clock = v;
+			for (int v = 0; v < SCREEN_OFFS; v++)
+				if (key == "screen-off" && value == SCREEN_OFF_IDS[v]) s.screenOffAfter = v;
 			if (key == "pan-area" && (value == "left" || value == "right")) s.panRight = value == "right";
 			if (key == "pan-drag" && (value == "photo" || value == "box")) s.dragBox = value == "box";
 			if (key == "eq" && (value == "on" || value == "off")) s.eqOn = value == "on";

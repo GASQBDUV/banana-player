@@ -383,6 +383,16 @@ static void testSettings()
 	Settings c12;
 	c12.clock = CLOCK_12;
 	CHECK_EQ(parseSettings(serializeSettings(c12)).clock, (int)CLOCK_12);
+	// Screen off after: 30 s unless said; never = 0 seconds; a value it doesn't know keeps the default
+	CHECK_EQ(d.screenOffAfter, (int)SOFF_30);
+	CHECK_EQ(parseSettings("screen-off = never\n").screenOffAfter, (int)SOFF_NEVER);
+	CHECK_EQ(parseSettings("screen-off = 2m\n").screenOffAfter, (int)SOFF_120);
+	CHECK_EQ(parseSettings("screen-off = 3h\n").screenOffAfter, (int)SOFF_30);
+	CHECK_EQ(screenOffSeconds(SOFF_NEVER), 0);
+	CHECK_EQ(screenOffSeconds(SOFF_300), 300);
+	Settings s5;
+	s5.screenOffAfter = SOFF_300;
+	CHECK_EQ(parseSettings(serializeSettings(s5)).screenOffAfter, (int)SOFF_300);
 }
 
 static void testClock()

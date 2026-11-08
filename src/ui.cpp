@@ -1435,6 +1435,7 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 			out.push_back(T + 5);
 			out.push_back(T + 7);
 			out.push_back(CLOCK_ROW);
+			out.push_back(SCREEN_OFF_ROW);
 			return out;
 		}
 		case GROUP_UPDATES:
@@ -1459,6 +1460,7 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 		if (row == VIS_ROW) return "How the music is drawn: Bars, Waves, Spectrum or Circle (SELECT while playing).";
 		if (row == SOUND_ROW) return "Equalizer and effects for music (not videos). A opens it";
 		if (row == CLOCK_ROW) return "The time in the top corner of this screen";
+		if (row == SCREEN_OFF_ROW) return "While a song or video plays, this screen goes dark after that long untouched. A touch brings it back.";
 		if (row == PAN_ROW) return "Which side the pan area (the small photo) is on.";
 		if (row == DRAG_ROW) return "The box: a drag moves the frame over the small photo. The photo: a drag moves the photo, as on a phone.";
 		if (row == CLEAR_ROW) return "Empties Recent. Press A twice. The places you stopped at are kept.";
@@ -1805,6 +1807,8 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 		else if (row == MUSIC_ROW) s.musicShow = ((s.musicShow + dir) % SHOWS + SHOWS) % SHOWS;
 		else if (row == VIS_ROW) s.visualizer = ((s.visualizer + dir) % VISUALIZERS + VISUALIZERS) % VISUALIZERS;
 		else if (row == CLOCK_ROW) s.clock = ((s.clock + dir) % CLOCKS + CLOCKS) % CLOCKS;
+		// (not round: Never at one end, 5 minutes at the other)
+		else if (row == SCREEN_OFF_ROW) s.screenOffAfter = std::clamp(s.screenOffAfter + dir, 0, SCREEN_OFFS - 1);
 		else if (row == PAN_ROW) s.panRight = !s.panRight;
 		else if (row == DRAG_ROW) s.dragBox = !s.dragBox;
 		else s.*REMEMBER[row - TOGGLE_ROW] = !(s.*REMEMBER[row - TOGGLE_ROW]);
@@ -2301,6 +2305,13 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 				seekPath.clear();
 			}
 		}
+		// Screen off after (Settings): a song or video playing (not a photo: it's looked at and panned here), nothing
+		// touched or pressed for that long, nothing open that waits for an answer: the bottom panel dark, as its Screen
+		// off button does (a touch or a page's button brings it back). Paused, it stays: someone is about to act
+		int offSecs = screenOffSeconds(p.settings.screenOffAfter);
+		if (offSecs > 0 && panel.on() && p.playing() && !p.playingPhoto() && !p.paused && !p.loading() && p.error.empty() &&
+			!kbOpen && !quickOpen && !popupShown(p) && !dragging && SDL_GetTicks() - webInputAt >= (Uint32)offSecs * 1000)
+			panel.set(false);
 		if (page == Page::Web)
 		{
 			// the address can change (another Wi-Fi), and the page is left up: read again every 10 s; and, as the
@@ -4183,6 +4194,11 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 			{
 				label = "Clock";
 				value = p.settings.clock == CLOCK_12 ? "12-hour" : p.settings.clock == CLOCK_OFF ? "Off" : "24-hour";
+			}
+			else if (row == SCREEN_OFF_ROW)
+			{
+				label = "Screen off after";
+				value = screenOffLabel(p.settings.screenOffAfter);
 			}
 			else if (row == PAN_ROW)
 			{

@@ -368,6 +368,7 @@ goes back to the list.
 | | Button hotkeys | On | Off: buttons can't pause, skip or close while something plays (touch still can) |
 | | Battery percentage | Off | Shows the battery's percent beside its icon (the icon, with a bolt while charging, is always there) |
 | | Clock | 24-hour | The time in the top corner of the bottom screen, left of the battery: 24-hour (`14:32`), 12-hour (`2:32 PM`) or Off. Not over a photo |
+| | Screen off after | 30 seconds | While a song or video plays, the bottom screen turns off by itself after that long without a touch or a button: Never, 15 or 30 seconds, 1, 2 or 5 minutes. Not while paused, and never over a photo. A touch brings it back |
 | **Updates** | Check automatically | On | Looks for a new version a few seconds after the start, in the background (Wi-Fi needed) |
 | | Check for updates | | Looks now, and shows what it found |
 | | Update to … | | Downloads the new version (shown when there's one), then **Restart now** |
@@ -500,5 +501,6 @@ combination instead.)
 - **Volume and brightness:** the keys show a level card on the top screen.
 - **Loading:** a file that takes a moment to open (a big photo, a slow card) shows a spinner on the top screen.
 - **Lock:** locks the touch screen while playing; Screen off still works. Hold the lock for a second to unlock.
-- **Screen off:** turns the bottom screen off to save battery. Touch it to turn it back on.
+- **Screen off:** turns the bottom screen off to save battery. Touch it to turn it back on. It also turns off by itself
+  while a song or video plays and nothing is touched (Settings › Controls & screen › **Screen off after**).
 - **Lid:** closing it pauses; opening it keeps it paused until you press play.

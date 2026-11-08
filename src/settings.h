@@ -17,6 +17,10 @@ namespace bp
 	enum Loop { LOOP_OFF, LOOP_ALL, LOOP_ONE, LOOPS };
 	// the clock in the bottom panel's header
 	enum ClockMode { CLOCK_24, CLOCK_12, CLOCK_OFF, CLOCKS };
+	// the bottom panel dark by itself after that long without a touch or a button, while a song or video plays (never)
+	enum ScreenOffAfter { SOFF_NEVER, SOFF_15, SOFF_30, SOFF_60, SOFF_120, SOFF_300, SCREEN_OFFS };
+	int screenOffSeconds(int v);	// 0: never
+	const char* screenOffLabel(int v);	// "Never", "15 seconds", "1 minute"...
 	const char* musicShowLabel(int v);
 	const char* visualizerLabel(int v);
 	const char* loopLabel(int v);
@@ -56,6 +60,8 @@ namespace bp
 		bool batteryPercent = false;
 		// the time left of the battery (Settings › Controls & screen): 24-hour, 12-hour or none
 		int clock = CLOCK_24;
+		// the bottom panel off by itself (Settings › Controls & screen) while a song or video plays and nothing is touched
+		int screenOffAfter = SOFF_30;
 		// photos: the next one opens at the zoom (and the place in it) the last was left at; off: each at its size
 		bool keepPhotoZoom = true;
 		// the photo's pan area on the bottom panel: the left half (the default) or the right
