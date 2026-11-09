@@ -10,6 +10,10 @@ const TAB_ID = (() => { try { let t = sessionStorage.getItem('bpTab'); if (!t) {
 // and audio session broke it in ways not yet pinned down; the handheld plays, the page is the remote
 const NO_HERE = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 const NO_HERE_WHY = 'Not on iPhone or iPad yet';
+// the layouts (as style.css): a phone (also one on its side: short and touch), a tablet (700 px up), a computer (1100 up)
+const Q_WIDE = '(min-width: 700px) and (min-height: 521px), (min-width: 700px) and (hover: hover)';
+const Q_DESK = '(min-width: 1100px) and (min-height: 521px), (min-width: 1100px) and (hover: hover)';
+const phoneNow = () => !matchMedia(Q_WIDE).matches;
 const store = {
 	// authed: null till the first answer; signedOut: why the sign-in page shows ('pin', 'expired', '')
 	authed: null, signedOut: '', epoch: 0,
@@ -17,7 +21,7 @@ const store = {
 	conn: 'ok', reconnecting: false, downReason: '', probing: false, nextTry: 0,
 	snap: null, snapAt: 0, eq: null,
 	target: !NO_HERE && lsGet('bpTarget') === 'browser' ? 'browser' : 'handheld',
-	toasts: [], modals: [], lightbox: null, pick: null, sel: new Set(), upload: { items: [], min: false },
+	toasts: [], modals: [], lightbox: null, pick: null, sel: new Set(), upload: { items: [], paused: false }, pls: null, upDone: 0,
 	help: false, dropping: false, fsTick: 0, plTick: 0, route: parseRoute(), fresh: {}, media: null,
 };
 const listeners = new Set();
@@ -92,7 +96,7 @@ addEventListener('hashchange', e => {
    the browser has them (Chrome, Safari 18); elsewhere the player's own slide, and the pages simply switch */
 const depth = r => r.page === 'files' ? (r.path ? r.path.split('/').length : 0) : r.page === 'playlists' ? (r.id ? 1 : 0) : 0;
 function navKind(a, b) {
-	const compact = !matchMedia('(min-width: 1024px)').matches, has = view().has;
+	const compact = phoneNow(), has = view().has;
 	// (not over this browser's own video: WebKit froze it for seconds after a View Transition took it along; the
 	// player's own slide then)
 	if (compact && has && (a.page === 'playing') !== (b.page === 'playing')) return videoHere() ? '' : b.page === 'playing' ? 'player-open' : 'player-close';
@@ -203,9 +207,10 @@ if (window.visualViewport) {
 let toastId = 0;
 function toast(text, action, ms, offline) {
 	const id = ++toastId;
-	set({ toasts: [...store.toasts.filter(t => t.text !== text).slice(-2), { id, text, action, offline }] });
+	ms = ms || (action ? 6000 : 4000);
+	set({ toasts: [...store.toasts.filter(t => t.text !== text).slice(-2), { id, text, action, offline, ms }] });
 	// it sinks away, then goes
-	setTimeout(() => { const t = store.toasts.find(x => x.id === id); if (!t) return; t.out = true; notify(); setTimeout(() => set({ toasts: store.toasts.filter(x => x.id !== id) }), 200); }, ms || (action ? 6000 : 4000));
+	setTimeout(() => { const t = store.toasts.find(x => x.id === id); if (!t) return; t.out = true; notify(); setTimeout(() => set({ toasts: store.toasts.filter(x => x.id !== id) }), 200); }, ms);
 	return id;
 }
 let modalId = 0;
@@ -360,6 +365,8 @@ function applySnap(s) {
 	if (B.active && B.meta && s.path === B.meta.p && s.paused && !s.loading) B.handheldQuiet = true;
 	if (s.paused === false && prev && prev.paused === true && B.active && B.handheldQuiet && !el.paused && !B.leaving && Date.now() - (B.announcedAt || 0) > 2000) handheldTookOver();
 	if (!prev || prev.playlistSerial !== s.playlistSerial) set({ plTick: store.plTick + 1 });
+	// a playlist playing on the handheld is a recent one (the Playlists page's Recent, the sidebar's)
+	if (s.source && s.source.kind === 'playlist' && s.source.id && !s.paused && (!prev || prev.path !== s.path)) markUsed(s.source.id);
 	updateMediaSession();
 }
 function openSSE() {
@@ -384,6 +391,8 @@ function openSSE() {
 		goDown(r);
 	});
 	on('awake', () => clearTimeout(C.graceTimer));
+	// Prev / Next pressed on the handheld while this page plays: this page's list moves on (as its own buttons do)
+	on('handheld-skip', d => { if (B.active && B.meta && B.parked == null && (d.dir === 1 || d.dir === -1)) { markTrack(d.dir); browserNext(false, d.dir); } });
 	// the handheld seeked while this page plays its file: here too
 	on('handheld-seek', d => { if (B.active && B.meta && B.parked == null && typeof d.t === 'number' && store.snap && store.snap.path === B.meta.p && Math.abs(el.currentTime - d.t) > .5) el.currentTime = d.t; });
 	es.onerror = () => {
@@ -793,7 +802,7 @@ async function playPlaylist(id, name, items, index, shuffle, target, tapped, sta
 		let list = items.filter(i => !i.missing && i.p).map(i => ({ p: i.p, title: i.title }));
 		if (shuffle) list = list.sort(() => Math.random() - .5);
 		const idx = shuffle ? 0 : Math.max(0, list.findIndex(i => i.p === items[index || 0].p));
-		if (await browserPlay(list, idx, { kind: 'playlist', title: name, id }, 0)) { chooseTarget('browser'); if (!stay) go('#/playing'); return true; }
+		if (await browserPlay(list, idx, { kind: 'playlist', title: name, id }, 0)) { markUsed(id); chooseTarget('browser'); if (!stay) go('#/playing'); return true; }
 		return false;
 	} else {
 		const was = B.active && !el.paused; el.pause();
@@ -883,11 +892,12 @@ async function startUpload(entries, dir) {
 		items.push({ id: ++upSeq, file: e.file, name, rel: e.rel, dir, size: e.file.size, loaded: 0, state: 'queued', overwrite, error: '', xhr: null });
 	}
 	if (!items.length) return;
-	set({ upload: { items: [...store.upload.items.filter(i => i.state !== 'done' && i.state !== 'cancelled'), ...items], min: false } });
+	clearTimeout(doneTimer);
+	set({ upDone: 0, upload: { ...store.upload, items: [...store.upload.items.filter(i => i.state !== 'done' && i.state !== 'cancelled'), ...items] } });
 	pumpUploads();
 }
 function pumpUploads() {
-	if (store.conn !== 'ok') return;
+	if (store.conn !== 'ok' || store.upload.paused) return;
 	let running = store.upload.items.filter(i => i.state === 'up').length;
 	for (const it of store.upload.items) {
 		if (running >= UP_MAX) break;
@@ -903,7 +913,7 @@ function sendUpload(it) {
 	x.upload.onprogress = e => { it.loaded = e.loaded; if (Date.now() - lastNote > 150) { lastNote = Date.now(); notify(); } };
 	x.onload = () => {
 		it.xhr = null;
-		if (x.status >= 200 && x.status < 300) { it.state = 'done'; it.loaded = it.size; markFresh(joinPath(joinPath(it.dir, it.rel), it.name)); set({ fsTick: store.fsTick + 1, fsDir: it.dir }); collapseSoon(); }
+		if (x.status >= 200 && x.status < 300) { it.state = 'done'; it.loaded = it.size; markFresh(joinPath(joinPath(it.dir, it.rel), it.name)); set({ fsTick: store.fsTick + 1, fsDir: it.dir }); checkUploadsDone(); }
 		else { it.state = 'failed'; let b = {}; try { b = JSON.parse(x.responseText); } catch (e) {} it.error = x.status === 409 ? 'Already there' : b.error || 'Failed (' + x.status + ')'; if (x.status === 401) signOutHere('expired'); }
 		notify(); pumpUploads();
 	};
@@ -913,17 +923,25 @@ function sendUpload(it) {
 	x.send(it.file);
 	notify();
 }
-function cancelUpload(it) { if (it.xhr) it.xhr.abort(); it.state = 'cancelled'; set({ upload: { ...store.upload, items: store.upload.items.filter(i => i !== it) } }); pumpUploads(); }
-function cancelAllUploads() { store.upload.items.forEach(i => { if (i.state === 'up' || i.state === 'queued' || i.state === 'waiting') { if (i.xhr) i.xhr.abort(); i.state = 'cancelled'; } }); set({ upload: { items: store.upload.items.filter(i => i.state === 'done' || i.state === 'failed'), min: false } }); }
+function cancelUpload(it) { if (it.xhr) it.xhr.abort(); it.state = 'cancelled'; set({ upload: { ...store.upload, items: store.upload.items.filter(i => i !== it) } }); pumpUploads(); checkUploadsDone(); }
+function cancelAllUploads() { store.upload.items.forEach(i => { if (i.state === 'up' || i.state === 'queued' || i.state === 'waiting') { if (i.xhr) i.xhr.abort(); i.state = 'cancelled'; } }); set({ upload: { items: store.upload.items.filter(i => i.state === 'failed'), paused: false } }); }
 function retryUpload(it) { it.state = 'queued'; it.loaded = 0; notify(); pumpUploads(); }
 function holdUploads() { store.upload.items.forEach(i => { if (i.state === 'up' || i.state === 'queued') { const x = i.xhr; i.xhr = null; i.state = 'waiting'; i.loaded = 0; if (x) x.abort(); } }); notify(); }
-function resumeUploads() { let any = false; store.upload.items.forEach(i => { if (i.state === 'waiting') { i.state = 'queued'; any = true; } }); if (any) { set({ upload: { ...store.upload, min: false } }); pumpUploads(); } }
-// uploads all done: the panel folds to a strip after 4 s
-let collapseTimer = 0;
-function collapseSoon() {
-	clearTimeout(collapseTimer);
-	collapseTimer = setTimeout(() => { const it = store.upload.items; if (it.length && it.every(i => i.state === 'done')) set({ upload: { ...store.upload, min: true } }); }, 4000);
+function resumeUploads() { if (store.upload.paused) return; let any = false; store.upload.items.forEach(i => { if (i.state === 'waiting') { i.state = 'queued'; any = true; } }); if (any) { notify(); pumpUploads(); } }
+// Pause: what's on its way stops (it starts again from the beginning: the handheld can't take a file in parts)
+function pauseUploads(on) { store.upload.paused = on; if (on) holdUploads(); else resumeUploads(); notify(); }
+// all sent: the key says so (a tick) and a toast says where; 2.5 s later the key is the arrow again
+let doneTimer = 0;
+function checkUploadsDone() {
+	const its = store.upload.items;
+	if (!its.length || its.some(i => i.state !== 'done')) return;
+	const dirs = [...new Set(its.map(i => i.dir))], d = dirs[0];
+	const there = store.route.page === 'files' && store.route.path === d;
+	set({ upDone: Date.now() });
+	toast(plural(its.length, 'file', 'files') + ' uploaded to ' + (dirs.length > 1 ? plural(dirs.length, 'folder', 'folders') : dirLabel(d)), dirs.length === 1 && !there ? { label: 'Show', fn: () => go(filesHash(d)) } : null);
+	clearTimeout(doneTimer); doneTimer = setTimeout(clearDone, 2500);
 }
+function clearDone() { clearTimeout(doneTimer); set({ upDone: 0, upload: { ...store.upload, items: store.upload.items.filter(i => i.state !== 'done') } }); }
 // rows that just arrived glow for 2 s
 function markFresh(p) { set({ fresh: Object.assign({}, store.fresh, { [p]: Date.now() }) }); setTimeout(() => { const f = Object.assign({}, store.fresh); delete f[p]; set({ fresh: f }); }, 2200); }
 const uploading = () => store.upload.items.some(i => i.state === 'up' || i.state === 'queued' || i.state === 'waiting');
@@ -960,7 +978,8 @@ function useHeld(serverVal) {
 	return [held == null ? serverVal : held, hold];
 }
 
-function Modal({ title, sub, onClose, actions, children, cls }) {
+// pos: a menu or popover placed by its anchor (no scrim then); raw: the children are the whole inside
+function Modal({ title, sub, label, onClose, actions, children, cls, pos, raw }) {
 	const ref = useRef();
 	useEffect(() => {
 		const prev = document.activeElement;
@@ -972,15 +991,15 @@ function Modal({ title, sub, onClose, actions, children, cls }) {
 	const key = e => {
 		if (e.key === 'Escape') { e.stopPropagation(); onClose(); }
 		if (e.key === 'Tab') {
-			const f = [...ref.current.querySelectorAll('button:not(:disabled),input,select')]; if (!f.length) return;
+			const f = [...ref.current.querySelectorAll('button:not(:disabled),input,select,[tabindex="0"]')]; if (!f.length) return;
 			const first = f[0], last = f[f.length - 1];
 			if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); } else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
 		}
 	};
-	return html`<div class="scrim" onMouseDown=${e => { if (e.target === e.currentTarget) onClose(); }} onKeyDown=${key}>
-		<div class="modal ${cls || ''}" role="dialog" aria-modal="true" aria-label=${title} ref=${ref}>
+	return html`<div class=${'scrim' + (pos ? ' clear' : '')} onMouseDown=${e => { if (e.target === e.currentTarget) onClose(); }} onKeyDown=${key}>
+		<div class="modal ${cls || ''}" style=${pos} role="dialog" aria-modal="true" aria-label=${label || title} ref=${ref}>
 			${title && html`<h2>${title}</h2>`}${sub && html`<div class="sub">${sub}</div>`}
-			${children && html`<div class="body">${children}</div>`}
+			${children && (raw ? children : html`<div class="body">${children}</div>`)}
 			${actions && html`<div class="acts">${actions}</div>`}
 		</div></div>`;
 }
@@ -1006,15 +1025,31 @@ function Seek({ view: v, onSeek, disabled }) {
 			${dur > 0 && html`<div class="thumb" style="left:${frac * 100}%"></div>`}</div></div>`;
 }
 
-function Cover({ path, kind, k }) {
-	const [bad, setBad] = useState(false);
-	useEffect(() => setBad(false), [path]);
-	if (path && !bad) return html`<img src="/api/cover?p=${encodeURIComponent(path)}" alt="" onError=${() => setBad(true)} />`;
-	return html`<${Icon} n=${kind === 'video' ? 'film' : kind === 'photo' ? 'picture' : 'note'} k=${k || 4} />`;
+/* covers: the file's own art when it has one, over a generated one (a gradient keyed on the path, a pixel motif) that
+   shows while it loads and stays when there's none. No artwork of ours: the handheld's files only */
+const PAL = [['#E8823A', '#6B1E4A'], ['#3AA7A0', '#18234F'], ['#F2C14E', '#B0413E'], ['#6C5CE7', '#120F2E'], ['#2E86AB', '#0B1E2D'], ['#D96C9A', '#2B193D'], ['#7BBF6A', '#1C3A2E'], ['#F0645A', '#2A0E14']];
+const MOTIFS = ['note', 'sun', 'moon', 'eq', 'vis-waves', 'vis-bars', 'vis-spectrum', 'note'];
+function hashOf(s) { let h = 5381; s = s || ''; for (let i = 0; i < s.length; i++) h = (h * 33 + s.charCodeAt(i)) | 0; return h >>> 0; }
+const palOf = s => PAL[hashOf(s) % PAL.length];
+function GenCover({ seed, kind, k }) {
+	const h = hashOf(seed), [a, b] = PAL[h % PAL.length];
+	const n = kind === 'video' ? 'film' : kind === 'photo' ? 'picture' : MOTIFS[(h >>> 5) % MOTIFS.length];
+	return html`<span class="gc" style=${`background:linear-gradient(135deg,${a},${b})`}><${Icon} n=${n} k=${k || 2} /></span>`;
+}
+const coverUrl = p => p ? '/api/cover?p=' + encodeURIComponent(p) : '';
+function Art({ src, seed, kind, k }) {
+	const [st, setSt] = useState('');
+	useEffect(() => setSt(''), [src]);
+	return html`<${GenCover} seed=${seed} kind=${kind} k=${k} />${src && st !== 'bad' && html`<img class=${'cvimg' + (st === 'ok' ? ' on' : '')} src=${src} alt="" decoding="async" onLoad=${() => setSt('ok')} onError=${() => setSt('bad')} />`}`;
+}
+// a playlist's cover: Liked's heart on dark gold; else a 2×2 mosaic
+function PlArt({ p, k }) {
+	if (p.builtin || p.id === LIKED_ID) return html`<span class="liked-art gc"><${Icon} n="heart" k=${k || 2} /></span>`;
+	return html`<span class="mosaic gc">${[0, 1, 2, 3].map(i => html`<span><${GenCover} seed=${p.id + '/' + i} kind="audio" k=${k ? Math.max(1, k - 1) : 1} /></span>`)}</span>`;
 }
 
 function Banner({ title, sub, children, cls }) {
-	return html`<div class="banner ${cls || ''}" role="status"><div class="grow"><div class="bt">${title}</div>${sub && html`<div class="bs">${sub}</div>`}</div>${children}</div>`;
+	return html`<div class="banner box surface ${cls || ''}" role="status"><div class="grow"><div class="bt">${title}</div>${sub && html`<div class="bs">${sub}</div>`}</div>${children}</div>`;
 }
 function Empty({ icon, title, sub, button, onClick }) {
 	return html`<div class="empty"><${Icon} n=${icon} k=${6} /><h2>${title}</h2><p>${sub}</p>${button && html`<button class="btn primary" onClick=${onClick}>${button}</button>`}</div>`;
@@ -1023,14 +1058,58 @@ const Skeleton = () => html`<div aria-hidden="true">${[1, 2, 3, 4, 5, 6].map(() 
 function useLater(loading, ms) { const [s, setS] = useState(false); useEffect(() => { if (!loading) { setS(false); return; } const t = setTimeout(() => setS(true), ms); return () => clearTimeout(t); }, [loading]); return s; }
 
 function MoreDots() { return html`<span class="dots" aria-hidden="true"><i></i><i></i><i></i></span>`; }
+function Storage({ free, total }) {
+	const cls = free < 200e6 ? 'crit' : free < 1e9 ? 'low' : '';
+	return html`<span class=${'storage ' + cls}>${total > 0 && html`<span class="meter" aria-hidden="true"><i style=${'width:' + Math.max(0, Math.min(100, (1 - free / total) * 100)) + '%'}></i></span>`}<span class="num">${cls ? 'Low on space · ' : ''}${fmtSize(free)} free</span></span>`;
+}
 
-// a simple action sheet / menu: items [{label, icon, sub, danger, disabled, fn}]
-function openSheet(title, glyph, items) {
-	const close = openModal(close => html`<${Modal} cls="sheet" onClose=${close}>
-		<div class="sheet-head"><${Icon} n=${glyph || 'note'} k=${3} cls="gl" /><div class="grow clamp2">${title}</div></div>
-		<div style="padding:var(--s2) 0">${items.filter(Boolean).map(it => it === '-' ? html`<div class="sheet-sep" role="separator"></div>` : html`<button class="sheet-item ${it.danger ? 'danger' : ''}" disabled=${it.disabled} onClick=${() => { close(); it.fn && it.fn(); }}>
-			${it.icon ? html`<${Icon} n=${it.icon} k=${2} cls=${it.y ? 'y' : ''} />` : html`<span style="width:24px"></span>`}<span class="grow">${it.label}${it.sub && html`<span class="sm">${it.sub}</span>`}</span>${it.on && html`<${Icon} n="check" k=${2} cls="on" label="Chosen" />`}</button>`)}</div></${Modal}>`);
+// where a menu goes on a computer: beside what opened it (an element, or a point), below or above it
+function menuPos(a, w) {
+	if (!a || phoneNow()) return null;
+	w = w || 280;
+	const r = a.getBoundingClientRect ? a.getBoundingClientRect() : { left: a.x, right: a.x, top: a.y, bottom: a.y };
+	const left = Math.max(8, Math.min(innerWidth - w - 8, r.right - w));
+	// (the side with more room; a long menu scrolls inside)
+	const above = r.top - 12, below = innerHeight - r.bottom - 12;
+	return above > below ? `left:${left}px;bottom:${innerHeight - r.top + 4}px;max-height:${Math.min(520, above)}px` : `left:${left}px;top:${r.bottom + 4}px;max-height:${Math.min(520, below)}px`;
+}
+// an action sheet (a phone) or a menu beside its row (a computer): items [{label, icon, sub, danger, disabled, fn}], '-'
+// between groups. opts: {anchor, sub, seed, kind, cover} (the header's tile: a cover when seed is given)
+function openSheet(title, glyph, items, opts) {
+	opts = opts || {};
+	const pos = menuPos(opts.anchor);
+	const list = items.filter(Boolean).filter((it, i, a) => it !== '-' || (i > 0 && i < a.length - 1 && a[i - 1] !== '-'));
+	const close = openModal(close => html`<${Modal} cls=${'sheet' + (pos ? ' menu-pop' : '')} pos=${pos} label=${title} raw=${true} onClose=${close}>
+		<div class="sheet-head"><span class=${'tile xs' + (glyph === 'folder' ? ' folder' : '')}>${opts.seed != null ? html`<${Art} src=${opts.cover} seed=${opts.seed} kind=${opts.kind} k=${1} />` : html`<${Icon} n=${glyph || 'note'} k=${2} />`}</span>
+			<div class="grow"><div class="t clamp2">${title}</div>${opts.sub && html`<div class="s">${opts.sub}</div>`}</div></div>
+		<div class="sheet-items">${list.map(it => it === '-' ? html`<div class="sheet-sep" role="separator"></div>` : html`<button class="sheet-item ${it.danger ? 'danger' : ''}" disabled=${it.disabled} onClick=${() => { close(); it.fn && it.fn(); }}>
+			${it.icon ? html`<${Icon} n=${it.icon} k=${2} cls=${it.y ? 'y' : ''} />` : html`<span style="width:22px"></span>`}<span class="grow">${it.label}${it.sub && html`<span class="sm">${it.sub}</span>`}</span>${it.on && html`<${Icon} n="check" k=${2} cls="on" label="Chosen" />`}</button>`)}</div></${Modal}>`);
 	return close;
+}
+// the phone's menu for the app itself (the sidebar's card on wider screens): the handheld, Sign out
+function appMenu() {
+	const sn = store.snap, r = store.roots && store.roots[0];
+	const bits = [store.reconnecting ? 'Reconnecting…' : 'Connected', sn && sn.battery >= 0 ? 'battery ' + sn.battery + '%' : '', r && r.free != null ? fmtSize(r.free) + ' free' : ''].filter(Boolean).join(' · ');
+	openSheet('Your handheld', 'card', [{ label: 'Sign out', icon: 'power', fn: signOut }], { sub: bits });
+}
+function AppMenu() {
+	const wide = useMedia(Q_WIDE);
+	if (wide) return null;
+	return html`<button class="ib" aria-label="Your handheld" aria-haspopup="dialog" onClick=${appMenu}><${Icon} n="card" k=${2} /></button>`;
+}
+
+/* the handheld, drawn small: two panels, the bottom one showing the QR (sign-in) or dark (the down screen) */
+function HandheldArt({ mode }) {
+	let bottom = '';
+	if (mode === 'qr') {
+		const q = ['1111101011111', '1000101010001', '1011101110101', '1011100011101', '1000101010001', '1111101011111', '0000000100000', '1011011101101', '0110100010110', '1111101101011', '1000100110100', '1011101011011', '1111101101111'];
+		bottom = '<rect x="31" y="44.5" width="25" height="25" rx="1" fill="#fff"/>' + q.map((r, y) => [...r].map((c, x) => c === '1' ? `<rect x="${33 + x * 1.6}" y="${46.5 + y * 1.6}" width="1.6" height="1.6" fill="#000"/>` : '').join('')).join('') +
+			'<rect x="60" y="48" width="18" height="2" fill="#FFD23F"/><rect x="60" y="53" width="14" height="2" fill="#8F8A80"/><rect x="60" y="58" width="16" height="3" rx=".5" fill="#26242E"/>';
+	}
+	const dark = mode !== 'qr';
+	const top = dark ? '<rect x="14" y="8" width="64" height="28" fill="#060608"/>' : '<rect x="14" y="8" width="64" height="28" fill="#000"/><rect x="36" y="14" width="20" height="2" fill="#FFD23F"/><rect x="30" y="20" width="32" height="2" fill="#E8E2D3"/><rect x="34" y="26" width="24" height="2" fill="#8F8A80"/>';
+	const svg = `<svg viewBox="0 0 92 84" class="dsmini" shape-rendering="crispEdges" aria-hidden="true"><rect x="8" y="2" width="76" height="38" rx="6" fill="#26242E" stroke="#605D60" stroke-width="1.5"/>${top}<rect x="20" y="40" width="52" height="3" fill="#1B1920"/><rect x="8" y="42" width="76" height="40" rx="6" fill="#26242E" stroke="#605D60" stroke-width="1.5"/><rect x="14" y="43" width="64" height="35" fill="${dark ? '#060608' : '#000'}"/>${bottom}</svg>`;
+	return html`<span style="display:block;line-height:0" dangerouslySetInnerHTML=${{ __html: svg }}></span>`;
 }
 
 /* ================= login ================= */
@@ -1064,7 +1143,7 @@ function Login() {
 	useTick(1000, !!lockEnd);
 	const left = lockEnd ? Math.max(0, Math.ceil((lockEnd - Date.now()) / 1000)) : 0;
 	useEffect(() => { if (lockEnd && !left) { setLockEnd(0); setStatus('idle'); setMsg(''); setTimeout(() => refs.current[0] && refs.current[0].focus(), 0); } });
-	useEffect(() => { if (!s.signingIn && refs.current[0]) refs.current[0].focus(); }, [s.signingIn]);
+	useEffect(() => { if (!s.signingIn && refs.current[0] && !touchOnly) refs.current[0].focus(); }, [s.signingIn]);
 	const locked = !!lockEnd && left > 0;
 	async function submit(arr) {
 		setStatus('busy'); setMsg('Signing in…');
@@ -1097,28 +1176,28 @@ function Login() {
 	function paste(e) { e.preventDefault(); const v = clean((e.clipboardData || window.clipboardData).getData('text')).slice(0, 4); if (!v) return; const a = ['', '', '', '']; [...v].forEach((c, i) => a[i] = c); setChars(a); if (a.every(Boolean)) submit(a); else refs.current[v.length].focus(); }
 	const busy = status === 'busy' || s.signingIn;
 	const dis = busy || locked;
-	return html`<main class="login">
-		<img src="/logo.svg" alt="" />
-		<h1>Banana Player</h1>
+	return html`<main class="login"><div class="signin">
+		<div class="brand"><img src="/logo.svg" alt="" width="64" height="64" />Banana Player</div>
 		${s.signedOut === 'pin' && html`<${Banner} cls="info" title="Signed out: a new PIN was made on your handheld." />`}
 		${s.signedOut === 'expired' && html`<${Banner} cls="info" title="You were signed out. Enter the PIN to continue." />`}
 		${s.loginNote && html`<${Banner} cls="info" title=${s.loginNote} />`}
-		<p class="sub">Enter the PIN shown on your handheld</p>
+		<div class="box surface how"><${HandheldArt} mode="qr" /><div><div class="kicker y">Quickest</div><div class="t">Scan the QR on your handheld</div><p>Point your phone's camera at its bottom screen. It signs you in.</p></div></div>
+		<div class="or" aria-hidden="true">OR TYPE THE PIN</div>
 		<div class="pin ${status === 'wrong' ? 'wrong' : ''} ${busy ? 'busy' : ''} ${shake && status === 'wrong' ? 'shake' : ''}" key=${shake} role="group" aria-label="PIN">
-			${chars.map((c, i) => html`<input ref=${r => refs.current[i] = r} value=${c} disabled=${dis} inputmode="text" autocomplete=${i ? 'off' : 'one-time-code'} autocapitalize="characters" autocorrect="off" spellcheck="false" maxlength=${i === 0 ? 4 : 2}
+			${chars.map((c, i) => html`<input ref=${r => refs.current[i] = r} class=${c ? 'filled' : ''} value=${c} disabled=${dis} inputmode="text" autocomplete=${i ? 'off' : 'one-time-code'} autocapitalize="characters" autocorrect="off" spellcheck="false" maxlength=${i === 0 ? 4 : 2}
 				aria-label=${'PIN character ' + (i + 1)} onInput=${e => input(i, e)} onKeyDown=${e => keydown(i, e)} onPaste=${paste} onFocus=${e => e.target.select()} />`)}
 		</div>
 		<div class="msg ${status === 'wrong' || locked ? 'err' : 'dim'}" aria-live="polite">${s.signingIn ? 'Signing in…' : locked ? 'Too many tries. Try again in ' + fmtTime(left) + '.' : msg}</div>
-		<p class="help">On your handheld: START › Settings › Web dashboard</p>
-		<p class="foot">Unencrypted: use it on your home Wi-Fi</p>
-	</main>`;
+		<p class="help">On the handheld: <span class="key">START</span> › Settings › Web dashboard</p>
+		<p class="lnote"><${Icon} n="lock" k=${1} />Not encrypted: use it on your home Wi-Fi only.</p>
+	</div></main>`;
 }
 
 /* ================= now playing =================
-   YouTube Music's shape: the media fills the space; one transport row; everything else (Queue, Chapters, Sound or
-   Audio & Subtitles) in one tabbed panel: a bottom sheet on phones and tablets, a column on the right on desktop,
-   where the bottom bar carries the transport. Phone and tablet show it as a full-screen player that the mini player
-   expands into and a chevron or a swipe down folds away. */
+   Phone: a full-screen player the small one expands into (a chevron or a swipe down folds it away); its panel (Up next,
+   Chapters, Tracks, Sound, Details) is a sheet from the bottom. Tablet: in the page, the cover beside the title and the
+   controls, the panel a card underneath. Computer: the stage and a panel column; the bar at the bottom carries the
+   transport, so there's one set of controls. */
 const reduceMotion = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
 const playableCache = {};
 function useCanPlayHere(path) {
@@ -1132,31 +1211,55 @@ function useCanPlayHere(path) {
 	}, [path]);
 	return r;
 }
-// elapsed on the left; on the right the time left ("−0:57"), or the length: a tap swaps them. skip: −5s / +10s between
+// elapsed on the left; on the right the time left ("−0:57"), or the length: a tap swaps them. skip: −5 s / +10 s between
 function Times({ v, skip, off }) {
 	useTick(1000);
 	const [total, setTotal] = useState(lsGet('bpTimeTotal') === '1');
 	const p = v.pos(), d = v.duration;
 	const flip = () => { lsSet('bpTimeTotal', total ? '0' : '1'); setTotal(!total); };
 	return html`<div class="times"><span>${fmtTime(p)}</span>
-		${skip && html`<span class="skips"><button aria-label="Back 5 seconds" onClick=${() => ctl.seekRel(-5)} disabled=${off}>−5s</button><button aria-label="Forward 10 seconds" onClick=${() => ctl.seekRel(10)} disabled=${off}>+10s</button></span>`}
+		${skip && html`<span class="skips"><button class="btn sm" aria-label="Back 5 seconds" onClick=${() => ctl.seekRel(-5)} disabled=${off}>−5 s</button><button class="btn sm" aria-label="Forward 10 seconds" onClick=${() => ctl.seekRel(10)} disabled=${off}>+10 s</button></span>`}
 		${d > 0 ? html`<button class="tm-r" onClick=${flip} aria-label=${total ? 'Length ' + fmtTime(d) + '. Show the time left' : fmtTime(d - p) + ' left. Show the length'}>${total ? fmtTime(d) : '−' + fmtTime(d - p)}</button>` : html`<span></span>`}</div>`;
 }
 
-/* ---- where it plays: one chip, a chooser like a cast picker ---- */
+/* ---- where it plays: a two-segment switch on the player; in the bar, a key that opens a bubble ---- */
 const targetLabel = t => t === 'browser' ? 'In this browser' : 'On handheld';
-function chooseDevice() {
-	const sn = store.snap, t = store.target;
-	const noHere = t === 'handheld' && !B.active && sn && sn.path && playableCache[sn.path] === 'no';
-	openSheet('Play on', 'speaker', [
-		{ label: 'On handheld', icon: 'card', sub: "Your handheld's speakers or headphones", on: t === 'handheld', fn: () => setTarget('handheld') },
-		{ label: 'In this browser', icon: 'laptop', sub: NO_HERE ? NO_HERE_WHY : noHere ? 'Plays on the handheld only' : 'This phone or computer', on: t === 'browser', disabled: NO_HERE || noHere, fn: () => setTarget('browser') },
-	]);
+// what the handheld plays can't play here (probed): the browser's choice says so
+const noHereFor = () => { const sn = store.snap; return store.target === 'handheld' && !B.active && !!sn && !!sn.path && playableCache[sn.path] === 'no'; };
+function DevSwitch({ small }) {
+	const t = store.target, why = NO_HERE ? NO_HERE_WHY : noHereFor() ? 'Plays on the handheld only' : '';
+	return html`<div class="seg dev" role="group" aria-label="Where it plays">
+		<button aria-pressed=${t === 'handheld'} aria-label="On handheld" title="On handheld" onClick=${() => setTarget('handheld')}><${Icon} n="card" k=${2} />${!small && 'Handheld'}</button>
+		<button aria-pressed=${t === 'browser'} aria-label=${'In this browser' + (why ? '. ' + why : '')} title=${why || 'In this browser'} aria-disabled=${why && t !== 'browser' ? 'true' : undefined} onClick=${() => setTarget('browser')}><${Icon} n="laptop" k=${2} />${!small && 'This browser'}</button></div>`;
 }
-function DeviceChip({ cls }) {
+function DevButton() {
 	const t = store.target;
-	return html`<button class=${'devchip ' + (cls || '')} aria-haspopup="dialog" aria-label=${targetLabel(t) + '. Change where it plays'} onClick=${chooseDevice}>
-		<${Icon} n=${t === 'browser' ? 'laptop' : 'card'} k=${2} /><span class="ell">${targetLabel(t)}</span><${Icon} n="down" k=${1} cls="caret" /></button>`;
+	return html`<button class=${'btn sm devbtn' + (t === 'handheld' ? ' hh' : '')} aria-haspopup="dialog" aria-expanded=${!!store.devOpen} aria-label=${targetLabel(t) + '. Change where it plays'} title=${targetLabel(t)} onClick=${e => deviceBubble(e.currentTarget)}>
+		<${Icon} n=${t === 'browser' ? 'laptop' : 'card'} k=${2} /><span class="lbl">${t === 'browser' ? 'Browser' : 'Handheld'}</span><${Icon} n="down" k=${1} /></button>`;
+}
+function deviceBubble(anchor) {
+	const r = anchor.getBoundingClientRect(), W = 300;
+	const right = Math.max(8, innerWidth - r.right), bottom = innerHeight - r.top + 14;
+	const notch = Math.max(14, Math.min(W - 30, innerWidth - right - (r.left + r.right) / 2 - 7));
+	set({ devOpen: true });
+	openModal(close => html`<${DevBubble} pos=${`right:${right}px;bottom:${bottom}px;--notch:${notch}px`} onClose=${() => { set({ devOpen: false }); close(); }} />`, () => set({ devOpen: false }));
+}
+function DevBubble({ pos, onClose }) {
+	const s = useStore(), t = s.target, v = view(), ref = useRef();
+	useEffect(() => {
+		const b = ref.current && ref.current.querySelector('.sheet-item'); if (b) b.focus();
+		const k = e => { if (e.key === 'Escape') { e.preventDefault(); onClose(); } };
+		document.addEventListener('keydown', k); return () => document.removeEventListener('keydown', k);
+	}, []);
+	const at = v.has ? fmtTime(v.pos()) : '';
+	const hereSub = NO_HERE ? NO_HERE_WHY : noHereFor() ? 'Plays on the handheld only' : t === 'handheld' && v.has && v.kind !== 'photo' ? 'Pauses the handheld, carries on at ' + at : 'This phone or computer';
+	const hhSub = t === 'browser' && v.has ? 'Pauses this browser, carries on there at ' + at : "The handheld's speakers or headphones";
+	const pick = x => { onClose(); setTarget(x); };
+	return html`<div class="popcatch" onMouseDown=${onClose}></div>
+		<div class="bubble box surface" role="dialog" aria-label="Play on" ref=${ref} style=${pos}>
+			<div class="kicker">Play on</div>
+			<button class=${'sheet-item' + (t === 'handheld' ? ' on' : '')} aria-pressed=${t === 'handheld'} onClick=${() => pick('handheld')}><${Icon} n="card" k=${2} /><span class="grow"><b>On handheld</b><span class="sm">${hhSub}</span></span></button>
+			<button class=${'sheet-item' + (t === 'browser' ? ' on' : '')} aria-pressed=${t === 'browser'} aria-disabled=${NO_HERE ? 'true' : undefined} onClick=${() => pick('browser')}><${Icon} n="laptop" k=${2} /><span class="grow"><b>In this browser</b><span class="sm">${hereSub}</span></span></button></div>`;
 }
 
 // "English" from "English · SRT", "Track 2" from "Track 2 · SRT"
@@ -1168,10 +1271,10 @@ function subChip(v) {
 }
 /* the sheet and the full player answer Back (Android's button, iOS's swipe, the browser's): each open layer is a
    history entry of its own, with the same address, so the hash routes don't move */
-const compactNow = () => !matchMedia('(min-width: 1024px)').matches;
+const compactNow = () => phoneNow();
 function openPanel(extra) {
 	if (!store.sheetOpen && compactNow() && !(history.state && history.state.sheet)) pushHist({ sheet: 1 });
-	set(Object.assign({ sheetOpen: true }, extra));
+	set(Object.assign({ sheetOpen: compactNow() }, extra));
 }
 function closePanel() {
 	if (!store.sheetOpen) return;
@@ -1182,23 +1285,29 @@ addEventListener('popstate', e => { if (store.sheetOpen && !(e.state && e.state.
 // the panel's tab, opened (the sheet slides up on a phone)
 function showTab(tab, extra) {
 	openPanel(Object.assign({ npTab: tab }, extra));
-	requestAnimationFrame(() => { const c = document.querySelector('.np-panel .tabbody, .sheet2 .tabbody'); if (c) c.scrollTop = 0; });
+	requestAnimationFrame(() => { const c = document.querySelector('.np-panel .tabbody, .sheet2 .tabbody, .np-card .tabbody'); if (c) c.scrollTop = 0; });
 }
 const showTracks = tab => showTab('tracks', { tracksTab: tab });
 function npTabs(v) {
-	const vid = v.kind === 'video', t = [['queue', 'Queue']];
+	const vid = v.kind === 'video', t = [['queue', 'Up next']];
 	if (v.chapters.length) t.push(['chapters', 'Chapters']);
-	if (vid) t.push(['tracks', 'Tracks']);	// (short: four tabs fit the desktop panel; the tab's own switch says Audio / Subtitles)
-	else { t.push(['sound', 'Sound']); if (v.tracks && (v.tracks.audio || []).length > 1) t.push(['tracks', 'Tracks']); }
-	t.push(['details', 'Details']);
+	if (vid || (v.tracks && (v.tracks.audio || []).length > 1)) t.push(['tracks', 'Tracks']);	// (the tab's own switch says Audio / Subtitles)
+	t.push(['sound', 'Sound'], ['details', 'Details']);
 	return t;
+}
+const NP_GLYPH = { queue: 'playlist', chapters: 'chapters', tracks: 'cc', sound: 'eq', details: 'info' };
+// the phone's three keys under the transport (the sheet has every tab)
+function threeKeys(v, tabs) {
+	const has = k => tabs.some(x => x[0] === k);
+	const want = v.kind === 'video' ? ['queue', has('chapters') ? 'chapters' : 'sound', 'tracks'] : ['queue', 'sound', 'details'];
+	return want.filter(has).map(k => tabs.find(x => x[0] === k));
 }
 function TabBody({ v, tab }) {
 	return html`<div class="tabpane" key=${tab}>${TabBody1({ v, tab })}</div>`;
 }
 function TabBody1({ v, tab }) {
 	return tab === 'details' ? html`<${DetailsTab} v=${v} />` : tab === 'chapters' ? html`<${ChaptersCard} v=${v} />` : tab === 'tracks' ? html`<${TracksCard} v=${v} />`
-		: tab === 'sound' ? (v.here ? html`<${SoundHere} />` : html`<${SoundCard} v=${v} />`) : html`<${UpNext} v=${v} />`;
+		: tab === 'sound' ? html`<${VolumeCard} />${v.here ? html`<${SoundHere} />` : html`<${SoundCard} v=${v} />`}` : html`<${UpNext} v=${v} />`;
 }
 function PanelTabs({ tabs, tab, open, onTab }) {
 	return html`<div class="ptabs" role="tablist" aria-label="More about what's playing">${tabs.map(([k, l]) => html`<button role="tab" id=${'pt-' + k} aria-controls="np-tabbody" aria-selected=${open !== false && tab === k} onClick=${() => onTab(k)}>${l}</button>`)}</div>`;
@@ -1262,7 +1371,7 @@ function Media({ v, off, immersive, onCollapse }) {
 	const cover = v.kind === 'video' ? v.path : v.cover;
 	return html`<div class=${'media ' + (live ? 'is-video' : v.kind === 'video' ? 'is-poster' : 'is-cover') + (full ? ' full' : '') + (shown ? ' ov' : '')} ref=${box}
 		onPointerUp=${up} onPointerMove=${move} onMouseLeave=${() => { if (!view().paused) setOv(false); }} role="group" aria-label=${v.title}>
-		${live ? html`<div class="mvideo" ref=${slot}></div>` : html`<div class=${'mart ' + trackClass(v.path)} key=${v.path}><${Cover} path=${cover} kind=${v.kind} k=${v.kind === 'video' ? 6 : 8} /></div>`}
+		${live ? html`<div class="mvideo" ref=${slot}></div>` : html`<div class=${'mart ' + trackClass(v.path)} key=${v.path}><${Art} src=${coverUrl(cover)} seed=${v.path} kind=${v.kind} k=${v.kind === 'video' ? 6 : 10} /></div>`}
 		${!live && v.kind === 'video' && html`<div class="poster-tag"><${Icon} n="card" k=${2} />Playing on your handheld</div>`}
 		${!live && v.kind === 'video' && v.paused && !v.loading && html`<div class="mpaused" aria-hidden="true"><${Icon} n="play" k=${5} /></div>`}
 		${live && html`<div class="mov" aria-hidden=${shown ? undefined : 'true'}>
@@ -1281,36 +1390,38 @@ function Media({ v, off, immersive, onCollapse }) {
 		${rip && html`<div class=${'mrip ' + rip.side} key=${rip.id} aria-hidden="true"><span>${rip.side === 'l' ? '−' + 5 * rip.n + ' s' : '+' + 10 * rip.n + ' s'}</span></div>`}
 	</div>`;
 }
-
-/* ---- the title and what it's from; on a phone or a tablet the small actions are a row of their own (NpActs) ---- */
-// over the scrubber, so a long title has the whole width: the heart on the left, subtitles and the volume on the right
-function NpActs({ v }) {
-	const chip = v.kind === 'video' ? subChip(v) : null;
-	return html`<div class="np-arow">
-		${likable(v) && html`<${LikeBtn} v=${v} cls="np-ib" />`}<span class="grow"></span>
-		${chip != null && html`<button class=${'np-ib' + (chip !== 'Off' ? ' on' : '')} aria-label=${'Subtitles: ' + chip} title=${'Subtitles: ' + chip} onClick=${() => showTracks('sub')}><${Icon} n="cc" k=${2} /></button>`}
-		<${VolButton} /></div>`;
+// a soft glow behind the player, tinted by the cover (blurred), or by the generated cover's colour
+function Glow({ v }) {
+	const src = v.kind === 'audio' ? coverUrl(v.cover) : '';
+	const [ok, setOk] = useState(false);
+	useEffect(() => setOk(false), [src]);
+	if (v.kind === 'video') return null;
+	const [a] = palOf(v.path);
+	return html`<div class="glow" aria-hidden="true">${src && html`<img src=${src} alt="" style=${ok ? '' : 'display:none'} onLoad=${() => setOk(true)} />`}${!ok && html`<i style=${`background:radial-gradient(closest-side, ${a}, transparent)`}></i>`}</div>`;
 }
-// the full player's ⋯: what to do with what plays, then the app's own
-function npMore(v) {
+
+// the player's ⋯: what to do with what plays, then the app's own
+function npMore(v, anchor) {
 	openSheet(v.title, v.kind === 'video' ? 'film' : 'note', [
 		likable(v) && { label: 'Add to playlist…', icon: 'pl-add', fn: () => addToPlaylist([v.path], v.title) },
 		v.path && { label: 'Show in Files', icon: 'folder', fn: () => showInFiles(v.path) },
-		(likable(v) || v.path) && '-',
-		{ label: 'Keyboard shortcuts', icon: 'info', fn: () => set({ help: true }) }, { label: 'Sign out', icon: 'power', fn: signOut }]);
+		'-',
+		!touchOnly && { label: 'Keyboard shortcuts', icon: 'info', fn: () => set({ help: true }) }, { label: 'Sign out', icon: 'power', fn: signOut }],
+		{ anchor, seed: v.path, kind: v.kind, cover: coverUrl(v.kind === 'video' ? v.path : v.cover), sub: v.artist || targetLabel(store.target) });
 }
-function NpMeta({ v, desk }) {
+// the title, what it's from, the subtitles chip; acts: the heart and ⋯ beside the title (the phone)
+function NpMeta({ v, acts }) {
 	const vid = v.kind === 'video', chip = vid ? subChip(v) : null;
 	const src = v.source && v.source.kind && v.source.kind !== 'none' ? v.source : null;
 	return html`<div class="np-meta">
-		<div class="np-tl">
-			<div class=${'grow ' + trackClass(v.path)} key=${v.path}><div class="np-title clamp2">${v.title}</div>
-				${(v.artist || v.album) && html`<div class="np-artist ell">${[v.artist, v.album].filter(Boolean).join(' · ')}</div>`}</div>
-			</div>
-		${(src || v.chapters.length > 0) && html`<div class="np-lines">
-			${src && html`<div class="np-source"><${Icon} n=${src.kind === 'playlist' ? 'playlist' : 'folder'} k=${2} /><span class="ell">From ${src.title}${src.count ? ' · ' + (src.index + 1) + ' / ' + src.count : ''}</span></div>`}
+		<div class="np-tl"><div class=${'grow ' + trackClass(v.path)} key=${v.path}><div class="np-title clamp2">${v.title}</div>
+			${(v.artist || v.album) && html`<div class="np-artist ell">${[v.artist, v.album].filter(Boolean).join(' · ')}</div>`}</div>
+			${acts && likable(v) && html`<${LikeBtn} v=${v} cls="np-ib" />`}
+			${acts && html`<button class="np-ib" aria-label="More" aria-haspopup="dialog" onClick=${e => npMore(v, e.currentTarget)}><${MoreDots} /></button>`}</div>
+		${(src || chip != null || v.chapters.length > 0) && html`<div class="np-lines">
+			${(src || chip != null) && html`<div class="np-source">${src && html`<${Icon} n=${src.kind === 'playlist' ? 'playlist' : 'folder'} k=${2} /><span class="ell">From <b>${src.title}</b>${src.count ? ' · ' + (src.index + 1) + ' / ' + src.count : ''}</span>`}
+				${chip != null && html`<button class=${'chip' + (chip === 'Off' ? ' ghost' : '')} aria-label=${'Subtitles: ' + chip} title=${'Subtitles: ' + chip} onClick=${() => showTracks('sub')}><${Icon} n="cc" k=${1} /><span class="ell" style="max-width:120px">${chip}</span></button>`}</div>`}
 			${v.chapters.length > 0 && html`<button class="np-chap" onClick=${() => showTab('chapters')}><${Icon} n="chapters" k=${2} /><span class="ell">Chapter ${Math.max(1, v.chapter + 1)} of ${v.chapters.length}${v.chapter >= 0 ? ' · ' + chapterTitle(v.chapters[v.chapter], v.chapter) : ''}</span></button>`}</div>`}
-		${desk && chip != null && html`<div class="np-row">${html`<button class=${'pillbtn' + (chip !== 'Off' ? ' on' : '')} onClick=${() => showTracks('sub')}><${Icon} n="cc" k=${2} /><span class="ell">Subtitles: ${chip}</span></button>`}</div>`}
 	</div>`;
 }
 function LoopIcon({ loop, k }) {
@@ -1321,7 +1432,7 @@ function Transport({ v, off }) {
 	return html`<div class="tp">
 		<button class=${'tp-s' + (v.shuffled ? ' on' : '')} aria-label="Shuffle" title=${v.shuffled ? 'Shuffle: On' : 'Shuffle: Off'} aria-pressed=${!!v.shuffled} onClick=${ctl.shuffle} disabled=${off}><${Icon} n="shuffle" k=${2} /></button>
 		<button class="tp-m" aria-label="Previous" onClick=${ctl.prev} disabled=${off}><${Icon} n="prev" k=${3} /></button>
-		<button class="tp-play" aria-label=${v.paused ? 'Play' : 'Pause'} onClick=${ctl.toggle} disabled=${off}><${Icon} n=${v.paused ? 'play' : 'pause'} k=${4} /></button>
+		<button class="box yellow tp-play" aria-label=${v.paused ? 'Play' : 'Pause'} onClick=${ctl.toggle} disabled=${off}><${Icon} n=${v.paused ? 'play' : 'pause'} k=${4} /></button>
 		<button class="tp-m" aria-label="Next" onClick=${ctl.next} disabled=${off}><${Icon} n="next" k=${3} /></button>
 		<button class=${'tp-s' + (v.loop !== 'no' ? ' on' : '')} aria-label=${loopName(v.loop)} title=${loopName(v.loop)} aria-pressed=${v.loop !== 'no'} onClick=${ctl.loop} disabled=${off}><${LoopIcon} loop=${v.loop} k=${2} /></button></div>`;
 }
@@ -1336,37 +1447,45 @@ function VolButton() {
 		return () => { document.removeEventListener('pointerdown', f, true); document.removeEventListener('keydown', k, true); };
 	}, [open]);
 	return html`<div class="volwrap" ref=${ref}><button class=${'np-ib' + (open ? ' on' : '')} aria-label="Volume" aria-expanded=${open} onClick=${() => setOpen(!open)}><${Icon} n="speaker" k=${2} /></button>
-		${open && html`<div class="volpop" role="group" aria-label="Volume"><${VolumeRow} /></div>`}</div>`;
+		${open && html`<div class="volpop box surface" role="group" aria-label="Volume"><${VolumeRow} lab=${true} /></div>`}</div>`;
 }
 
 function Strips({ v, other, sn }) {
-	return html`${v.here && v.parked != null && html`<div class="strip"><span>Stopped when the connection to your handheld dropped.</span><button class="btn sm primary" onClick=${playParked}><${Icon} n="play" k=${2} />Play here from ${fmtTime(v.parked)}</button></div>`}
-		${other && !NO_HERE && html`<div class="strip"><span>Your handheld is playing <b>${titleFor(sn.path, sn.title)}</b></span><button class="btn sm primary" onClick=${continueHere}>Continue here</button></div>`}`;
+	return html`${v.here && v.parked != null && html`<div class="strip box surface"><span>Stopped when the connection to your handheld dropped.</span><button class="btn sm primary" onClick=${playParked}><${Icon} n="play" k=${2} />Play here from ${fmtTime(v.parked)}</button></div>`}
+		${other && !NO_HERE && html`<div class="strip box surface"><span>Your handheld is playing <b>${titleFor(sn.path, sn.title)}</b></span><button class="btn sm primary" onClick=${continueHere}>Continue here</button></div>`}`;
 }
 
 function NowPlaying() {
 	const s = useStore(), v = view(), sn = s.snap;
-	const desk = useMedia('(min-width: 1024px)');
+	const wide = useMedia(Q_WIDE), desk = useMedia(Q_DESK);
 	useCanPlayHere(s.target === 'handheld' && sn ? sn.path : null);
 	const off = s.reconnecting && !v.here;
 	// the handheld plays something this page doesn't have: offer it here
 	const other = s.target === 'browser' && sn && sn.path && sn.kind !== 'photo' && (!B.meta || (sn.path !== B.meta.p && !sn.paused));
+	const top = html`<div class="np-top"><span class="kicker">Now playing</span><${DevSwitch} /><span style="width:44px"></span></div>`;
 	if (!v.has) return html`<div class="np idle">
-		<div class="np-idlehead"><${DeviceChip} /></div>
+		<div class="np-idlehead"><span class="kicker">Now playing</span><${AppMenu} /></div>
+		<div style="display:flex;justify-content:center"><${DevSwitch} /></div>
 		<${Strips} v=${v} other=${other} sn=${sn} />
 		<${Empty} icon="note" title="Nothing playing" sub="Pick something in Files or Playlists." button="Open Files" onClick=${() => go(filesHash(store.lastDir || ''))} /></div>`;
 	const tabs = npTabs(v), tab = tabs.some(x => x[0] === s.npTab) ? s.npTab : 'queue';
-	if (desk) return html`<div class=${'np desk' + (v.kind === 'video' ? ' vid' : '')}>
-		<section class="np-stage" aria-label="Now playing"><div class="stage-in">
+	const vid = v.kind === 'video';
+	const panel = html`<${PanelTabs} tabs=${tabs} tab=${tab} onTab=${k => set({ npTab: k })} />
+		<div class="tabbody" id="np-tabbody" role="tabpanel" aria-labelledby=${'pt-' + tab}><${TabBody} v=${v} tab=${tab} /></div>`;
+	if (desk) return html`<div class=${'np desk' + (vid ? ' vid' : '')}>
+		<div class="np-stagecol"><${Glow} v=${v} />${top}
 			<${Strips} v=${v} other=${other} sn=${sn} />
-			<${Media} v=${v} off=${off} />
-			<${NpMeta} v=${v} desk=${true} /></div></section>
-		<aside class="np-panel" aria-label="Queue and more"><${PanelTabs} tabs=${tabs} tab=${tab} onTab=${k => set({ npTab: k })} />
-			<div class="tabbody" id="np-tabbody" role="tabpanel" aria-labelledby=${'pt-' + tab}><${TabBody} v=${v} tab=${tab} /></div></aside></div>`;
+			<section class="np-stage" aria-label="Now playing"><div class="stage-in"><${Media} v=${v} off=${off} /><${NpMeta} v=${v} /></div></section></div>
+		<aside class="np-panel" aria-label="Queue and more">${panel}</aside></div>`;
+	if (wide) return html`<div class=${'np wide' + (vid ? ' vid' : '')}><${Glow} v=${v} />${top}
+		<${Strips} v=${v} other=${other} sn=${sn} />
+		<div class="np-hero"><${Media} v=${v} off=${off} />
+			<div class="np-side"><${NpMeta} v=${v} /><div class="np-seek"><${Seek} view=${v} onSeek=${ctl.seek} disabled=${off} /><${Times} v=${v} skip=${true} off=${off} /></div><${Transport} v=${v} off=${off} /></div></div>
+		<section class="np-card box surface" aria-label="Queue and more">${panel}</section></div>`;
 	return html`<${FullPlayer} v=${v} off=${off} other=${other} sn=${sn} tabs=${tabs} tab=${tab} />`;
 }
 
-// the phone's and the tablet's player: it fills the screen; the panel is a sheet that peeks at the bottom
+// the phone's player: it fills the screen; the panel is a sheet that rises from the bottom
 function FullPlayer({ v, off, other, sn, tabs, tab }) {
 	const s = store, root = useRef();
 	const short = useMedia('(orientation: landscape) and (max-height: 520px)');
@@ -1392,7 +1511,7 @@ function FullPlayer({ v, off, other, sn, tabs, tab }) {
 	// a swipe down on the header or the media folds the player away; it follows the finger
 	const sw = useRef(null);
 	const down = e => {
-		if (e.pointerType === 'mouse' || e.target.closest('.seek,.sheet2,.np-ctl,input,select,.volpop') || immersive) return;
+		if (e.pointerType === 'mouse' || e.target.closest('.seek,.sheet2,.sh-scrim,.np-ctl,input,select,.volpop') || immersive || s.sheetOpen) return;
 		sw.current = { y: e.clientY, x: e.clientX, t: Date.now(), dy: 0, on: false, box: e.target.closest('.media') };
 	};
 	const move = e => {
@@ -1411,58 +1530,48 @@ function FullPlayer({ v, off, other, sn, tabs, tab }) {
 	};
 	return html`<div class=${'fp' + (entering ? ' entering' : '') + (leaving ? ' leaving' : '') + (short ? ' short' : '') + (immersive ? ' immersive' : '') + (v.kind === 'video' ? ' vid' : '')} ref=${root}
 		onPointerDown=${down} onPointerMove=${move} onPointerUp=${up} onPointerCancel=${up}>
+		<${Glow} v=${v} />
 		<header class="fp-head">
-			<button class="ib" aria-label="Close player" onClick=${collapse}><${Icon} n="down" k=${2} /></button>
-			<div class="grow fp-mid"><${DeviceChip} /></div>
-			<button class="ib" aria-label="More" aria-haspopup="dialog" onClick=${() => npMore(v)}><${MoreDots} /></button></header>
+			<button class="ib" aria-label="Close player" onClick=${collapse}><${Icon} n="down" k=${3} /></button>
+			<div class="grow fp-mid"><${DevSwitch} small=${true} /></div>
+			<${VolButton} /></header>
 		<${Strips} v=${v} other=${other} sn=${sn} />
 		<section class="fp-body" aria-label="Now playing">
 			<div class="fp-media"><${Media} v=${v} off=${off} immersive=${immersive} onCollapse=${collapse} /></div>
 			<div class="np-ctl">
-				<${NpMeta} v=${v} />
-				<${NpActs} v=${v} />
+				<${NpMeta} v=${v} acts=${true} />
 				<div class="np-seek"><${Seek} view=${v} onSeek=${ctl.seek} disabled=${off} /><${Times} v=${v} skip=${true} off=${off} /></div>
-				<${Transport} v=${v} off=${off} /></div></section>
-		<${Sheet} v=${v} tabs=${tabs} tab=${tab} hidden=${immersive && !s.sheetOpen} />
+				<${Transport} v=${v} off=${off} />
+				<div class="np-tabs">${threeKeys(v, tabs).map(([k, l]) => html`<button class="btn" aria-haspopup="dialog" onClick=${() => showTab(k)}><${Icon} n=${NP_GLYPH[k]} k=${2} />${l}</button>`)}</div></div></section>
+		<${Sheet} v=${v} tabs=${tabs} tab=${tab} />
 	</div>`;
 }
 
-// the bottom sheet: peeks with its tabs; a tab or a drag up opens it, a drag down or the row on top closes it
-function Sheet({ v, tabs, tab, hidden }) {
+// the panel as a sheet: a key or a tab opens it; a drag down, the scrim, the grip, Esc or Back closes it
+function Sheet({ v, tabs, tab }) {
 	const s = store, open = !!s.sheetOpen, ref = useRef(), d = useRef(null);
-	const setOpen = o => o ? openPanel() : closePanel();
-	const peekOffset = () => { const el2 = ref.current; return el2 ? el2.offsetHeight - el2.querySelector('.sh-peek').offsetHeight : 0; };
-	const down = e => {
-		if (e.button > 0) return;
-		d.current = { y: e.clientY, t: Date.now(), base: open ? 0 : peekOffset(), on: false, cur: 0 };
-	};
+	const down = e => { if (e.button > 0 || !open) return; d.current = { y: e.clientY, t: Date.now(), on: false, cur: 0 }; };
 	const move = e => {
 		const g = d.current; if (!g) return;
 		const dy = e.clientY - g.y;
-		if (!g.on && Math.abs(dy) > 8) { g.on = true; ref.current.classList.add('dragging'); try { ref.current.setPointerCapture(e.pointerId); } catch (x) {} }
-		if (g.on) { g.cur = Math.max(0, Math.min(peekOffset(), g.base + dy)); ref.current.style.transform = `translateY(${g.cur}px)`; e.preventDefault(); }
+		if (!g.on && dy > 8) { g.on = true; ref.current.classList.add('dragging'); try { ref.current.setPointerCapture(e.pointerId); } catch (x) {} }
+		if (g.on) { g.cur = Math.max(0, dy); ref.current.style.transform = `translateY(${g.cur}px)`; e.preventDefault(); }
 	};
 	const up = e => {
 		const g = d.current; d.current = null; if (!g || !g.on) return;
 		ref.current.classList.remove('dragging'); ref.current.style.transform = '';
-		g.dragged = true; sheetDragged = Date.now();
-		const v2 = (e.clientY - g.y) / Math.max(1, Date.now() - g.t), mid = peekOffset() / 2;
-		setOpen(Math.abs(v2) > .4 ? v2 < 0 : g.cur < mid);
+		sheetDragged = Date.now();
+		const vel = (e.clientY - g.y) / Math.max(1, Date.now() - g.t);
+		if (vel > .4 || g.cur > ref.current.offsetHeight * .3) closePanel();
 	};
-	// a tab opens the sheet there; the one already showing closes it
-	const onTab = k => { if (Date.now() - sheetDragged < 250) return; if (open && k === tab) closePanel(); else openPanel({ npTab: k }); };
-	return html`<section class=${'sheet2' + (open ? ' open' : '') + (hidden ? ' gone' : '')} ref=${ref} aria-label="Queue and more">
-		<div class="sh-peek" onPointerDown=${down} onPointerMove=${move} onPointerUp=${up} onPointerCancel=${up}>
-			<div class="sh-np" aria-hidden=${open ? undefined : 'true'}>
-				<button class="sh-np-main" tabindex=${open ? 0 : -1} aria-label="Back to the player" onClick=${() => { if (Date.now() - sheetDragged > 250) setOpen(false); }}>
-					<span class="art-sm"><${Cover} path=${v.kind === 'video' ? v.path : v.cover} kind=${v.kind} k=${3} /></span>
-					<span class="grow"><span class="t ell">${v.title}</span><span class="a ell">${v.artist || targetLabel(store.target)}</span></span></button>
-				<button class="ib play" tabindex=${open ? 0 : -1} aria-label=${v.paused ? 'Play' : 'Pause'} onClick=${ctl.toggle}><${Icon} n=${v.paused ? 'play' : 'pause'} k=${3} /></button>
-				<button class="ib sh-close" tabindex=${open ? 0 : -1} aria-label="Close" onClick=${closePanel}><${Icon} n="down" k=${2} /></button></div>
-			<button class="sh-grip" aria-label=${open ? 'Close the panel' : 'Open the panel'} aria-expanded=${open} onClick=${() => { if (Date.now() - sheetDragged > 250) setOpen(!open); }}><i></i></button>
-			<${PanelTabs} tabs=${tabs} tab=${tab} open=${open} onTab=${onTab} /></div>
-		<div class="tabbody" id="np-tabbody" role="tabpanel" aria-labelledby=${'pt-' + tab} inert=${open ? undefined : true}><${TabBody} v=${v} tab=${tab} /></div>
-	</section>`;
+	const onTab = k => { if (Date.now() - sheetDragged < 250) return; openPanel({ npTab: k }); };
+	return html`${open && html`<div class="sh-scrim" onClick=${closePanel}></div>`}
+		<section class=${'sheet2 box surface' + (open ? ' open' : '')} ref=${ref} aria-label="Queue and more" role="dialog" aria-modal=${open ? 'true' : undefined} inert=${open ? undefined : true}>
+			<div class="sh-peek" onPointerDown=${down} onPointerMove=${move} onPointerUp=${up} onPointerCancel=${up}>
+				<button class="sh-grip" aria-label="Close the panel" onClick=${() => { if (Date.now() - sheetDragged > 250) closePanel(); }}><i></i></button>
+				<${PanelTabs} tabs=${tabs} tab=${tab} onTab=${onTab} /></div>
+			<div class="tabbody" id="np-tabbody" role="tabpanel" aria-labelledby=${'pt-' + tab}><${TabBody} v=${v} tab=${tab} /></div>
+		</section>`;
 }
 let sheetDragged = 0;
 
@@ -1504,12 +1613,16 @@ function DetailsTab({ v }) {
 		['Size', row && row.size ? fmtSize(row.size) : m.size ? fmtSize(m.size) : ''],
 		['Modified', row && row.mtime ? fmtDate(row.mtime) : ''],
 	].filter(r => r && r[1]);
-	return html`<section aria-label="Details"><dl class="details">${rows.map(([k, val]) => html`<dt>${k}</dt><dd>${val}</dd>`)}</dl>
-		<div class="det-loc"><div class="det-k">Location</div><button class="det-path" onClick=${() => go(filesHash(dirName(p)))}><${Icon} n="folder" k=${2} />
-			<span class="grow">${segs.map((sg, i) => html`${i > 0 && html`<span class="sep">›</span>`}<span>${i === 0 ? rootName(sg) : sg}</span>`)}<span class="sep">›</span><b>${baseName(p)}</b></span><span class="det-open">Show in Files</span></button></div></section>`;
+	const onCard = /^\d+\//.test(p);	// (a network file isn't in the page's tree)
+	return html`<section class="box surface card" aria-label="Details"><dl class="details">${rows.map(([k, val]) => html`<dt>${k}</dt><dd>${val}</dd>`)}</dl></section>
+		<button class="box surface det-path" onClick=${() => go(filesHash(dirName(p)))} aria-label=${'Location: ' + segs.join(' › ') + '. Show in Files'}><${Icon} n="folder" k=${2} />
+			<span class="grow">${segs.map((sg, i) => html`${i > 0 && html`<span class="sep">›</span>`}<span>${i === 0 ? rootName(sg) : sg}</span>`)}<span class="sep">›</span><b>${baseName(p)}</b></span><span class="chip">Show in Files</span></button>
+		<div class="det-acts">${onCard && html`<button class="btn sm" onClick=${() => downloadPaths([p])}><${Icon} n="download" k=${2} />Download</button>`}
+			${likable(v) && html`<button class="btn sm" onClick=${e => addToPlaylist([p], v.title, e.currentTarget)}><${Icon} n="pl-add" k=${2} />Add to playlist</button>`}</div>`;
 }
 
-function VolumeRow() {
+// lab: says whose volume (the speaker button's pop-up; the Sound tab's card has it in its head)
+function VolumeRow({ lab }) {
 	const s = store, here = s.target === 'browser', sn = s.snap;
 	const [val, hold] = useHeld(here ? B.vol : sn ? sn.volume : 0);
 	const send = useMemo(() => throttled(v => post('/api/volume', { v }).catch(() => {}), 120), []);
@@ -1517,14 +1630,18 @@ function VolumeRow() {
 	if (here && isIOS) return html`<div class="vol-note">Use your phone's volume buttons</div>`;
 	// the server sends -1 when the handheld has no volume control to read (a desktop test run)
 	if (!here && sn && sn.volume < 0) return html`<div class="vol-note">The handheld's volume can't be changed from here.</div>`;
-	return html`<div class="vol-lab">${here ? 'Browser volume' : 'Handheld volume'}</div><div class="vol"><${Icon} n="speaker" k=${2} /><input type="range" min="0" max="100" value=${val} onInput=${change} aria-label=${here ? 'Browser volume' : 'Handheld volume'} aria-valuetext=${val + '%'} disabled=${!here && s.reconnecting} />
-		<span class="pct">${val}%</span></div>`;
+	return html`${lab && html`<div class="vol-lab">${here ? 'Browser volume' : 'Handheld volume'}</div>`}<div class="vol"><${Icon} n="speaker" k=${2} /><input type="range" class="filled" style=${'--v:' + val + '%'} min="0" max="100" value=${val} onInput=${change} aria-label=${here ? 'Browser volume' : 'Handheld volume'} aria-valuetext=${val + '%'} disabled=${!here && s.reconnecting} />
+		<span class="pct">${val}</span></div>`;
+}
+function VolumeCard() {
+	const here = store.target === 'browser';
+	return html`<section class="box surface card" aria-label="Volume"><div class="card-head"><h2 class="grow">Volume</h2><span class="chip ghost"><${Icon} n=${here ? 'laptop' : 'card'} k=${1} />${here ? 'this browser' : 'handheld'}</span></div><${VolumeRow} /></section>`;
 }
 
 function ChaptersCard({ v }) {
-	return html`<section class="card" id="chapters-card" aria-label="Chapters"><h2 style="margin-bottom:var(--s2)">Chapters</h2><div class="list-lines">
+	return html`<section id="chapters-card" aria-label="Chapters"><div class="list-lines">
 		${v.chapters.map((c, i) => html`<button class="line ${i === v.chapter ? 'cur' : ''}" aria-current=${i === v.chapter ? 'true' : undefined} onClick=${() => ctl.chapterTo(i)}>
-			<span class="n">${i + 1}</span><span class="tt ell">${chapterTitle(c, i)}</span><span class="tm">${fmtTime(c.start)}</span></button>`)}</div></section>`;
+			<span class="n">${String(i + 1).padStart(2, '0')}</span><span class="tt ell">${chapterTitle(c, i)}</span><span class="tm">${fmtTime(c.start)}</span></button>`)}</div></section>`;
 }
 
 // the queue, scrolled so the one playing is near the top
@@ -1536,7 +1653,7 @@ function UpNext({ v }) {
 	useEffect(() => {
 		if (v.here) { setItems(B.queue.map(q => ({ p: q.p, title: titleFor(q.p, q.title) }))); setIdx(B.index); return; }
 		let dead = false;
-		get('/api/source').then(r => { if (!dead) { setItems((r.items || []).map(q => ({ p: q.p, title: titleFor(q.p, q.title) }))); setIdx(r.index); } }).catch(() => { if (!dead) setItems([]); });
+		get('/api/source').then(r => { if (!dead) { setItems((r.items || []).map(q => ({ p: q.p, title: titleFor(q.p, q.title), duration: q.duration }))); setIdx(r.index); } }).catch(() => { if (!dead) setItems([]); });
 		return () => { dead = true; };
 	}, [key]);
 	useLayoutEffect(() => {
@@ -1551,9 +1668,13 @@ function UpNext({ v }) {
 		const src = sn.source;
 		try { if (src && src.kind === 'playlist' && src.id) await post('/api/play', { playlist: src.id, index: i }); else await post('/api/play', { p: items[i].p }); } catch (e) { toast(errMsg(e)); }
 	};
-	return html`<section class="card" aria-label="Queue"><div class="card-head"><h2 class="grow">Queue</h2><span class="dim tm">${idx + 1} of ${items.length}</span></div><div class="upnext list-lines" ref=${box}>
+	const src = v.source && v.source.title, pad = n => String(n).padStart(2, '0');
+	return html`<section aria-label="Queue"><div class="band queue-band"><span class="kicker ell" style="max-width:70%">${src ? 'From ' + src : 'Up next'}</span><span class="rule"></span><span class="num">${pad(idx + 1)} / ${pad(items.length)}</span></div>
+		<div class="upnext list-lines" ref=${box}>
 		${items.map((it, i) => html`<button class="line ${i === idx ? 'cur' : ''} ${i < idx ? 'past' : ''}" onClick=${() => play(i)} aria-current=${i === idx ? 'true' : undefined}>
-			${i === idx ? html`<${Icon} n="play" k=${2} cls="y" />` : html`<span class="n">${i + 1}</span>`}<span class="tt ell">${i === idx && v.title ? v.title : it.title}</span></button>`)}</div></section>`;
+			<span class="tile sm"><${Art} seed=${it.p} kind=${kindOfName(it.p)} k=${1} /></span>
+			<span class="tt"><span class="ell" style="display:block">${i === idx && v.title ? v.title : it.title}</span>${i === idx && html`<span class="m"><span class="chip y tiny"><${Icon} n="play" k=${1} />Now</span></span>`}</span>
+			${it.duration > 0 && html`<span class="tm">${fmtTime(it.duration)}</span>`}</button>`)}</div></section>`;
 }
 
 /* ---- audio and subtitles ---- */
@@ -1567,8 +1688,8 @@ function TracksCard({ v }) {
 	const here = v.here;
 	if (!here && !v.tracks) return null;	// a player too old to say
 	const tabs = [['audio', 'Audio'], ['sub', 'Subtitles']];
-	return html`<section class="card tracks" id="tracks-card" tabindex="-1" aria-label="Audio and subtitles">
-		<div class="card-head"><h2 class="grow">Audio & Subtitles</h2>${here && html`<span class="chip">In this browser</span>`}</div>
+	return html`<section class="box surface card tracks" id="tracks-card" tabindex="-1" aria-label="Audio and subtitles">
+		${here && html`<div class="card-head"><span class="grow"></span><span class="chip ghost"><${Icon} n="laptop" k=${1} />this browser</span></div>`}
 		<div class="seg tabs2" role="tablist">${tabs.map(([k, l]) => html`<button role="tab" id=${'tt-' + k} aria-controls="tracks-panel" aria-selected=${tab === k} onClick=${() => set({ tracksTab: k })}>${l}</button>`)}</div>
 		<div id="tracks-panel" role="tabpanel" aria-labelledby=${'tt-' + tab}>
 		${here ? (tab === 'audio' ? html`<${BrowserAudio} />` : html`<${BrowserSubs} />`) : (tab === 'audio' ? html`<${HandheldAudio} t=${v.tracks} />` : html`<${HandheldSubs} t=${v.tracks} />`)}
@@ -1664,41 +1785,45 @@ const FX = [['none', 'None'], ['room', 'Room'], ['hall', 'Concert hall'], ['chur
 const dbText = g => (g > 0 ? '+' : g < 0 ? '−' : '') + Math.abs(g).toFixed(1);
 // a song in this browser: the equalizer and effects are the handheld's
 function SoundHere() {
-	return html`<section class="card sound-here" aria-label="Sound"><span class="grow note">Equalizer and effects play on the handheld</span><button class="btn sm" onClick=${() => setTarget('handheld')}><${Icon} n="card" k=${2} />Switch to handheld</button></section>`;
+	return html`<section class="box surface card sound-here" aria-label="Sound"><span class="note">Equalizer and effects play on the handheld</span><button class="btn sm" onClick=${() => setTarget('handheld')}><${Icon} n="card" k=${2} />Switch to handheld</button></section>`;
+}
+// one band: a slot with a cream knob, yellow from the 0 dB line; drag, arrows (Page keys ±3 dB), a double click or 0 resets
+function EqBand({ f, g, onSet }) {
+	const ref = useRef(), drag = useRef(false);
+	const at = e => { const r = ref.current.querySelector('.slot').getBoundingClientRect(); const fr = 1 - (e.clientY - r.top) / r.height; return Math.round((Math.max(0, Math.min(1, fr)) * 24 - 12) * 2) / 2; };
+	const down = e => { if (e.button > 0) return; drag.current = true; try { ref.current.setPointerCapture(e.pointerId); } catch (x) {} onSet(at(e)); };
+	const move = e => { if (drag.current) onSet(at(e)); };
+	const up = () => { drag.current = false; };
+	const key = e => {
+		const d = { ArrowUp: .5, ArrowRight: .5, ArrowDown: -.5, ArrowLeft: -.5, PageUp: 3, PageDown: -3 }[e.key];
+		if (d != null) { e.preventDefault(); e.stopPropagation(); onSet(g + d); }
+		else if (e.key === 'Home' || e.key === 'End' || e.key === '0') { e.preventDefault(); onSet(e.key === 'Home' ? 12 : e.key === 'End' ? -12 : 0); }
+	};
+	const top = 50 - g / 12 * 50;
+	return html`<div class="eqb"><span class="val">${g ? dbText(g).replace('.0', '') : ''}</span>
+		<div class="slotwrap" ref=${ref} role="slider" tabindex="0" aria-label=${bandLabel(f) + ' Hz'} aria-orientation="vertical" aria-valuemin="-12" aria-valuemax="12" aria-valuenow=${g} aria-valuetext=${dbText(g) + ' dB'}
+			onPointerDown=${down} onPointerMove=${move} onPointerUp=${up} onPointerCancel=${up} onKeyDown=${key} onDblClick=${() => onSet(0)}>
+			<div class="slot"><div class="lvl" style=${`top:${Math.min(top, 50)}%;bottom:${100 - Math.max(top, 50)}%`}></div><div class="knob" style=${`top:${top}%`}></div></div></div>
+		<small>${bandLabel(f)}</small></div>`;
 }
 function SoundCard({ v }) {
 	const sn = store.snap, eq = sn && sn.eq || { on: false, preset: 'Flat', gains: Array(10).fill(0) };
-	const [tab, setTab] = useState('eq');
 	const [gains, holdGains] = useHeld(eq.gains);
-	const [selBand, setSelBand] = useState(2);
-	const wide = useMedia('(min-width: 768px)');
 	const sendGains = useMemo(() => throttled(g => post('/api/eq', { gains: g.join(',') }).catch(e => errToast(e)), 120), []);
-	const setGain = (i, val) => { const g = gains.slice(); g[i] = Math.max(-12, Math.min(12, val)); holdGains(g); sendGains(g); };
-	const here = v.here, vid = v.kind === 'video', off = here || vid;
+	const setGain = (i, val) => { const g = gains.slice(); g[i] = Math.max(-12, Math.min(12, val)); if (g[i] === gains[i]) return; holdGains(g); sendGains(g); };
+	const vid = v.kind === 'video';
 	const presets = store.eq || [{ name: 'Flat' }];
-	const cd = eq.preset === '';
-	return html`<section class="card sound" aria-label="Sound" aria-disabled=${off ? 'true' : undefined}>
-		<div class="head"><h2 class="grow">Sound</h2></div>
-		<div class="seg tabs2" role="tablist">${[['eq', 'Equalizer'], ['fx', 'Effects']].map(([k, l]) => html`<button role="tab" aria-selected=${tab === k} onClick=${() => setTab(k)}>${l}</button>`)}</div>
-		${off && html`<div class="note" style="margin-bottom:var(--s3)">${here ? 'Equalizer and effects play on the handheld only.' : 'Sound changes music only.'}</div>`}
-		<div class=${off ? 'greyed' : ''} inert=${off ? true : undefined}>
-		${tab === 'eq' ? html`
-			<div class="sound-ctl">
-				<button class="switch" role="switch" aria-checked=${eq.on} onClick=${() => post('/api/eq', { on: eq.on ? 0 : 1 }).catch(e => errToast(e))}><span class="knob"></span>${eq.on ? 'On' : 'Off'}</button>
-				<select class="sel grow" aria-label="Preset" value=${eq.preset} onChange=${e => post('/api/eq', { preset: e.target.value }).catch(x => errToast(x))}>
-					${cd && html`<option value="">Custom</option>`}${presets.map(p => html`<option value=${p.name}>${p.name}</option>`)}</select>
-				<button class="btn sm" onClick=${() => { holdGains(Array(10).fill(0)); post('/api/eq', { preset: 'Flat' }).catch(() => {}); }}>Reset</button>
-			</div>
-			<div class=${eq.on ? '' : 'greyed'}>${wide ? html`<div class="eq-v">${BANDS.map((f, i) => html`<div class="eq-band"><div class="val ${gains[i] ? 'on' : ''}">${gains[i] ? dbText(gains[i]).replace('.0', '') : ''}</div>
-				<div class="rail"><input type="range" min="-12" max="12" step="0.5" value=${gains[i]} aria-label=${bandLabel(f) + ' Hz'} aria-valuetext=${dbText(gains[i]) + ' dB'} onInput=${e => setGain(i, +e.target.value)} onDblClick=${() => setGain(i, 0)} /></div>
-				<div class="hz">${bandLabel(f)}</div></div>`)}</div>` : html`
-				<div class="eq-bars" role="group" aria-label="Bands">${BANDS.map((f, i) => { const g = gains[i], h = Math.abs(g) / 12 * 50; return html`<button class="${g >= 0 ? 'pos' : 'neg'} ${i === selBand ? 'sel' : ''} ${g ? 'nz' : ''}" aria-label=${bandLabel(f) + ' Hz, ' + dbText(g) + ' dB'} aria-pressed=${i === selBand} onClick=${() => setSelBand(i)}><i style="height:${h}%"></i><span class="hz">${bandLabel(f)}</span></button>`; })}</div>
-				<div class="eq-edit"><button class="ib" aria-label="Lower" onClick=${() => setGain(selBand, gains[selBand] - 0.5)}><${Icon} n="minus" k=${2} /></button>
-					<input type="range" min="-12" max="12" step="0.5" value=${gains[selBand]} aria-label=${BANDS[selBand] + ' Hz'} aria-valuetext=${dbText(gains[selBand]) + ' dB'} onInput=${e => setGain(selBand, +e.target.value)} />
-					<button class="ib" aria-label="Raise" onClick=${() => setGain(selBand, gains[selBand] + 0.5)}><${Icon} n="plus" k=${2} /></button></div>
-				<div class="eq-edit" style="margin-top:4px;justify-content:center"><span class="lab">${BANDS[selBand] >= 1000 ? BANDS[selBand] / 1000 + ' kHz' : BANDS[selBand] + ' Hz'} · ${dbText(gains[selBand])} dB</span></div>`}</div>` : html`
-			<div class="fx-list" role="radiogroup" aria-label="Effect">${FX.map(([k, l]) => html`<button class="radio" role="radio" aria-checked=${(sn && sn.fx || 'none') === k} onClick=${() => post('/api/fx', { key: k }).catch(e => errToast(e))}><${Icon} n=${(sn && sn.fx || 'none') === k ? 'radio-on' : 'radio'} k=${2} />${l}</button>`)}</div>`}
-		</div></section>`;
+	const cd = eq.preset === '', fx = sn && sn.fx || 'none';
+	return html`<section class="box surface card sound" aria-label="Equalizer" aria-disabled=${vid ? 'true' : undefined}>
+		<div class="eqhead"><h2>Equalizer</h2>
+			<button class="btn sm ghost" disabled=${vid} onClick=${() => { holdGains(Array(10).fill(0)); post('/api/eq', { preset: 'Flat' }).catch(() => {}); }}>Reset</button>
+			<button class=${'ib sm' + (eq.on ? ' on' : '')} role="switch" aria-checked=${!!eq.on} aria-label="Equalizer on" disabled=${vid} onClick=${() => post('/api/eq', { on: eq.on ? 0 : 1 }).catch(e => errToast(e))}><${Icon} n=${eq.on ? 'box-on' : 'box'} k=${2} /></button></div>
+		${vid && html`<p class="note" style="margin-bottom:var(--s3)">Sound changes music only.</p>`}
+		<div class=${vid ? 'greyed' : ''} inert=${vid ? true : undefined}>
+			<div class="chips" role="radiogroup" aria-label="Preset">${cd && html`<button class="chipbtn" role="radio" aria-checked="true">Custom</button>`}${presets.map(p => html`<button class="chipbtn" role="radio" aria-checked=${eq.preset === p.name} onClick=${() => post('/api/eq', { preset: p.name }).catch(x => errToast(x))}>${p.name}</button>`)}</div>
+			<div class=${'eq' + (eq.on ? '' : ' greyed')} role="group" aria-label="Bands">${BANDS.map((f, i) => html`<${EqBand} f=${f} g=${gains[i]} onSet=${val => setGain(i, val)} />`)}</div></div></section>
+	<section class="box surface card" aria-label="Effect"><div class="card-head"><h2>Effect</h2></div>
+		<div class=${vid ? 'greyed' : ''} inert=${vid ? true : undefined}><div class="chips" role="radiogroup" aria-label="Effect">${FX.map(([k, l]) => html`<button class="chipbtn" role="radio" aria-checked=${fx === k} onClick=${() => post('/api/fx', { key: k }).catch(e => errToast(e))}>${l}</button>`)}</div></div></section>`;
 }
 
 /* ================= playlist edits shared by Files and Playlists ================= */
@@ -1800,7 +1925,7 @@ function markUsed(id) { const u = plUsed(); u[id] = Date.now(); lsSet('bpPlUsed'
 function addToPlaylist(paths, what, anchor) {
 	if (anchor && !compactNow()) {
 		const r = anchor.getBoundingClientRect();
-		const pos = { left: Math.max(8, Math.min(innerWidth - 388, r.left - 160)), bottom: innerHeight - r.top + 10 };
+		const pos = { left: Math.max(8, Math.min(innerWidth - 408, r.left - 160)), bottom: innerHeight - r.top + 12 };
 		set({ addOpen: true });
 		openModal(close => html`<${AddTo} paths=${paths} what=${what} pos=${pos} onClose=${() => { set({ addOpen: false }); close(); }} />`, () => set({ addOpen: false }));
 	} else openModal(close => html`<${AddTo} paths=${paths} what=${what} onClose=${close} />`);
@@ -1827,8 +1952,12 @@ function AddTo({ paths, what, pos, onClose }) {
 	}, [s.plTick, s.epoch]);
 	const used = plUsed();
 	const pls = (list || []).filter(p => !p.builtin).sort((a, b) => ((used[b.id] || 0) - (used[a.id] || 0)) || cmpName(a.name, b.name));
+	// the three added to last say RECENT
+	const recent = new Set(pls.filter(p => used[p.id]).slice(0, 3).map(p => p.id));
 	const many = pls.length > 7, f = find.trim().toLowerCase();
-	const shown = f ? pls.filter(p => p.name.toLowerCase().includes(f)) : pls;
+	const hit = p => !f || p.name.toLowerCase().includes(f);
+	// what matches first; the rest stays, dimmed
+	const matches = pls.filter(hit), shown = f ? [...matches, ...pls.filter(p => !hit(p))] : pls;
 	const exact = f && pls.some(p => p.name.toLowerCase() === f);
 	const loaded = list !== null;
 	// a computer: straight into Find; the popover's first row otherwise (keys work at once)
@@ -1864,25 +1993,26 @@ function AddTo({ paths, what, pos, onClose }) {
 		} catch (e) { setBusy(false); setNaming(name); setErr(errMsg(e)); }
 	};
 	// Enter adds to the first match, or makes a playlist of that name when nothing matches
-	const findKey = e => { if (e.key !== 'Enter') return; e.preventDefault(); if (shown.length) add(shown[0]); else if (f) create(find); };
+	const findKey = e => { if (e.key !== 'Enter') return; e.preventDefault(); if (matches.length) add(matches[0]); else if (f) create(find); };
 	// Esc leaves the name field; a second one closes
 	const nameKey = e => { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); setNaming(null); setErr(''); } };
 	const hl = n => { if (!f) return n; const i = n.toLowerCase().indexOf(f); return i < 0 ? n : html`${n.slice(0, i)}<span class="hl">${n.slice(i, i + f.length)}</span>${n.slice(i + f.length)}`; };
 	const body = !loaded ? html`<div class="none">Loading…</div>` : html`
-		${many && html`<div class="find"><${Icon} n="search" k=${2} /><input class="field" ref=${findRef} value=${find} placeholder="Find a playlist" aria-label="Find a playlist" autocomplete="off" enterkeyhint="go" onInput=${e => { setFind(e.target.value); setArmed(null); }} onKeyDown=${findKey} /></div>`}
+		${many && html`<label class="find"><${Icon} n="search" k=${2} /><input class="field" ref=${findRef} value=${find} placeholder="Find a playlist" aria-label="Find a playlist" autocomplete="off" enterkeyhint="go" onInput=${e => { setFind(e.target.value); setArmed(null); }} onKeyDown=${findKey} />${!touchOnly && html`<span class="key">Enter</span>`}</label>`}
 		<div class="picklist">
 			${naming != null ? html`<form class="newpl" onSubmit=${e => { e.preventDefault(); create(nameRef.current ? nameRef.current.value : naming); }}>
 				<input class=${'field' + (err ? ' bad' : '')} ref=${nameRef} value=${naming} placeholder="Playlist name" aria-label="New playlist's name" aria-invalid=${err ? 'true' : undefined} autocomplete="off" enterkeyhint="done" onInput=${e => { setNaming(e.target.value); setErr(''); }} onKeyDown=${nameKey} />
 				<button class="btn primary" disabled=${busy}>Create</button></form>${err && html`<div class="errtxt" role="alert">${err}</div>`}`
-			: html`<button class="sheet-item" onClick=${() => { setNaming(find.trim()); setErr(''); }}><${Icon} n="plus" k=${2} /><span class="grow">${f && !exact ? 'New playlist “' + find.trim() + '”' : 'New playlist…'}</span></button>`}
-			${shown.map(p => { const arm = armed === p.id; return html`<button class=${'sheet-item' + (arm ? ' armed' : '')} key=${p.id} disabled=${busy} onClick=${() => add(p)}>
-				<${Icon} n="playlist" k=${2} /><span class="grow">${hl(p.name)}<span class="sm">${arm ? 'Already in it' : plural(p.count, 'item', 'items')}</span></span>
-				${arm ? html`<span class="r">Add again</span>` : has[p.id] ? html`<span class="r"><${Icon} n="check" k=${2} />Added</span>` : null}</button>`; })}
-			${f && !shown.length && html`<div class="none">No playlist called “${find.trim()}”</div>`}</div>`;
+			: html`<button class="sheet-item new" onClick=${() => { setNaming(find.trim()); setErr(''); }}><span class="tile"><${Icon} n="plus" k=${2} /></span><span class="grow">${f && !exact ? 'New playlist “' + find.trim() + '”' : 'New playlist…'}</span></button>`}
+			${shown.map(p => { const arm = armed === p.id; return html`<button class=${'sheet-item' + (arm ? ' armed' : '') + (f && !hit(p) ? ' miss' : '')} key=${p.id} disabled=${busy} onClick=${() => add(p)}>
+				<span class="tile"><${PlArt} p=${p} /></span><span class="grow">${hl(p.name)}<span class="sm">${arm ? 'Already in it' : html`${recent.has(p.id) && html`<span class="kicker" style="font-size:10px">Recent</span> · `}${plural(p.count, 'item', 'items')}`}</span></span>
+				${arm ? html`<span class="r">Add again</span>` : has[p.id] ? html`<span class="r chip ghost"><${Icon} n="check" k=${1} />Added</span>` : null}</button>`; })}
+			${f && !matches.length && html`<div class="none">No playlist called “${find.trim()}”</div>`}</div>`;
+	const head = html`<div class="uphead"><div class="kicker">Add to playlist</div><h2 class="ell">${what}</h2></div>`;
 	if (pos) return html`<div class="popcatch" onMouseDown=${onClose}></div>
-		<div class="addpop addto" role="dialog" aria-label=${'Add ' + what + ' to a playlist'} ref=${ref} style=${`left:${pos.left}px;bottom:${pos.bottom}px`}>
-			<h2>Add to playlist</h2><div class="sub ell">${what}</div><div class="body">${body}</div></div>`;
-	return html`<${Modal} cls="addto" title="Add to playlist" sub=${what} onClose=${onClose} actions=${html`<button class="btn" onClick=${onClose}>Cancel</button>`}>${body}</${Modal}>`;
+		<div class="addpop box surface addto" role="dialog" aria-label=${'Add ' + what + ' to a playlist'} ref=${ref} style=${`left:${pos.left}px;bottom:${pos.bottom}px`}>
+			${head}<div class="body">${body}</div></div>`;
+	return html`<${Modal} cls="addto" label=${'Add ' + what + ' to a playlist'} raw=${true} onClose=${onClose} actions=${html`<button class="btn" onClick=${onClose}>Cancel</button>`}>${head}<div class="body">${body}</div></${Modal}>`;
 }
 
 /* ================= files ================= */
@@ -1899,9 +2029,9 @@ function MovePicker({ paths, start, onClose, done }) {
 	const segs = dir.split('/');
 	const move = async () => { setBusy(true); try { await post('/api/move', { p: paths, to: dir }); onClose(); done(); toast('Moved ' + plural(paths.length, 'item', 'items') + ' to ' + (segs.length > 1 ? segs[segs.length - 1] : rootName(segs[0]))); } catch (e) { setErr(errMsg(e)); setBusy(false); } };
 	return html`<${Modal} title=${'Move ' + plural(paths.length, 'item', 'items') + ' to…'} onClose=${onClose} actions=${html`<button class="btn" onClick=${onClose}>Cancel</button><button class="btn primary" disabled=${busy || dir === dirName(paths[0])} onClick=${move}>Move here</button>`}>
-		<div class="crumbs"><nav aria-label="Destination">${segs.map((sg, i) => html`${i > 0 && html`<span class="sep">›</span>`}<button onClick=${() => setDir(segs.slice(0, i + 1).join('/'))}>${i === 0 ? rootName(sg) : sg}</button>`)}</nav><button class="btn sm ghost" onClick=${mkdir}><${Icon} n="plus" k=${2} />New folder</button></div>
+		<div class="crumbs" style="gap:8px"><nav aria-label="Destination" class="grow">${segs.map((sg, i) => html`${i > 0 && html`<${Icon} n="right" k=${1} cls="sep" />`}<button aria-current=${i === segs.length - 1 ? 'page' : undefined} onClick=${() => setDir(segs.slice(0, i + 1).join('/'))}>${i === 0 ? rootName(sg) : sg}</button>`)}</nav><button class="btn sm" onClick=${mkdir}><${Icon} n="plus" k=${2} />New folder</button></div>
 		<div class="picklist">${items === null ? html`<div style="padding:var(--s4)" class="dim">Loading…</div>` : items.length === 0 ? html`<div style="padding:var(--s4)" class="dim">No folders here</div>` :
-			items.map(n => html`<button class="sheet-item" onClick=${() => setDir(joinPath(dir, n))}><${Icon} n="folder" k=${2} cls="gl-y" />${n}</button>`)}</div>
+			items.map(n => html`<button class="sheet-item" onClick=${() => setDir(joinPath(dir, n))}><${Icon} n="folder" k=${2} cls="gl-y" /><span class="grow ell">${n}</span><${Icon} n="right" k=${1} /></button>`)}</div>
 		<div class="errtxt" role="alert">${err}</div></${Modal}>`;
 }
 
@@ -1953,11 +2083,22 @@ function renamePath(p, done) {
 	} });
 }
 
+// a folder's own cover (cover.jpg, folder.png…): its songs' tiles show it
+const FOLDER_ART = /^(cover|folder|front|album|albumart[^.]*)\.(jpe?g|png|webp)$/i;
+function RowTile({ it, p, art }) {
+	if (it.dir) return html`<span class="tile folder"><${Icon} n="folder" k=${2} /></span>`;
+	const k = it.kind;
+	if (k === 'audio' || k === 'video' || k === 'photo') return html`<span class="tile"><${Art} src=${k === 'audio' ? art : ''} seed=${p} kind=${k} />${k === 'video' && html`<span class="mark"><${Icon} n="film" k=${1} /></span>`}</span>`;
+	return html`<span class="tile"><${Icon} n=${GLYPH[k] || 'info'} k=${2} /></span>`;
+}
+const newFolderIn = (path, done) => nameDialog({ title: 'New folder', label: 'Folder name', ok: 'Create', submit: async n => { n = n.trim(); const bad = nameError(n); if (bad) return bad; try { await post('/api/mkdir', { p: path, name: n }); markFresh(joinPath(path, n)); done(); return ''; } catch (e) { return e.message; } } });
+
 function Files() {
 	const s = useStore(), route = s.route, path = route.path;
 	const roots = s.roots;
-	const [data, setData] = useState(null), [err, setErr] = useState(''), [selMode, setSelMode] = useState(false), [over, setOver] = useState(false);
-	const fileIn = useRef(), dirIn = useRef(), lp = useRef({});
+	const [data, setData] = useState(null), [err, setErr] = useState(''), [selMode, setSelMode] = useState(false), [over, setOver] = useState(false), [filter, setFilter] = useState('');
+	const lp = useRef({});
+	const wide = useMedia(Q_WIDE), desk = useMedia(Q_DESK);
 	const sel = s.sel, pick = s.pick;
 	useEffect(() => { if (!path && roots && roots.length === 1) replaceHash(filesHash(roots[0].path)); }, [path, roots]);
 	const load = useCallback(async quiet => {
@@ -1966,12 +2107,15 @@ function Files() {
 		try { const r = await get('/api/ls', { p: path }); r.items.forEach(i => { if (i.dir) store.knownFolders.add(joinPath(path, i.name)); }); setData(r); setErr(''); }
 		catch (e) { if (e.status === 404 && path.includes('/')) replaceHash(filesHash(dirName(path))); else setErr(errMsg(e)); }
 	}, [path]);
-	useEffect(() => { load(false); store.lastDir = path; if (!store.pick) set({ sel: new Set() }); setSelMode(false); }, [path]);
+	useEffect(() => { load(false); store.lastDir = path; if (!store.pick) set({ sel: new Set() }); setSelMode(false); setFilter(''); }, [path]);
 	// back from a lost connection: the same folder, quietly up to date (the selection stays)
 	useEffect(() => { if (s.epoch && (data || err)) load(!!data); }, [s.epoch]);
 	useEffect(() => { if (data && (!s.fsDir || s.fsDir === path)) load(true); }, [s.fsTick]);
 	const slow = useLater(!data && !err, 300);
-	const items = useMemo(() => data ? data.items.slice().sort((a, b) => (b.dir - a.dir) || cmpName(a.name, b.name)) : [], [data]);
+	const all = useMemo(() => data ? data.items.slice().sort((a, b) => (b.dir - a.dir) || cmpName(a.name, b.name)) : [], [data]);
+	const f = desk ? filter.trim().toLowerCase() : '';
+	const items = f ? all.filter(i => i.name.toLowerCase().includes(f)) : all;
+	const art = useMemo(() => { const c = data && data.items.find(i => !i.dir && FOLDER_ART.test(i.name)); return c ? fileUrl(joinPath(path, c.name)) : ''; }, [data]);
 	const full = n => joinPath(path, n);
 	const refresh = () => { set({ sel: new Set() }); setSelMode(false); load(true); };
 	const setSel = x => set({ sel: new Set(x) });
@@ -1979,7 +2123,7 @@ function Files() {
 	const selected = [...sel], selCount = selected.length;
 	const showSel = selMode || selCount > 0 || !!pick;
 	const here = s.target === 'browser';
-	// the phone's small player makes room for the selection's bar
+	// the phone's small player and the upload key make room for the selection's band
 	useEffect(() => { set({ selecting: showSel && !pick }); return () => set({ selecting: false }); }, [showSel, !!pick]);
 	const byName = useMemo(() => { const o = {}; (data ? data.items : []).forEach(i => o[i.name] = i); return o; }, [data]);
 	// "Show hidden folders" changed here or on the handheld: the list follows
@@ -1988,24 +2132,29 @@ function Files() {
 	useEffect(() => { if (seenHidden.current !== showHidden) { seenHidden.current = showHidden; if (data) load(true); } }, [showHidden]);
 	const selFolders = [...sel].filter(p => dirName(p) === path && byName[baseName(p)] && byName[baseName(p)].dir);
 	const selAllHidden = selFolders.length > 0 && selFolders.every(p => byName[baseName(p)].hidden);
+	const metaOf = it => it.dir ? itemsText(it.items, it.itemsMore) : fmtSize(it.size) + (wide && it.mtime ? ' · ' + fmtDate(it.mtime) : '');
 
-	function rowSheet(it) {
+	// a row's ⋯: where it plays · Like, Add · Rename, Move, Download, Delete
+	function rowSheet(it, anchor) {
 		const p = full(it.name), isDir = it.dir, k = it.kind;
 		const playable = k === 'audio' || k === 'video';
 		const playH = { label: isDir ? 'Play folder on handheld' : 'Play on handheld', icon: 'card', fn: () => playOn('handheld', [p]) };
-		const playB = { label: isDir ? 'Play folder here' : 'Play in this browser', icon: 'network', disabled: NO_HERE || it.playable === 'no', sub: NO_HERE ? NO_HERE_WHY : it.playable === 'no' ? 'Plays on the handheld only' : undefined, fn: () => playOn('browser', [p]) };
+		const playB = { label: isDir ? 'Play folder here' : 'Play in this browser', icon: 'laptop', disabled: NO_HERE || it.playable === 'no', sub: NO_HERE ? NO_HERE_WHY : it.playable === 'no' ? 'Plays on the handheld only' : undefined, fn: () => playOn('browser', [p]) };
 		const plays = (isDir || playable) ? (here ? [playB, playH] : [playH, playB]) : [];
-		openSheet(it.name, isDir ? 'folder' : GLYPH[k], [...plays,
+		openSheet(it.name, isDir ? 'folder' : GLYPH[k], [...plays, '-',
 			// a song or video: Like (never a photo or a folder), then Add
 			playable && (liked => ({ label: liked ? 'Unlike' : 'Like', icon: liked ? 'heart' : 'heart-o', y: liked, sub: liked ? 'In Liked' : undefined, fn: () => setLike(p, !liked, 'menu') }))(isLiked(p)),
-			(isDir || playable) && { label: 'Add to playlist…', icon: isDir ? 'playlist' : 'pl-add', fn: () => addToPlaylist([p], isDir ? it.name : titleFor(p)) },
+			(isDir || playable) && { label: 'Add to playlist…', icon: 'pl-add', fn: () => addToPlaylist([p], isDir ? it.name : titleFor(p)) },
+			'-',
 			isDir && canHide && { label: it.hidden ? 'Unhide folder' : 'Hide folder', icon: 'eye', sub: it.hidden ? 'Listed on the handheld again' : 'Left out of the handheld’s lists', fn: () => setHidden([p], !it.hidden, refresh) },
 			{ label: 'Rename…', icon: 'pencil', fn: () => renamePath(p, refresh) },
-			{ label: 'Move…', icon: 'move', fn: () => openModal(close => html`<${MovePicker} paths=${[p]} start=${path} onClose=${close} done=${refresh} />`) },
+			{ label: 'Move…', icon: 'folder-move', fn: () => openModal(close => html`<${MovePicker} paths=${[p]} start=${path} onClose=${close} done=${refresh} />`) },
 			!isDir && { label: 'Download', icon: 'download', fn: () => downloadPaths([p]) },
-			{ label: 'Delete', icon: 'trash', danger: true, fn: () => deletePaths([p], refresh, byName) }]);
+			{ label: 'Delete…', icon: 'trash', danger: true, fn: () => deletePaths([p], refresh, byName) }],
+			{ anchor, sub: metaOf(it), seed: isDir ? null : p, kind: k, cover: k === 'audio' ? art : '' });
 	}
 	const playOn = (target, paths) => playPaths(paths, store.knownFolders, target);
+	const playRow = (it, p) => playHere(t => playPaths([p], store.knownFolders, t, true), p, it.playable);
 	const nowV = view(), nowPath = nowV.has ? nowV.path : '';
 	function rowClick(it) {
 		if (lp.current.fired) { lp.current.fired = false; return; }
@@ -2014,7 +2163,7 @@ function Files() {
 		if (showSel && it.dir && !pick) return toggle(p);
 		if (it.dir) return go(filesHash(p));
 		if (it.kind === 'photo') { const ph = items.filter(i => i.kind === 'photo').map(i => full(i.name)); return set({ lightbox: { items: ph, i: ph.indexOf(p) } }); }
-		if (it.kind === 'audio' || it.kind === 'video') return playHere(t => playPaths([p], store.knownFolders, t, true), p, it.playable);
+		if (it.kind === 'audio' || it.kind === 'video') return playRow(it, p);
 		rowSheet(it);
 	}
 	const lpStart = (e, it) => { lp.current.mouse = e.pointerType === 'mouse'; lp.current.fired = false; lp.current.x = e.clientX; lp.current.y = e.clientY; clearTimeout(lp.current.t); if (e.pointerType === 'mouse') return; lp.current.t = setTimeout(() => { lp.current.fired = true; toggle(full(it.name)); navigator.vibrate && navigator.vibrate(10); }, 500); };
@@ -2023,55 +2172,62 @@ function Files() {
 
 	const crumbs = path.split('/').filter(Boolean);
 	const upload = ents => startUpload(ents, path);
-	const onDrop = e => { e.preventDefault(); e.stopPropagation(); setOver(false); set({ dropping: false, overZone: false }); upload_(e.dataTransfer); };
-	const upload_ = dt => entriesFromDrop(dt).then(upload);
+	const onDrop = e => { e.preventDefault(); e.stopPropagation(); setOver(false); set({ dropping: false, overZone: false }); entriesFromDrop(e.dataTransfer).then(upload); };
 	const free = data && data.free;
-	const freeCls = free != null && free < 200e6 ? 'crit' : free != null && free < 1e9 ? 'low' : '';
 	const folderName = crumbs.length > 1 ? crumbs[crumbs.length - 1] : rootName(crumbs[0]);
 
 	if (!path) {
 		if (!roots) return html`<div class="page"><${Skeleton} /></div>`;
-		return html`<div class="page"><div class="page-head"><h1>Files</h1></div><ul class="flist">${roots.map(r => html`<li class="frow"><button class="main-btn" onClick=${() => go(filesHash(r.path))}><${Icon} n="card" k=${3} cls="gl folder" /><span class="grow"><div class="fn">${r.name}</div><div class="fm">${fmtSize(r.free)} free</div></span></button></li>`)}</ul></div>`;
+		return html`<div class="page"><div class="phead"><div class="row"><h1>Files</h1><${AppMenu} /></div></div>
+			<div class="box surface listbox"><ul class="flist">${roots.map(r => html`<li class="frow"><button class="main-btn" onClick=${() => go(filesHash(r.path))}><span class="tile folder"><${Icon} n="card" k=${2} /></span><span class="grow"><div class="fn ell">${r.name}</div><div class="fm">${fmtSize(r.free)} free</div></span></button><${Icon} n="right" k=${2} cls="chev" /></li>`)}</ul></div></div>`;
 	}
 	const addPick = async () => {
 		try { await plEdit(pick.id, 'add', { p: selected }); toast('Added to ' + pick.name); const id = pick.id; set({ pick: null, sel: new Set() }); go('#/playlists/' + encodeURIComponent(id)); }
 		catch (e) { toast(e.message); }
 	};
-	return html`<div class=${'page ' + (showSel ? 'selmode' : '')}>
-		${pick && html`<div class="pickbar"><span class="t">Adding to ${pick.name} · ${selCount} selected</span><button class="btn primary sm" disabled=${!selCount} onClick=${addPick}>Add</button><button class="btn sm" onClick=${() => { const id = pick.id; set({ pick: null, sel: new Set() }); go('#/playlists/' + encodeURIComponent(id)); }}>Cancel</button></div>`}
-		<div class="crumbs"><nav aria-label="Folder path">${crumbs.map((sg, i) => html`${i > 0 && html`<span class="sep" aria-hidden="true">›</span>`}<button aria-current=${i === crumbs.length - 1 ? 'page' : undefined} onClick=${() => go(filesHash(crumbs.slice(0, i + 1).join('/')))}>${i === 0 ? rootName(sg) : sg}</button>`)}</nav>
-			${free != null && html`<span class="free ${freeCls}">${freeCls ? 'Low on space · ' : ''}${fmtSize(free)} free</span>`}</div>
-		${!pick && html`<div class="toolbar">
-			<button class="btn primary" onClick=${() => fileIn.current.click()}><${Icon} n="up" k=${2} />Upload</button>
-			${!touchOnly && html`<button class="btn" onClick=${() => dirIn.current.click()}><${Icon} n="folder" k=${2} />Upload folder</button>`}
-			<button class="btn" onClick=${() => nameDialog({ title: 'New folder', label: 'Folder name', ok: 'Create', submit: async n => { n = n.trim(); const bad = nameError(n); if (bad) return bad; try { await post('/api/mkdir', { p: path, name: n }); markFresh(joinPath(path, n)); load(true); return ''; } catch (e) { return e.message; } } })}><${Icon} n="plus" k=${2} />New folder</button>
-			<button class="btn ${selMode ? 'primary' : ''}" aria-pressed=${selMode} onClick=${() => { setSelMode(!selMode); if (selMode) setSel([]); }}>${selMode ? 'Done' : 'Select'}</button>
-			${canHide && html`<button class="btn tb-more" aria-label="More for this folder" aria-haspopup="dialog" onClick=${() => openSheet(folderName, 'folder', [{ label: 'Show hidden folders', icon: 'eye', on: !!showHidden, sub: showHidden ? 'On: the folders hidden on the handheld are listed, dimmed' : 'Off: the folders hidden on the handheld are left out', fn: () => setShowHidden(!showHidden) }])}><${MoreDots} /></button>`}
-			<input type="file" multiple hidden ref=${fileIn} onChange=${e => { upload(entriesFromInput(e.target.files)); e.target.value = ''; }} />
-			<input type="file" hidden webkitdirectory ref=${dirIn} onChange=${e => { upload(entriesFromInput(e.target.files)); e.target.value = ''; }} />
+	const cnt = { folder: 0, audio: 0, video: 0, photo: 0 };
+	(data ? data.items : []).forEach(i => { const k = i.dir ? 'folder' : i.kind; if (k in cnt) cnt[k]++; });
+	const chips = [['folder', 'folder', 'folders', 'folder'], ['audio', 'song', 'songs', 'note'], ['video', 'video', 'videos', 'film'], ['photo', 'photo', 'photos', 'picture']].filter(([k]) => cnt[k]);
+	const head = showSel && !pick ? html`<div class="phead"><div class="row">
+			<button class="ib" aria-label="Clear selection" onClick=${() => { setSel([]); setSelMode(false); }}><${Icon} n="cross" k=${2} /></button>
+			<h1 aria-live="polite">${selCount} selected</h1>
+			${selCount < items.length ? html`<button class="btn sm" onClick=${() => setSel(items.map(i => full(i.name)))}>All</button>` : html`<button class="btn sm" onClick=${() => setSel([])}>None</button>`}</div></div>`
+		: html`<div class="phead">
+			${crumbs.length > 1 && html`<div class="crumbs"><nav aria-label="Folder path">${crumbs.slice(0, -1).map((sg, i) => html`<button onClick=${() => go(filesHash(crumbs.slice(0, i + 1).join('/')))}>${i === 0 ? rootName(sg) : sg}</button><${Icon} n="right" k=${1} cls="sep" />`)}</nav></div>`}
+			<div class="row"><h1>${folderName}</h1><${AppMenu} /></div>
+			${data && html`<div class="sub">${chips.map(([k, one, many, g]) => html`<span class="chip"><${Icon} n=${g} k=${1} />${plural(cnt[k], one, many)}</span>`)}<span class="grow"></span>${free != null && html`<${Storage} free=${free} total=${data.total} />`}</div>`}</div>`;
+	return html`<div class=${'page files' + (showSel ? ' selmode' : '')}>
+		${pick && html`<div class="pickbar box surface"><span class="t">Adding to ${pick.name} · ${selCount} selected</span><button class="btn primary sm" disabled=${!selCount} onClick=${addPick}>Add</button><button class="btn sm" onClick=${() => { const id = pick.id; set({ pick: null, sel: new Set() }); go('#/playlists/' + encodeURIComponent(id)); }}>Cancel</button></div>`}
+		${head}
+		${!showSel && html`<div class="toolbar">
+			<button class=${'btn' + (wide ? '' : ' icon')} aria-label=${wide ? undefined : 'New folder'} title="New folder" onClick=${() => newFolderIn(path, () => load(true))}><${Icon} n="plus" k=${2} />${wide && 'New folder'}</button>
+			<button class="btn" onClick=${() => setSelMode(true)}><${Icon} n="box-on" k=${2} />Select</button>
+			${desk ? html`<label class="find"><${Icon} n="search" k=${2} /><input class="field" data-slash="1" value=${filter} placeholder="Filter this folder" aria-label="Filter this folder" autocomplete="off" onInput=${e => setFilter(e.target.value)} onKeyDown=${e => { if (e.key === 'Escape') { setFilter(''); e.target.blur(); } }} /><span class="key">/</span></label>` : html`<span class="grow"></span>`}
+			${canHide && html`<button class="btn icon" aria-label="More for this folder" aria-haspopup="dialog" onClick=${e => openSheet(folderName, 'folder', [{ label: 'Show hidden folders', icon: 'eye', on: !!showHidden, sub: showHidden ? 'On: the folders hidden on the handheld are listed, dimmed' : 'Off: the folders hidden on the handheld are left out', fn: () => setShowHidden(!showHidden) }], { anchor: e.currentTarget })}><${MoreDots} /></button>`}
 		</div>`}
-		${!pick && html`<div class="dropzone ${over ? 'over' : ''}" onDragEnter=${e => { e.preventDefault(); setOver(true); set({ overZone: true }); }} onDragOver=${e => { e.preventDefault(); setOver(true); store.overZone = true; }} onDragLeave=${e => { if (!e.currentTarget.contains(e.relatedTarget)) { setOver(false); set({ overZone: false }); } }} onDrop=${onDrop}>
-			<${Icon} n="up" k=${3} />Drop files or folders here to upload to ${folderName}</div>`}
+		${!showSel && html`<div class="dropzone ${over ? 'over' : ''}" onDragEnter=${e => { e.preventDefault(); setOver(true); set({ overZone: true }); }} onDragOver=${e => { e.preventDefault(); setOver(true); store.overZone = true; }} onDragLeave=${e => { if (!e.currentTarget.contains(e.relatedTarget)) { setOver(false); set({ overZone: false }); } }} onDrop=${onDrop}>
+			<${Icon} n="up" k=${2} /><span>Drop files or folders here · they go to <b>${folderName}</b></span></div>`}
 		${err ? html`<${Empty} icon="alert" title="Couldn't open this folder" sub=${err} button="Try again" onClick=${() => load(false)} />` :
 			!data ? (slow ? html`<${Skeleton} />` : null) :
-			items.length === 0 ? html`<${Empty} icon="folder" title="This folder is empty" sub=${touchOnly ? 'Upload music, videos or photos from this device.' : 'Drop files here, or use Upload.'} button=${pick ? undefined : 'Upload'} onClick=${() => fileIn.current && fileIn.current.click()} />` : html`
-			<div class="thead" aria-hidden="true"><span class="nm">Name</span><span class="sz">Size</span><span class="md">Modified</span></div>
-			<ul class="flist">${items.map(it => { const p = full(it.name), on = sel.has(p); return html`<li class="frow ${on ? 'sel' : ''} ${s.fresh[p] ? 'fresh' : ''} ${it.hidden ? 'hiddenf' : ''} ${p === nowPath ? 'nowp' : ''}" key=${it.name}>
-				<button class="chk ib" aria-label=${(on ? 'Deselect ' : 'Select ') + it.name} aria-pressed=${on} onClick=${() => toggle(p)}><${Icon} n=${on ? 'box-on' : 'box'} k=${2} /></button>
-				<button class="main-btn" onClick=${() => rowClick(it)} onPointerDown=${e => lpStart(e, it)} onPointerMove=${lpMove} onPointerUp=${lpEnd} onPointerCancel=${lpEnd} onContextMenu=${e => { e.preventDefault(); if (lp.current.mouse !== false && !lp.current.fired) rowSheet(it); }}>
-					<${Icon} n=${it.dir ? 'folder' : p === nowPath ? 'play' : GLYPH[it.kind] || 'info'} k=${3} cls=${'gl ' + (it.dir ? 'folder' : p === nowPath ? 'now' : '')} label=${p === nowPath ? 'Playing' : undefined} />
-					<span class="grow"><div class="fn clamp2">${it.name}${it.hidden && html`<span class="hidmark" title="Hidden on the handheld"><${Icon} n="eye" k=${2} label="Hidden" /></span>`}${!it.dir && (it.kind === 'audio' || it.kind === 'video') && isLiked(p) && html`<span class="likemark" title="Liked"><${Icon} n="heart" k=${1} label="Liked" /></span>`}</div><div class="fm">${it.hidden ? 'Hidden · ' : ''}${it.dir ? itemsText(it.items, it.itemsMore) : fmtSize(it.size)}</div></span>
-					<span class="cols"><span class="sz">${it.dir ? itemsText(it.items, it.itemsMore) : fmtSize(it.size)}</span><span class="md">${fmtDate(it.mtime)}</span></span>
+			all.length === 0 ? html`<${Empty} icon="folder" title="This folder is empty" sub=${touchOnly ? 'Upload music, videos or photos from this device.' : 'Drop files here, or use the upload key.'} button=${pick ? undefined : 'Upload'} onClick=${() => pickUpload('files')} />` :
+			items.length === 0 ? html`<p class="note pad">Nothing here has “${filter.trim()}” in its name.</p>` : html`
+			<div class="box surface listbox"><ul class="flist">${items.map(it => { const p = full(it.name), on = sel.has(p), now = p === nowPath, playable = !it.dir && (it.kind === 'audio' || it.kind === 'video'); return html`<li class=${'frow' + (on ? ' sel' : '') + (s.fresh[p] ? ' fresh' : '') + (it.hidden ? ' hiddenf' : '') + (now && !showSel ? ' cur nowp' : '')} key=${it.name}>
+				<button class="chk" aria-label=${(on ? 'Deselect ' : 'Select ') + it.name} aria-pressed=${on} onClick=${() => toggle(p)}><span class=${'check' + (on ? ' on' : '')}>${on && html`<${Icon} n="check" k=${2} />`}</span></button>
+				<button class="main-btn" onClick=${() => rowClick(it)} onPointerDown=${e => lpStart(e, it)} onPointerMove=${lpMove} onPointerUp=${lpEnd} onPointerCancel=${lpEnd} onContextMenu=${e => { e.preventDefault(); if (lp.current.mouse !== false && !lp.current.fired) rowSheet(it, { x: e.clientX, y: e.clientY }); }}>
+					<${RowTile} it=${it} p=${p} art=${art} />
+					<span class="grow"><div class="fn ell">${it.name}${it.hidden && html`<span class="hidmark" title="Hidden on the handheld"><${Icon} n="eye" k=${2} label="Hidden" /></span>`}${playable && isLiked(p) && html`<span class="likemark" title="Liked"><${Icon} n="heart-s" k=${2} label="Liked" /></span>`}</div>
+						<div class="fm">${now && html`<span class="chip y tiny"><${Icon} n="play" k=${1} />Playing</span>`}<span class="ell">${it.hidden ? 'Hidden · ' : ''}${metaOf(it)}</span></div></span>
 				</button>
-				<button class="ib more" aria-label=${'More about ' + it.name} onClick=${() => rowSheet(it)}><${MoreDots} /></button></li>`; })}</ul>`}
-		${selCount > 0 && !pick && html`<div class="selbar" role="toolbar" aria-label="Selection">
-			<div class="cnt"><span aria-live="polite">${selCount} selected</span><span style="display:flex;gap:var(--s2)">${selCount < items.length ? html`<button class="btn sm ghost" onClick=${() => setSel(items.map(i => full(i.name)))}>All</button>` : html`<button class="btn sm ghost" onClick=${() => setSel([])}>None</button>`}<button class="ib" aria-label="Clear selection" onClick=${() => { setSel([]); setSelMode(false); }} style="width:36px;height:36px"><${Icon} n="cross" k=${2} /></button></span></div>
-			<button class="sb" onClick=${() => playOn(s.target, selected)}><${Icon} n="play" k=${2} />Play</button>
-			<button class="sb" onClick=${() => addToPlaylist(selected, selCount === 1 ? titleFor(selected[0]) : plural(selCount, 'item', 'items'))}><${Icon} n="playlist" k=${2} />Add</button>
-			<button class="sb" onClick=${() => openModal(close => html`<${MovePicker} paths=${selected} start=${path} onClose=${close} done=${refresh} />`)}><${Icon} n="move" k=${2} />Move</button>
-			<button class="sb" onClick=${() => downloadPaths(selected)}><${Icon} n="download" k=${2} />Download</button>
-			${canHide && selFolders.length > 0 && html`<button class="sb" onClick=${() => setHidden(selFolders, !selAllHidden, refresh)}><${Icon} n="eye" k=${2} />${selAllHidden ? 'Unhide' : 'Hide'}</button>`}
-			<button class="sb danger" onClick=${() => deletePaths(selected, refresh, byName)}><${Icon} n="trash" k=${2} />Delete</button></div>`}
+				${playable && !showSel && html`<button class="ib rowplay" aria-label=${'Play ' + it.name} title=${here ? 'Play in this browser' : 'Play on handheld'} onClick=${() => playRow(it, p)}><${Icon} n="play" k=${2} /></button>`}
+				${!showSel && html`<button class="ib more" aria-label=${'More about ' + it.name} aria-haspopup="dialog" onClick=${e => rowSheet(it, e.currentTarget)}><${MoreDots} /></button>`}
+				${it.dir && !showSel && html`<${Icon} n="right" k=${2} cls="chev" />`}</li>`; })}</ul></div>`}
+		${selCount > 0 && !pick && html`<div class="selbar box surface" role="toolbar" aria-label="Selection"><div class="acts">
+			<button class="btn sm primary sb" onClick=${() => playOn(s.target, selected)}><${Icon} n="play" k=${2} /><span class="lbl">Play</span></button>
+			<button class="btn sm sb" onClick=${() => addToPlaylist(selected, selCount === 1 ? titleFor(selected[0]) : plural(selCount, 'item', 'items'))}><${Icon} n="pl-add" k=${2} /><span class="lbl">Add</span></button>
+			<button class="btn sm sb" onClick=${() => openModal(close => html`<${MovePicker} paths=${selected} start=${path} onClose=${close} done=${refresh} />`)}><${Icon} n="folder-move" k=${2} /><span class="lbl">Move</span></button>
+			<button class="btn sm sb" onClick=${() => downloadPaths(selected)}><${Icon} n="download" k=${2} /><span class="lbl">Download</span></button>
+			${canHide && selFolders.length > 0 && html`<button class="btn sm sb" onClick=${() => setHidden(selFolders, !selAllHidden, refresh)}><${Icon} n="eye" k=${2} /><span class="lbl">${selAllHidden ? 'Unhide' : 'Hide'}</span></button>`}
+			<button class="btn sm danger sb" onClick=${() => deletePaths(selected, refresh, byName)}><${Icon} n="trash" k=${2} /><span class="lbl">Delete</span></button></div></div>`}
 	</div>`;
 }
 
@@ -2105,36 +2261,82 @@ function Lightbox() {
 let uidSeq = 0;
 function Playlists() { return store.route.id ? html`<${PlaylistView} id=${store.route.id} key=${store.route.id} />` : html`<${PlaylistList} />`; }
 
+// "1 h 38 min", "23 min"
+const fmtLong = t => { t = Math.round(t / 60); return t >= 60 ? Math.floor(t / 60) + ' h ' + (t % 60) + ' min' : Math.max(1, t) + ' min'; };
+const letterOf = n => { const c = (n || '').trim().charAt(0).toUpperCase(); return /[A-Z]/.test(c) ? c : /\p{L}/u.test(c) ? c : '#'; };
+async function playFromPl(p, target, shuffle) {
+	if (!userTap()) return;
+	try { const r = await get('/api/playlist', { id: p.id }); await playPlaylist(p.id, r.name, r.items, 0, shuffle, target, true); } catch (e) { errToast(e); }
+}
+
+/* the Playlists page: Liked pinned, the playlists as cards; past 12 a Recent strip, then Find, a sort and a view (a list
+   with letter headers by default), both remembered by this browser */
 function PlaylistList() {
 	const s = useStore(), [list, setList] = useState(null), [err, setErr] = useState('');
-	const load = () => get('/api/playlists').then(r => { setList(r.playlists || []); setErr(''); }).catch(e => setErr(errMsg(e)));
+	const [find, setFind] = useState(''), [sort, setSort] = useState(lsGet('bpPlSort') || 'az'), [viewPref, setViewPref] = useState(lsGet('bpPlView') || '');
+	const [tbH, setTbH] = useState(64), tools = useRef();
+	const wide = useMedia(Q_WIDE), desk = useMedia(Q_DESK);
+	const load = () => get('/api/playlists').then(r => { setList(r.playlists || []); setErr(''); if (store.pls) set({ pls: r.playlists || [] }); }).catch(e => setErr(errMsg(e)));
 	useEffect(() => { load(); }, [s.epoch, s.plTick]);
+	useLayoutEffect(() => {
+		const t = tools.current; if (!t || !('ResizeObserver' in window)) return;
+		const ro = new ResizeObserver(() => setTbH(t.offsetHeight)); ro.observe(t); return () => ro.disconnect();
+	});
 	const slow = useLater(!list && !err, 300);
 	const open = id => go('#/playlists/' + encodeURIComponent(id));
-	const sheet = p => openSheet(p.name, 'playlist', [
-		{ label: 'Play on handheld', icon: 'card', fn: () => playFrom(p, 'handheld', false) },
-		{ label: 'Play here', icon: 'network', disabled: NO_HERE, sub: NO_HERE ? NO_HERE_WHY : undefined, fn: () => playFrom(p, 'browser', false) },
-		{ label: 'Shuffle play', icon: 'shuffle', fn: () => playFrom(p, store.target, true) },
+	const sheet = (p, anchor) => openSheet(p.name, 'playlist', [
+		{ label: 'Play on handheld', icon: 'card', fn: () => playFromPl(p, 'handheld', false) },
+		{ label: 'Play in this browser', icon: 'laptop', disabled: NO_HERE, sub: NO_HERE ? NO_HERE_WHY : undefined, fn: () => playFromPl(p, 'browser', false) },
+		{ label: 'Shuffle play', icon: 'shuffle', fn: () => playFromPl(p, store.target, true) }, '-',
 		{ label: 'Rename…', icon: 'pencil', fn: () => nameDialog({ title: 'Rename playlist', label: 'Playlist name', initial: p.name, ok: 'Rename', select: true, submit: async n => { const m = validPlName(n, list, p.id); if (m) return m; try { await post('/api/playlists/rename', { id: p.id, name: n.trim() }); load(); return ''; } catch (e) { return e.message; } } }) },
-		{ label: 'Delete', icon: 'trash', danger: true, fn: async () => { if (await ask('Delete ' + p.name + '?', 'Its files stay where they are.', { buttons: [{ label: 'Cancel', value: null }, { label: 'Delete', value: true, cls: 'danger' }] })) { try { await post('/api/playlists/delete', { id: p.id }); load(); } catch (e) { toast(e.message); } } } }]);
-	async function playFrom(p, target, shuffle) {
-		if (!userTap()) return;
-		try { const r = await get('/api/playlist', { id: p.id }); await playPlaylist(p.id, r.name, r.items, 0, shuffle, target, true); } catch (e) { errToast(e); }
-	}
+		{ label: 'Delete…', icon: 'trash', danger: true, fn: async () => { if (await ask('Delete ' + p.name + '?', 'Its files stay where they are.', { buttons: [{ label: 'Cancel', value: null }, { label: 'Delete', value: true, cls: 'danger' }] })) { try { await post('/api/playlists/delete', { id: p.id }); load(); } catch (e) { toast(e.message); } } } }],
+		{ anchor, sub: plural(p.count, 'item', 'items'), seed: p.id + '/0', kind: 'audio' });
 	const create = () => newPlaylistDialog((id) => open(id));
-	// Liked: built in, pinned in a block of its own; played, never renamed or deleted
+	// Liked: built in, pinned in a card of its own; played, never renamed or deleted
 	const liked = list && list.find(p => p.builtin), rest = list ? list.filter(p => !p.builtin) : [];
-	const likedSheet = p => openSheet('Liked', 'heart', [
-		{ label: 'Play on handheld', icon: 'card', disabled: !p.count, fn: () => playFrom(p, 'handheld', false) },
-		{ label: 'Play here', icon: 'network', disabled: NO_HERE || !p.count, sub: NO_HERE ? NO_HERE_WHY : undefined, fn: () => playFrom(p, 'browser', false) },
-		{ label: 'Shuffle play', icon: 'shuffle', disabled: !p.count, fn: () => playFrom(p, store.target, true) }]);
+	const likedSheet = (p, anchor) => openSheet('Liked', 'heart', [
+		{ label: 'Play on handheld', icon: 'card', disabled: !p.count, fn: () => playFromPl(p, 'handheld', false) },
+		{ label: 'Play in this browser', icon: 'laptop', disabled: NO_HERE || !p.count, sub: NO_HERE ? NO_HERE_WHY : undefined, fn: () => playFromPl(p, 'browser', false) },
+		{ label: 'Shuffle play', icon: 'shuffle', disabled: !p.count, fn: () => playFromPl(p, store.target, true) }], { anchor });
 	if (err) return html`<div class="page"><${Empty} icon="alert" title="Couldn't load playlists" sub=${err} button="Try again" onClick=${load} /></div>`;
-	return html`<div class="page"><div class="page-head"><h1>Playlists</h1>${rest.length > 0 && html`<button class="btn primary" onClick=${create}><${Icon} n="plus" k=${2} />New playlist</button>`}</div>
-		${liked && html`<ul class="flist pinned" style="list-style:none"><li class="plrow liked"><button class="main-btn" onClick=${() => open(liked.id)}><${Icon} n="heart" k=${3} cls="gl" /><span class="grow"><div class="nm ell">${liked.name || 'Liked'}</div><div class="ct">${liked.count ? plural(liked.count, 'item', 'items') + ' · newest first' : 'Tap ♥ on anything playing'}</div></span></button>
-			<button class="ib" aria-label="More about Liked" aria-haspopup="dialog" onClick=${() => likedSheet(liked)}><${MoreDots} /></button></li></ul>`}
+	const many = rest.length > 12, used = plUsed();
+	const mode = many ? (viewPref || 'list') : 'grid';
+	const recent = many ? rest.filter(p => used[p.id]).sort((a, b) => used[b.id] - used[a.id]).slice(0, 6) : [];
+	const f = many ? find.trim().toLowerCase() : '';
+	const shown = rest.filter(p => !f || p.name.toLowerCase().includes(f)).sort(
+		sort === 'recent' && many ? (a, b) => ((used[b.id] || 0) - (used[a.id] || 0)) || cmpName(a.name, b.name)
+		: sort === 'size' && many ? (a, b) => (b.count - a.count) || cmpName(a.name, b.name) : (a, b) => cmpName(a.name, b.name));
+	const pickSort = k => { setSort(k); lsSet('bpPlSort', k); };
+	const pickView = k => { setViewPref(k); lsSet('bpPlView', k); };
+	const card = p => html`<div class="plcell" key=${p.id}><button class="box surface plcard" onClick=${() => open(p.id)} onContextMenu=${e => { if (!touchOnly) { e.preventDefault(); sheet(p, { x: e.clientX, y: e.clientY }); } }}>
+			<span class="cv"><${PlArt} p=${p} k=${3} /></span><span class="txt"><div class="n ell">${p.name}</div><div class="c">${plural(p.count, 'item', 'items')}</div></span></button>
+		<button class="ib plmore" aria-label=${'More about ' + p.name} aria-haspopup="dialog" onClick=${e => sheet(p, e.currentTarget)}><${MoreDots} /></button></div>`;
+	let rows = [], last = '';
+	if (mode === 'list') for (const p of shown) {
+		const L = letterOf(p.name);
+		if (sort === 'az' && L !== last) { rows.push(html`<div class="letter" key=${'L' + L} aria-hidden="true">${L}</div>`); last = L; }
+		rows.push(html`<div class="plrow" key=${p.id}><button class="main-btn" onClick=${() => open(p.id)} onContextMenu=${e => { if (!touchOnly) { e.preventDefault(); sheet(p, { x: e.clientX, y: e.clientY }); } }}><span class="tile sm"><${PlArt} p=${p} /></span><span class="grow"><div class="fn ell">${p.name}</div><div class="fm">${plural(p.count, 'item', 'items')}</div></span></button>
+			${wide && p.count > 0 && html`<button class="ib rowplay" aria-label=${'Play ' + p.name} onClick=${() => playFromPl(p, store.target, false)}><${Icon} n="play" k=${2} /></button>`}
+			<button class="ib more" aria-label=${'More about ' + p.name} aria-haspopup="dialog" onClick=${e => sheet(p, e.currentTarget)}><${MoreDots} /></button></div>`);
+	}
+	return html`<div class="page">
+		<div class="phead"><div class="row"><h1>Playlists</h1><button class=${'btn' + (wide ? '' : ' icon')} aria-label=${wide ? undefined : 'New playlist'} title="New playlist" onClick=${create}><${Icon} n="plus" k=${2} />${wide && 'New playlist'}</button><${AppMenu} /></div>
+			${list && html`<div class="sub"><span class="kicker">${plural(list.length, 'playlist', 'playlists')} · shared with the handheld</span></div>`}</div>
+		${liked && html`<div class="plcell liked"><button class="box surface plcard liked" onClick=${() => open(liked.id)}><span class="cv"><${PlArt} p=${liked} k=${4} /></span>
+				<span class="txt grow"><div class="kicker y">Pinned</div><div class="n">Liked</div><div class="c">${liked.count ? plural(liked.count, 'item', 'items') + ' · newest first' : 'Tap ♥ on anything playing'}</div></span></button>
+			<span class="plcell-acts"><button class="ib" aria-label="More about Liked" aria-haspopup="dialog" onClick=${e => likedSheet(liked, e.currentTarget)}><${MoreDots} /></button>
+				<button class="box yellow plplay" aria-label="Play Liked" disabled=${!liked.count} onClick=${() => playFromPl(liked, store.target, false)}><${Icon} n="play" k=${3} /></button></span></div>`}
 		${!list ? (slow ? html`<${Skeleton} />` : null) : rest.length === 0 ? html`<${Empty} icon="playlist" title="No playlists yet" sub="Make one, then add songs and videos from Files." button="New playlist" onClick=${create} />` : html`
-		<ul class="flist" style="list-style:none">${rest.map(p => html`<li class="plrow" key=${p.id}><button class="main-btn" onClick=${() => open(p.id)}><${Icon} n="playlist" k=${3} cls="gl" /><span class="grow"><div class="nm ell">${p.name}</div><div class="ct">${plural(p.count, 'item', 'items')}</div></span></button>
-			<button class="ib" aria-label=${'More about ' + p.name} onClick=${() => sheet(p)}><${MoreDots} /></button></li>`)}</ul>`}</div>`;
+			${recent.length > 0 && html`<div class="band" style="margin-bottom:10px"><span class="kicker">Recent</span><span class="rule"></span><span class="dim" style="font-size:12px">played or added to</span></div>
+				<div class="plstrip">${recent.map(card)}</div>`}
+			${many && html`<div class="pltools" ref=${tools}>
+				<label class="find"><${Icon} n="search" k=${2} /><input class="field" data-slash="1" value=${find} placeholder="Find a playlist" aria-label="Find a playlist" autocomplete="off" enterkeyhint="go"
+					onInput=${e => setFind(e.target.value)} onKeyDown=${e => { if (e.key === 'Enter' && shown[0]) open(shown[0].id); if (e.key === 'Escape') { setFind(''); e.target.blur(); } }} />${desk && html`<span class="key">/</span>`}</label>
+				<div class="seg" role="group" aria-label="Sort">${[['az', 'A–Z'], ['recent', 'Recent'], ['size', 'Size']].map(([k, l]) => html`<button aria-pressed=${sort === k} onClick=${() => pickSort(k)}>${l}</button>`)}</div>
+				<div class="seg" role="group" aria-label="View"><button aria-pressed=${mode === 'list'} aria-label="List" title="List" onClick=${() => pickView('list')}><${Icon} n="playlist" k=${2} /></button><button aria-pressed=${mode === 'grid'} aria-label="Grid" title="Grid" onClick=${() => pickView('grid')}><${Icon} n="blocks" k=${2} /></button></div></div>`}
+			${shown.length === 0 ? html`<p class="note pad">No playlist called “${find.trim()}”</p>`
+				: mode === 'grid' ? html`<div class="plgrid">${shown.map(card)}</div>`
+				: html`<div class="box surface pllist" style=${'--tb-h:' + tbH + 'px'}>${rows}</div>`}`}</div>`;
 }
 
 function PlaylistView({ id }) {
@@ -2156,6 +2358,8 @@ function PlaylistView({ id }) {
 	}, [id]);
 	useEffect(() => { load(false); }, [id]);
 	useEffect(() => { if (pl) load(true); else if (err && s.epoch) load(false); }, [s.plTick, s.epoch]);
+	// the small player and the upload key make room for the selection's band
+	useEffect(() => { set({ selecting: selMode }); return () => set({ selecting: false }); }, [selMode]);
 	const slow = useLater(!pl && !err, 300);
 
 	async function edit(act, params, okMsg) {
@@ -2215,125 +2419,192 @@ function PlaylistView({ id }) {
 	const playLiked = i => items[i].p ? playItem(i) : playPlaylist(id, pl.name, items, i, false, 'handheld', true, true);
 	const addFiles = () => { set({ pick: { id, name: pl.name }, sel: new Set() }); go(filesHash(store.lastDir || (store.roots && store.roots[0].path) || '')); };
 	const total = items.reduce((a, x) => a + (x.duration > 0 ? x.duration : 0), 0);
-	const header = pl && html`<div class="page-head nowrap"><button class="ib" aria-label="Back to playlists" onClick=${() => go('#/playlists')}><${Icon} n="back" k=${3} /></button>
-		<div class="grow"><h1 class="clamp2">${pl.name}</h1><div class="dim" style="font-size:14px">${builtin && !items.length ? 'Nothing yet' : plural(items.length, 'item', 'items') + (total > 0 ? ' · ' + fmtTime(total) : '') + (builtin ? ' · newest first' : '')}</div></div>
-		<button class="ib" aria-label=${'More about ' + pl.name} aria-haspopup="dialog" onClick=${() => menu()}><${MoreDots} /></button></div>`;
-	const menu = () => builtin ? openSheet(pl.name, 'heart', [{ label: 'Select…', icon: 'box', sub: 'To unlike several at once', disabled: !items.length, fn: () => setSelMode(true) }]) : openSheet(pl.name, 'playlist', [
+	const menu = anchor => builtin ? openSheet(pl.name, 'heart', [{ label: 'Select…', icon: 'box', sub: 'To unlike several at once', disabled: !items.length, fn: () => setSelMode(true) }], { anchor }) : openSheet(pl.name, 'playlist', [
+		{ label: 'Add files…', icon: 'plus', fn: addFiles },
+		{ label: 'Select…', icon: 'box', disabled: !items.length, fn: () => setSelMode(true) },
+		{ label: 'Remove duplicates', icon: 'refresh', fn: async () => { const before = items.length, r = await edit('dedupe', {}); if (r) { await load(false); toast(r.count != null && before - r.count > 0 ? 'Removed ' + plural(before - r.count, 'duplicate', 'duplicates') : 'No duplicates'); } } }, '-',
 		{ label: 'Rename…', icon: 'pencil', fn: () => nameDialog({ title: 'Rename playlist', label: 'Playlist name', initial: pl.name, ok: 'Rename', select: true, submit: async n => { let others = []; try { others = (await get('/api/playlists')).playlists; } catch (e) {} const m = validPlName(n, others, id); if (m) return m; try { await post('/api/playlists/rename', { id, name: n.trim() }); load(false); return ''; } catch (e) { return e.message; } } }) },
-		{ label: 'Remove duplicates', icon: 'refresh', fn: async () => { const before = items.length, r = await edit('dedupe', {}); if (r) { await load(false); toast(r.count != null && before - r.count > 0 ? 'Removed ' + plural(before - r.count, 'duplicate', 'duplicates') : 'No duplicates'); } } },
-		{ label: 'Select…', icon: 'box', fn: () => setSelMode(true) },
-		{ label: 'Delete', icon: 'trash', danger: true, fn: async () => { if (await ask('Delete ' + pl.name + '?', 'Its files stay where they are.', { buttons: [{ label: 'Cancel', value: null }, { label: 'Delete', value: true, cls: 'danger' }] })) { try { await post('/api/playlists/delete', { id }); go('#/playlists'); } catch (e) { toast(e.message); } } } }]);
-	const rowMenu = (it, i) => openSheet(it.title, GLYPH[kindOfName(it.p)] || 'note', [
+		{ label: 'Delete…', icon: 'trash', danger: true, fn: async () => { if (await ask('Delete ' + pl.name + '?', 'Its files stay where they are.', { buttons: [{ label: 'Cancel', value: null }, { label: 'Delete', value: true, cls: 'danger' }] })) { try { await post('/api/playlists/delete', { id }); go('#/playlists'); } catch (e) { toast(e.message); } } } }], { anchor, sub: plural(items.length, 'item', 'items'), seed: id + '/0', kind: 'audio' });
+	const rowMenu = (it, i, anchor) => openSheet(it.title, GLYPH[kindOfName(it.p)] || 'note', [
 		{ label: 'Play from here', icon: 'play', disabled: it.missing, fn: () => playPlaylist(id, pl.name, items, i, false) },
-		{ label: 'Remove from playlist', icon: 'trash', danger: true, fn: () => remove(new Set([it.uid])) }]);
-	const likedMenu = (it, i) => openSheet(it.title, GLYPH[it.kind] || 'note', it.missing ? [{ label: 'Unlike', icon: 'heart-o', sub: 'The file is gone from the card', fn: () => remove(new Set([it.uid])) }] : [
+		{ label: 'Remove from playlist', icon: 'trash', danger: true, fn: () => remove(new Set([it.uid])) }], { anchor, seed: it.p || it.net, kind: kindOfName(it.p || it.net || '') });
+	const likedMenu = (it, i, anchor) => openSheet(it.title, GLYPH[it.kind] || 'note', it.missing ? [{ label: 'Unlike', icon: 'heart-o', sub: 'The file is gone from the card', fn: () => remove(new Set([it.uid])) }] : [
 		{ label: 'Play from here', icon: 'play', fn: () => playLiked(i) },
-		{ label: 'Play in this browser', icon: 'network', disabled: NO_HERE || !it.p, sub: NO_HERE ? NO_HERE_WHY : it.p ? undefined : 'Network files play on the handheld only', fn: () => playPlaylist(id, pl.name, items, i, false, 'browser') },
+		{ label: 'Play in this browser', icon: 'laptop', disabled: NO_HERE || !it.p, sub: NO_HERE ? NO_HERE_WHY : it.p ? undefined : 'Network files play on the handheld only', fn: () => playPlaylist(id, pl.name, items, i, false, 'browser') }, '-',
 		{ label: 'Unlike', icon: 'heart-o', fn: () => remove(new Set([it.uid])) },
 		it.p && { label: 'Add to playlist…', icon: 'pl-add', fn: () => addToPlaylist([it.p], it.title) },
-		it.p && { label: 'Show in Files', icon: 'folder', fn: () => showInFiles(it.p) }]);
+		it.p && { label: 'Show in Files', icon: 'folder', fn: () => showInFiles(it.p) }], { anchor, seed: it.p || it.net, kind: kindOfName(it.p || it.net || '') });
 	if (err) return html`<div class="page"><${Empty} icon="alert" title="Couldn't open this playlist" sub=${err} button="Try again" onClick=${() => load(false)} /></div>`;
 	if (!pl) return html`<div class="page">${slow ? html`<${Skeleton} />` : null}</div>`;
-	return html`<div class=${'page ' + (selMode ? 'pl-sel' : '')}>${header}
+	const nowV = view(), nowPath = nowV.has ? nowV.path : '';
+	const toggleSel = uid => setSel(x => { const n = new Set(x); n.has(uid) ? n.delete(uid) : n.add(uid); return n; });
+	return html`<div class=${'page ' + (selMode ? 'pl-sel' : '')}>
+		<div class="phead" style="padding-bottom:0"><div class="crumbs"><nav><button aria-label="Back to playlists" onClick=${() => go('#/playlists')}><${Icon} n="left" k=${1} />Playlists</button></nav></div></div>
+		<div class="plhero"><span class="cv"><${PlArt} p=${{ id, builtin }} k=${builtin ? 6 : 4} /></span>
+			<div class="grow" style="min-width:180px"><div class=${'kicker' + (builtin ? ' y' : '')} style="margin-bottom:8px">${builtin ? 'Built in · newest first' : 'Playlist'}</div><h1>${pl.name}</h1>
+				<div class="meta2">${builtin && !items.length ? 'Nothing yet' : plural(items.length, 'item', 'items') + (total > 0 ? ' · ' + fmtLong(total) : '')}</div></div>
+			<div class="acts">${items.length > 0 && html`<button class="btn primary" onClick=${() => playPlaylist(id, pl.name, items, 0, false)}><${Icon} n="play" k=${2} />Play</button>
+				<button class="btn" onClick=${() => playPlaylist(id, pl.name, items, 0, true)}><${Icon} n="shuffle" k=${2} />Shuffle</button>`}
+				${!builtin && html`<button class=${'btn' + (items.length ? ' icon' : '')} aria-label="Add files" title="Add files" onClick=${addFiles}><${Icon} n="plus" k=${2} />${!items.length && 'Add files'}</button>`}
+				<button class="btn icon" aria-label=${'More about ' + pl.name} aria-haspopup="dialog" onClick=${e => menu(e.currentTarget)}><${MoreDots} /></button></div></div>
 		${items.length === 0 && builtin ? html`<${Empty} icon="heart-o" title="Nothing liked yet" sub="Tap the heart on anything playing, here or on your handheld. It shows up here, newest first." button="Go to Playing" onClick=${() => go('#/playing')} />` : items.length === 0 ? html`<${Empty} icon="playlist" title=${pl.name + ' is empty'} sub="Add songs and videos from Files." button="Add files" onClick=${addFiles} />` : html`
-		<div class="pl-actions"><button class="btn primary" onClick=${() => playPlaylist(id, pl.name, items, 0, false)}><${Icon} n="play" k=${2} />Play</button>
-			<button class="btn" onClick=${() => playPlaylist(id, pl.name, items, 0, true)}><${Icon} n="shuffle" k=${2} />Shuffle</button>
-			${!builtin && html`<button class="btn" onClick=${addFiles}><${Icon} n="plus" k=${2} />Add files</button>`}</div>
-		<div class="flist" ref=${listRef} role="list">${items.map((it, i) => { const k = kindOfName(it.p), on = sel.has(it.uid); return html`<div class="pitem ${on ? 'sel' : ''} ${kb && kb.uid === it.uid ? 'picked' : ''} ${it.missing ? 'gone' : ''} ${builtin ? 'nogrip' : ''} ${it.fresh ? 'fresh' : ''}" role="listitem" key=${it.uid} data-uid=${it.uid}>
-			<button class="chk" aria-label=${(on ? 'Deselect ' : 'Select ') + it.title} onClick=${() => setSel(x => { const n = new Set(x); n.has(it.uid) ? n.delete(it.uid) : n.add(it.uid); return n; })}><${Icon} n=${on ? 'box-on' : 'box'} k=${2} /></button>
-			${!builtin && html`<button class="grip" aria-label=${'Reorder ' + it.title} aria-roledescription="drag handle" onKeyDown=${e => gripKey(e, i, it)}><${Icon} n="grip" k=${3} /></button>`}
-			<button class="tt" onClick=${() => selMode ? setSel(x => { const n = new Set(x); n.has(it.uid) ? n.delete(it.uid) : n.add(it.uid); return n; }) : it.missing ? toast('That file is gone from the card') : builtin ? playLiked(i) : playItem(i)} onContextMenu=${e => { if (matchMedia('(hover: hover)').matches) { e.preventDefault(); (builtin ? likedMenu : rowMenu)(it, i); } }}>
-				<div class="fn clamp2">${titleFor(it.p, it.title)}</div><div class="fm ell">${it.net ? html`<${Icon} n="network" k=${1} />${baseName(dirName(it.net))}` : baseName(dirName(it.p))}${it.duration > 0 ? ' · ' + fmtTime(it.duration) : ''}</div></button>
-			${it.missing && html`<span class="chip red">Gone</span>`}
-			${builtin && html`<button class="ib like on" aria-label=${'Unlike ' + it.title} title="Unlike" onClick=${() => remove(new Set([it.uid]))}><${Icon} n="heart" k=${2} /></button>`}
-			<button class="ib" aria-label=${'More about ' + it.title} onClick=${() => (builtin ? likedMenu : rowMenu)(it, i)}><${MoreDots} /></button></div>`; })}</div>
-		${selMode && html`<div class="selbar"><div class="cnt"><span>${sel.size} selected</span><span style="display:flex;gap:var(--s2)">${sel.size < items.length ? html`<button class="btn sm ghost" onClick=${() => setSel(new Set(items.map(x => x.uid)))}>All</button>` : html`<button class="btn sm ghost" onClick=${() => setSel(new Set())}>None</button>`}<button class="ib" aria-label="Done selecting" style="width:36px;height:36px" onClick=${() => { setSelMode(false); setSel(new Set()); }}><${Icon} n="cross" k=${2} /></button></span></div>
-			<button class="sb danger" disabled=${!sel.size} onClick=${() => remove(sel)}><${Icon} n=${builtin ? 'heart-o' : 'trash'} k=${2} />${builtin ? 'Unlike' : 'Remove'}</button></div>`}`}
+		<div class="box surface listbox"><div class="flist" ref=${listRef} role="list">${items.map((it, i) => { const k = kindOfName(it.p || it.net || ''), on = sel.has(it.uid), cur = !!it.p && it.p === nowPath && !selMode; return html`<div class=${'pitem' + (on ? ' sel' : '') + (kb && kb.uid === it.uid ? ' picked' : '') + (it.missing ? ' gone' : '') + (builtin ? ' nogrip' : '') + (it.fresh ? ' fresh' : '') + (cur ? ' cur' : '')} role="listitem" key=${it.uid} data-uid=${it.uid}>
+			<button class="chk" aria-label=${(on ? 'Deselect ' : 'Select ') + it.title} aria-pressed=${on} onClick=${() => toggleSel(it.uid)}><span class=${'check' + (on ? ' on' : '')}>${on && html`<${Icon} n="check" k=${2} />`}</span></button>
+			${!builtin && html`<button class="grip" aria-label=${'Reorder ' + it.title} aria-roledescription="drag handle" onKeyDown=${e => gripKey(e, i, it)}><${Icon} n="grip" k=${2} /></button>`}
+			<button class="main-btn tt" onClick=${() => selMode ? toggleSel(it.uid) : it.missing ? toast('That file is gone from the card') : builtin ? playLiked(i) : playItem(i)} onContextMenu=${e => { if (matchMedia('(hover: hover)').matches) { e.preventDefault(); (builtin ? likedMenu : rowMenu)(it, i, { x: e.clientX, y: e.clientY }); } }}>
+				<span class="tile"><${Art} seed=${it.p || it.net} kind=${k} /></span>
+				<span class="grow"><div class="fn ell">${titleFor(it.p || it.net || '', it.title)}</div>
+					<div class="fm">${cur && html`<span class="chip y tiny"><${Icon} n="play" k=${1} />Playing</span>`}${it.missing && html`<span class="chip red tiny">Gone</span>`}${it.net && !it.missing && html`<span class="chip tiny"><${Icon} n="network" k=${1} />handheld only</span>`}<span class="ell">${it.net ? baseName(dirName(it.net)) : baseName(dirName(it.p))}</span></div></span>
+				${it.duration > 0 && html`<span class="dur">${fmtTime(it.duration)}</span>`}</button>
+			${builtin && !selMode && html`<button class="ib like on" aria-label=${'Unlike ' + it.title} title="Unlike" onClick=${() => remove(new Set([it.uid]))}><${Icon} n="heart" k=${2} /></button>`}
+			${!selMode && html`<button class="ib more" aria-label=${'More about ' + it.title} aria-haspopup="dialog" onClick=${e => (builtin ? likedMenu : rowMenu)(it, i, e.currentTarget)}><${MoreDots} /></button>`}</div>`; })}</div></div>
+		${selMode && html`<div class="selbar box surface" role="toolbar" aria-label="Selection"><div class="acts">
+			<button class="btn sm sb" onClick=${() => { setSelMode(false); setSel(new Set()); }} aria-label="Done selecting"><${Icon} n="cross" k=${2} /><span class="lbl" aria-live="polite">${sel.size} selected</span></button>
+			${sel.size < items.length ? html`<button class="btn sm sb" onClick=${() => setSel(new Set(items.map(x => x.uid)))}><${Icon} n="box-on" k=${2} /><span class="lbl">All</span></button>` : html`<button class="btn sm sb" onClick=${() => setSel(new Set())}><${Icon} n="box" k=${2} /><span class="lbl">None</span></button>`}
+			<button class="btn sm danger sb" disabled=${!sel.size} onClick=${() => remove(sel)}><${Icon} n=${builtin ? 'heart-o' : 'trash'} k=${2} /><span class="lbl">${builtin ? 'Unlike' : 'Remove'}</span></button></div></div>`}`}
 		<div class="sr" aria-live="assertive">${live}</div></div>`;
 }
 
-/* ================= upload panel ================= */
-function UploadPanel() {
-	const u = store.upload, items = u.items; if (!items.length) return null;
-	const active = items.filter(i => i.state === 'up' || i.state === 'queued'), waiting = items.filter(i => i.state === 'waiting'), done = items.filter(i => i.state === 'done'), failed = items.filter(i => i.state === 'failed');
-	const total = items.reduce((a, i) => a + i.size, 0), loaded = items.reduce((a, i) => a + (i.state === 'done' ? i.size : i.loaded), 0);
-	const title = waiting.length && !active.length ? 'Waiting for your handheld · ' + plural(waiting.length, 'file', 'files')
-		: active.length || waiting.length ? `Uploading ${Math.min(done.length + 1, items.length)} of ${items.length} · ${fmtSize(total - loaded)} left`
-		: failed.length ? `${done.length} uploaded · ${failed.length} failed` : 'Uploaded ' + plural(done.length, 'file', 'files');
-	const allDone = !active.length && !waiting.length && !failed.length;
-	return html`<aside class="upanel ${u.min ? 'min' : ''} ${allDone ? 'done' : ''}" aria-label="Uploads"><div class="totalbar"><i style="width:${total ? loaded / total * 100 : 0}%"></i></div>
-		<header><div class="tt" aria-live="polite">${allDone && html`<${Icon} n="check" k=${2} cls="ok" />`}${title}</div>
-			${active.length || waiting.length ? html`<button class="btn sm ghost" onClick=${cancelAllUploads}>Cancel all</button>` : html`<button class="btn sm" onClick=${() => set({ upload: { items: [], min: false } })}>Done</button>`}
-			<button class="ib" aria-label=${u.min ? 'Show uploads' : 'Fold uploads'} aria-expanded=${!u.min} onClick=${() => { clearTimeout(collapseTimer); set({ upload: { ...u, min: !u.min } }); }}><${Icon} n=${u.min ? 'up' : 'down'} k=${2} /></button></header>
-		<div class="items">${items.map(it => html`<div class="uitem" key=${it.id}><div class="nm"><div class="ell">${joinPath(it.rel, it.name)}</div>
-			${it.state === 'failed' ? html`<div class="meta" style="color:var(--red)">${it.error}</div>` : html`<div class="meta">${fmtSize(it.size)}${it.state === 'queued' ? ' · next' : it.state === 'waiting' ? ' · waiting for your handheld' : ''}</div>`}
-			${(it.state === 'up') && html`<div class="ubar"><i style="width:${it.size ? it.loaded / it.size * 100 : 0}%"></i></div>`}</div>
-			${it.state === 'done' ? html`<${Icon} n="check" k=${2} cls="ok" label="Done" />` : it.state === 'failed' ? html`<button class="fail" onClick=${() => retryUpload(it)}>Failed · Retry</button>` : html`<span class="st">${it.state === 'up' ? Math.floor(it.loaded / (it.size || 1) * 100) + '%' : ''}</span>`}
-			${it.state !== 'done' && html`<button class="ib" style="width:36px;height:36px" aria-label=${'Cancel ' + it.name} onClick=${() => cancelUpload(it)}><${Icon} n="cross" k=${2} /></button>`}</div>`)}</div></aside>`;
+/* ================= uploads: the round key (bottom right) and its sheet =================
+   Idle in a folder: the yellow key; a tap offers Files or Folder. Sending: a dark key with the count and a ring of the
+   bytes sent (a red stretch for what failed); done: a green ring and a tick, back to the arrow after 2.5 s. A tap while
+   it sends shows each file (a sheet on a phone, a popover elsewhere). Shown in Files, and anywhere while uploads run
+   or failed; never over the player or a selection. */
+const isUp = i => i.state === 'up' || i.state === 'queued' || i.state === 'waiting';
+function upStats() {
+	const items = store.upload.items, n = items.length;
+	const total = items.reduce((a, i) => a + i.size, 0) || 1;
+	const loaded = items.reduce((a, i) => a + (i.state === 'done' ? i.size : i.state === 'failed' ? 0 : i.loaded), 0);
+	const failedB = items.filter(i => i.state === 'failed').reduce((a, i) => a + i.size, 0);
+	const done = items.filter(i => i.state === 'done').length, failed = items.filter(i => i.state === 'failed').length, running = items.filter(isUp).length;
+	return { items, n, total, loaded, failedB, done, failed, running, frac: Math.min(1, loaded / total) };
+}
+function pickUpload(kind) { const i = document.getElementById(kind === 'dir' ? 'up-dir' : 'up-files'); if (i) i.click(); }
+function UploadFab({ down }) {
+	const s = store, st = upStats(), [picking, setPicking] = useState(false);
+	const state = st.running ? (st.failed ? 'error' : 'busy') : st.failed ? 'error' : s.upDone ? 'done' : 'idle';
+	useEffect(() => { if (state !== 'idle') setPicking(false); }, [state]);
+	useEffect(() => { if (!picking) return; const k = e => { if (e.key === 'Escape') setPicking(false); }; addEventListener('keydown', k); return () => removeEventListener('keydown', k); }, [picking]);
+	const onFiles = s.route.page === 'files' && !!s.route.path && !down;
+	if (!down && (s.route.page === 'playing' || s.selecting || s.pick)) return null;
+	if (state === 'idle' && !onFiles) return null;
+	const C = 2 * Math.PI * 35, yel = st.frac, red = st.failedB / st.total;
+	const at = Math.min(st.done + st.failed + 1, st.n), cnt = at + '/' + st.n;
+	const label = state === 'idle' ? (picking ? 'Close' : 'Upload') : state === 'done' ? 'Uploads done' : !st.running ? plural(st.failed, 'upload', 'uploads') + ' failed. Show uploads' : `Uploading ${at} of ${st.n}, ${Math.floor(st.frac * 100)}%. Show uploads`;
+	const tap = e => { if (state === 'idle') setPicking(!picking); else if (state === 'done') clearDone(); else openUploads(e.currentTarget); };
+	const q = Math.floor(st.frac * 4) * 25;
+	return html`${picking && html`<div class="fabcatch" onClick=${() => setPicking(false)}></div>
+			<div class="fabpick" role="menu" aria-label="Upload">
+				<button class="btn" role="menuitem" onClick=${() => { setPicking(false); pickUpload('files'); }}><${Icon} n="note" k=${2} />Files</button>
+				${!isIOS && html`<button class="btn" role="menuitem" onClick=${() => { setPicking(false); pickUpload('dir'); }}><${Icon} n="folder" k=${2} />Folder</button>`}</div>`}
+		<div class=${'fabwrap ' + state + (picking ? ' picking' : '')}>
+			${state !== 'idle' && html`<svg class="ring" viewBox="0 0 80 80" aria-hidden="true"><circle cx="40" cy="40" r="35" fill="none" stroke="var(--e-track)" stroke-width="4" />
+				<circle class="arc" cx="40" cy="40" r="35" fill="none" stroke=${state === 'done' ? 'var(--green)' : 'var(--yellow)'} stroke-width="4" stroke-linecap="round" stroke-dasharray=${C} stroke-dashoffset=${C * (1 - (state === 'done' ? 1 : yel))} transform="rotate(-90 40 40)" />
+				${red > 0 && state !== 'done' && html`<circle cx="40" cy="40" r="35" fill="none" stroke="var(--red)" stroke-width="4" stroke-dasharray=${`${C * red} ${C}`} stroke-dashoffset=${-C * yel} transform="rotate(-90 40 40)" />`}</svg>`}
+			<button class=${'box fab' + (state === 'idle' || state === 'done' ? ' yellow' : '')} aria-label=${label} aria-haspopup=${state === 'idle' ? 'menu' : 'dialog'} aria-expanded=${state === 'idle' ? picking : undefined} onClick=${tap}>
+				${state === 'idle' ? html`<${Icon} n=${picking ? 'cross' : 'up'} k=${3} />` : state === 'done' ? html`<${Icon} n="check" k=${3} />` : html`<span class=${'cnt' + (cnt.length > 5 ? ' long' : '')}>${cnt}</span>`}</button>
+			${st.failed > 0 && state !== 'done' && html`<span class="fbadge" aria-hidden="true"><${Icon} n="alert" k=${1} />${st.failed}</span>`}
+			<span class="sr" aria-live="polite">${state === 'busy' || state === 'error' ? (q ? 'Uploaded ' + q + '%' : '') : state === 'done' ? 'Uploads done' : ''}</span></div>`;
+}
+function openUploads(anchor) {
+	if (store.upOpen) return;
+	let pos = null;
+	if (!phoneNow() && anchor) { const r = anchor.getBoundingClientRect(); pos = `right:${Math.max(8, innerWidth - r.right - 10)}px;bottom:${innerHeight - r.top + 16}px`; }
+	set({ upOpen: true });
+	openModal(close => html`<${UploadSheet} pos=${pos} onClose=${() => { set({ upOpen: false }); close(); }} />`, () => set({ upOpen: false }));
+}
+function UploadSheet({ pos, onClose }) {
+	useStore();
+	const st = upStats(), items = st.items, u = store.upload;
+	useEffect(() => { if (!items.length) onClose(); }, [items.length]);
+	useEffect(() => {
+		if (!pos) return;
+		const k = e => { if (e.key === 'Escape') { e.preventDefault(); onClose(); } };
+		document.addEventListener('keydown', k); return () => document.removeEventListener('keydown', k);
+	}, []);
+	const dirs = [...new Set(items.map(i => i.dir))];
+	const to = dirs.length > 1 ? plural(dirs.length, 'folder', 'folders') : dirLabel(dirs[0] || '');
+	const head = html`<div class="uphead"><div class="kicker y ell">${st.running ? 'Uploading to ' : 'Uploads to '}${to}</div>
+		<div style="display:flex;align-items:baseline;gap:10px"><h2 class="grow">${st.running ? Math.min(st.done + st.failed + 1, st.n) + ' of ' + st.n : st.failed ? plural(st.failed, 'upload', 'uploads') + ' failed' : 'All uploaded'}</h2>
+			<span class="num dim" style="font-size:13px">${fmtSize(st.loaded)} of ${fmtSize(st.total)} · ${Math.floor(st.frac * 100)}%</span></div>
+		<div class="upbar"><i style=${'width:' + st.frac * 100 + '%'}></i></div>
+		${store.conn !== 'ok' && html`<div class="note">Waiting for your handheld: they start again once it's back.</div>`}</div>`;
+	const rows = html`<div class="uprows">${items.map(it => { const cls = it.state === 'done' ? 'done' : it.state === 'failed' ? 'err' : it.state === 'up' ? 'run' : 'wait'; return html`<div class=${'up ' + cls} key=${it.id}>
+		<span class="nm ell">${joinPath(it.rel, it.name)}${dirs.length > 1 && html`<span class="dir ell">${dirLabel(it.dir)}</span>`}</span>
+		<span class="st">${it.state === 'done' ? html`<${Icon} n="check" k=${1} />done`
+			: it.state === 'failed' ? html`<span>${it.error}</span><button class="btn sm" style="min-height:28px;font-size:13px" onClick=${() => retryUpload(it)}>Retry</button>`
+			: html`<span class=${it.state === 'up' ? 'y' : ''}>${it.state === 'up' ? Math.floor(it.loaded / (it.size || 1) * 100) + '%' : it.state === 'queued' ? 'next' : u.paused ? 'paused' : 'waiting'}</span><button class="ib sm" aria-label=${'Cancel ' + it.name} onClick=${() => cancelUpload(it)}><${Icon} n="cross" k=${1} /></button>`}</span>
+		${it.state !== 'failed' && html`<div class="bar"><i style=${'width:' + (it.state === 'done' ? 100 : it.size ? it.loaded / it.size * 100 : 0) + '%'}></i></div>`}</div>`; })}</div>`;
+	const foot = html`<div class="upfoot">${st.running ? html`<button class="btn sm" onClick=${() => pauseUploads(!u.paused)}>${u.paused ? 'Resume' : 'Pause'}</button><button class="btn sm danger" onClick=${cancelAllUploads}>Cancel all</button>`
+		: html`<span></span><button class="btn sm" onClick=${() => { clearTimeout(doneTimer); set({ upload: { ...u, items: [] }, upDone: 0 }); }}>Clear</button>`}</div>`;
+	if (pos) return html`<div class="popcatch" onMouseDown=${onClose}></div><div class="uppop box surface" role="dialog" aria-label="Uploads" style=${pos}>${head}${rows}${foot}</div>`;
+	return html`<${Modal} cls="upsheet" label="Uploads" raw=${true} onClose=${onClose}>${head}${rows}${foot}</${Modal}>`;
 }
 
 /* ================= down screen: the handheld closed, off, asleep or out of reach ================= */
-// the logo, kept from the start: when the handheld is gone, nothing more can be fetched from it
-let logoUrl = '/logo.svg';
-fetch('/logo.svg').then(r => r.ok ? r.text() : '').then(t => { if (t) logoUrl = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(t); }).catch(() => {});
 const DOWN = {
 	quit: ['Banana Player was closed on your handheld', 'Open Banana Player on your handheld. This page reconnects by itself.'],
 	off: ['The web dashboard was turned off', 'Turn it on again on your handheld: START › Settings › Web dashboard. This page reconnects by itself.'],
-	sleep: ['Your handheld is asleep', 'Open its lid to continue. This page reconnects by itself.'],
+	sleep: ['Your handheld is asleep', 'Open its lid to carry on. This page reconnects by itself.'],
 	none: ["Can't reach your handheld", 'It may be asleep, or off this Wi-Fi. This page reconnects by itself.'],
 };
+// (all drawn here: when the handheld is gone, nothing more can be fetched from it)
 function DownScreen() {
 	const s = store; useTick(1000);
 	const [t, sub] = DOWN[s.downReason] || DOWN.none;
 	const left = Math.max(0, Math.ceil((s.nextTry - Date.now()) / 1000));
-	const status = s.probing || !left ? 'Trying again…' : 'Next try in ' + fmtTime(left);
+	const trying = s.probing || !left;
 	const ref = useRef();
 	useEffect(() => { ref.current && ref.current.focus(); }, [s.downReason]);
-	return html`<main class="down" aria-labelledby="down-t">
-		<div class="down-box">
-			<img src=${logoUrl} alt="" width="64" height="64" />
-			<h1 id="down-t" tabindex="-1" ref=${ref}>${t}</h1>
-			<p class="down-sub">${sub}</p>
-			${B.meta && B.parkedPlaying && html`<div class="down-card"><${Icon} n=${B.meta.kind === 'video' ? 'film' : 'note'} k=${2} /><span><b>${B.meta.title}</b> was playing here. It stopped at ${fmtTime(B.parked)}.</span></div>`}
-			<p class="down-status" role="status" aria-live="polite">${status}</p>
-			<button class="btn" disabled=${s.probing} onClick=${() => probe()}>Try again</button>
-		</div></main>`;
+	const sleep = s.downReason === 'sleep';
+	return html`<main class="down" aria-labelledby="down-t"><div class="downbox">
+		<div class="zz"><${HandheldArt} mode="off" />${sleep && html`<span style="right:-6px;top:-4px" aria-hidden="true">z</span><span style="right:-18px;top:-14px;animation-delay:.8s" aria-hidden="true">Z</span>`}</div>
+		<div class="kicker">Disconnected</div>
+		<h1 id="down-t" tabindex="-1" ref=${ref}>${t}</h1>
+		<p class="down-sub">${sub}</p>
+		${B.meta && B.parkedPlaying && html`<div class="box surface down-card"><span class="tile"><${Art} seed=${B.meta.p} kind=${B.meta.kind} /></span><div class="grow"><div class="t">${B.meta.title}</div><div class="dim" style="font-size:13px">Was playing here · stopped at <span class="num">${fmtTime(B.parked)}</span></div></div></div>`}
+		<p class="down-status" role="status" aria-live="polite"><span class="wdots" aria-hidden="true"><i></i><i></i><i></i></span>${trying ? 'Trying again…' : 'Next try in ' + fmtTime(left)}</p>
+		<button class="btn" disabled=${s.probing} onClick=${() => probe()}><${Icon} n="refresh" k=${2} />Try again</button>
+	</div></main>`;
 }
 
 /* ================= shell ================= */
 const NAV = [['playing', 'Playing', 'note', '#/playing'], ['files', 'Files', 'folder', '#/files'], ['playlists', 'Playlists', 'playlist', '#/playlists']];
 async function signOut() { browserStop(); closeSSE(); try { await post('/api/logout'); } catch (e) {} set({ authed: false, signedOut: '', snap: null }); }
+async function loadPls() { try { set({ pls: (await get('/api/playlists', null, { quiet: true })).playlists || [] }); } catch (e) {} }
 
+// the phone's small player, floating over the tab bar
 function MiniPlayer() {
 	const v = view(); useTick(1000);
 	if (!v.has || store.route.page === 'playing' || store.selecting) return null;
 	const frac = v.duration ? Math.min(1, v.pos() / v.duration) : 0;
-	return html`<div class="mini" onClick=${() => go('#/playing')} role="region" aria-label="Now playing">
-		<div class="prog"><i style="width:${frac * 100}%"></i></div>
-		<div class="art-sm"><${Cover} path=${v.cover} kind=${v.kind} k=${3} /></div>
-		<div class="meta"><div class="t ell">${v.title}</div><div class="a ell">${v.artist || (v.here ? 'In this browser' : 'On handheld')}</div></div>
-		<span class="chip-target" title=${v.here ? 'In this browser' : 'On handheld'}><${Icon} n=${v.here ? 'laptop' : 'card'} k=${2} label=${v.here ? 'In this browser' : 'On handheld'} /></span>
-		<button class="ib play" aria-label=${v.paused ? 'Play' : 'Pause'} onClick=${e => { e.stopPropagation(); ctl.toggle(); }}><${Icon} n=${v.paused ? 'play' : 'pause'} k=${3} /></button></div>`;
+	return html`<div class="mini box surface" onClick=${() => go('#/playing')} role="region" aria-label="Now playing">
+		<div class="tile art-sm"><${Art} src=${coverUrl(v.kind === 'video' ? v.path : v.cover)} seed=${v.path} kind=${v.kind} /></div>
+		<div class="meta"><div class="t ell">${v.title}</div><div class="m ell">${v.here ? 'In this browser' : html`<span class="y">On handheld</span>`}${v.artist ? ' · ' + v.artist : ''}</div></div>
+		${likable(v) && html`<${LikeBtn} v=${v} cls="ib" />`}
+		<button class="ib play" aria-label=${v.paused ? 'Play' : 'Pause'} onClick=${e => { e.stopPropagation(); ctl.toggle(); }}><${Icon} n=${v.paused ? 'play' : 'pause'} k=${2} /></button>
+		<div class="prog" aria-hidden="true"><i style=${'width:' + frac * 100 + '%'}></i></div></div>`;
 }
-// the desktop's player bar, on every page (on Playing too: the transport lives here, as on YouTube Music)
+// the tablet's and the computer's player bar, on every page (on Playing too: on a computer the transport lives here)
 function PlayerBar() {
 	const v = view(), s = store; useTick(1000);
-	if (!v.has) return html`<div class="bar"><span class="dim grow" style="font-size:14px">Nothing playing</span><div class="bar-r"><${DeviceChip} cls="bar-chip" /></div></div>`;
+	if (!v.has) return html`<div class="pbar idle" role="region" aria-label="Player"><span class="dim" style="font-size:14px">Nothing playing</span><div class="right"><${DevButton} /></div></div>`;
 	const off = s.reconnecting && !v.here, onPage = s.route.page === 'playing';
-	return html`<div class="bar" role="region" aria-label="Player">
-		<div class="bar-seek"><${Seek} view=${v} onSeek=${ctl.seek} disabled=${off} /></div>
-		<div class="ctl"><button class="ib" aria-label="Previous" onClick=${ctl.prev} disabled=${off}><${Icon} n="prev" k=${3} /></button>
-			<button class="ib play" aria-label=${v.paused ? 'Play' : 'Pause'} onClick=${ctl.toggle} disabled=${off}><${Icon} n=${v.paused ? 'play' : 'pause'} k=${3} /></button>
-			<button class="ib" aria-label="Next" onClick=${ctl.next} disabled=${off}><${Icon} n="next" k=${3} /></button></div>
-		<span class="tm">${fmtTime(v.pos())} / ${fmtTime(v.duration)}</span>
-		<div class=${'meta' + (onPage ? ' here' : '')} onClick=${() => go('#/playing')} role=${onPage ? undefined : 'link'} aria-label=${onPage ? undefined : 'Open the player'}>
-			<div class="art-sm"><${Cover} path=${v.kind === 'video' ? v.path : v.cover} kind=${v.kind} k=${3} /></div><div class="t-wrap"><div class="t ell">${v.title}</div><div class="a ell">${v.artist || targetLabel(s.target)}</div></div>
-			${likable(v) && html`<div class="acts" onClick=${e => e.stopPropagation()}><${LikeBtn} v=${v} cls="ib" />
-				<button class=${'ib' + (s.addOpen ? ' open' : '')} aria-label="Add to playlist" title="Add to playlist" aria-haspopup="dialog" aria-expanded=${!!s.addOpen} onClick=${e => addToPlaylist([v.path], v.title, e.currentTarget)}><${Icon} n="pl-add" k=${2} /></button></div>`}</div>
-		<div class="bar-r">
-			<button class=${'ib' + (v.loop !== 'no' ? ' on' : '')} aria-label=${loopName(v.loop)} title=${loopName(v.loop)} aria-pressed=${v.loop !== 'no'} onClick=${ctl.loop} disabled=${off}><${LoopIcon} loop=${v.loop} k=${2} /></button>
-			<button class=${'ib' + (v.shuffled ? ' on' : '')} aria-label="Shuffle" title=${v.shuffled ? 'Shuffle: On' : 'Shuffle: Off'} aria-pressed=${!!v.shuffled} onClick=${ctl.shuffle} disabled=${off}><${Icon} n="shuffle" k=${2} /></button>
-			<${DeviceChip} cls="bar-chip" />
+	const open = () => { if (!onPage) go('#/playing'); };
+	return html`<div class="pbar" role="region" aria-label="Player">
+		<div class="pb-seek"><${Seek} view=${v} onSeek=${ctl.seek} disabled=${off} /></div>
+		<div class="tx"><button class="ib" aria-label="Previous" onClick=${ctl.prev} disabled=${off}><${Icon} n="prev" k=${2} /></button>
+			<button class="box yellow play" aria-label=${v.paused ? 'Play' : 'Pause'} onClick=${ctl.toggle} disabled=${off}><${Icon} n=${v.paused ? 'play' : 'pause'} k=${3} /></button>
+			<button class="ib" aria-label="Next" onClick=${ctl.next} disabled=${off}><${Icon} n="next" k=${2} /></button>
+			<span class="ptime">${fmtTime(v.pos())} / ${fmtTime(v.duration)}</span></div>
+		<div class=${'pb-now' + (onPage ? ' here' : '')}>
+			<div class="go" onClick=${open} role=${onPage ? undefined : 'link'} tabindex=${onPage ? undefined : 0} aria-label=${onPage ? undefined : 'Open the player'} onKeyDown=${e => { if (e.key === 'Enter') open(); }}>
+				<span class="tile art-sm"><${Art} src=${coverUrl(v.kind === 'video' ? v.path : v.cover)} seed=${v.path} kind=${v.kind} /></span><span class="grow"><div class="t ell">${v.title}</div><div class="m ell">${v.artist || targetLabel(s.target)}</div></span></div>
+			${likable(v) && html`<${LikeBtn} v=${v} cls="ib" /><button class=${'ib' + (s.addOpen ? ' open' : '')} aria-label="Add to playlist" title="Add to playlist" aria-haspopup="dialog" aria-expanded=${!!s.addOpen} onClick=${e => addToPlaylist([v.path], v.title, e.currentTarget)}><${Icon} n="pl-add" k=${2} /></button>`}</div>
+		<div class="right">
+			<button class=${'ib opt' + (v.shuffled ? ' on' : '')} aria-label="Shuffle" title=${v.shuffled ? 'Shuffle: On' : 'Shuffle: Off'} aria-pressed=${!!v.shuffled} onClick=${ctl.shuffle} disabled=${off}><${Icon} n="shuffle" k=${2} /></button>
+			<button class=${'ib opt' + (v.loop !== 'no' ? ' on' : '')} aria-label=${loopName(v.loop)} title=${loopName(v.loop)} aria-pressed=${v.loop !== 'no'} onClick=${ctl.loop} disabled=${off}><${LoopIcon} loop=${v.loop} k=${2} /></button>
+			<${DevButton} />
 			<${BarVolume} /></div></div>`;
 }
 function BarVolume() {
@@ -2342,24 +2613,63 @@ function BarVolume() {
 	const send = useMemo(() => throttled(v => post('/api/volume', { v }).catch(() => {}), 120), []);
 	if ((here && isIOS) || (!here && sn && sn.volume < 0)) return null;
 	const change = e => { const v = +e.target.value; hold(v); if (here) setBrowserVol(v); else send(v); };
-	return html`<div class="bar-vol"><${Icon} n="speaker" k=${2} /><input type="range" min="0" max="100" value=${val} onInput=${change} aria-label=${here ? 'Browser volume' : 'Handheld volume'} aria-valuetext=${val + '%'} /></div>`;
+	return html`<div class="bar-vol"><${Icon} n="speaker" k=${2} /><input type="range" class="filled" style=${'--v:' + val + '%'} min="0" max="100" value=${val} onInput=${change} aria-label=${here ? 'Browser volume' : 'Handheld volume'} aria-valuetext=${val + '%'} /></div>`;
 }
 function Toasts() {
-	return html`<div class="toasts" role="status" aria-live="polite">${store.toasts.map(t => html`<div class=${'toast' + (t.out ? ' out' : '')} key=${t.id}><span class="grow">${t.text}</span>${t.action && html`<button onClick=${() => { set({ toasts: store.toasts.filter(x => x.id !== t.id) }); t.action.fn(); }}>${t.action.label}</button>`}</div>`)}</div>`;
+	return html`<div class="toasts" role="status" aria-live="polite">${store.toasts.map(t => html`<div class=${'toast box' + (t.out ? ' out' : '')} key=${t.id} style=${'--ms:' + (t.ms || 4000) + 'ms'}>
+		<span class="grow ttl">${t.text}</span>
+		${t.action && html`<button class="btn sm primary" onClick=${() => { set({ toasts: store.toasts.filter(x => x.id !== t.id) }); t.action.fn(); }}>${t.action.label}</button>`}
+		<svg class="tring" viewBox="0 0 22 22" aria-hidden="true"><circle cx="11" cy="11" r="9" fill="none" stroke="#3a3842" stroke-width="3" /><circle cx="11" cy="11" r="9" fill="none" stroke="var(--yellow)" stroke-width="3" stroke-dasharray="56.55" stroke-dashoffset="0" /></svg></div>`)}</div>`;
 }
 function HelpOverlay() {
-	const keys = [['Space', 'Play / pause'], ['← →', 'Back 5 s / forward 10 s'], ['Shift + ← →', 'Previous / next'], ['[ ]', 'Previous / next chapter'], ['L', 'Loop'], ['↑ ↓', 'Volume'], ['?', 'This help'], ['Esc', 'Close']];
+	const keys = [['Space', 'Play / pause'], ['← →', 'Back 5 s / forward 10 s'], ['Shift + ← →', 'Previous / next'], ['[ ]', 'Previous / next chapter'], ['L', 'Loop'], ['↑ ↓', 'Volume'], ['/', 'Find (Files, Playlists)'], ['?', 'This help'], ['Esc', 'Close']];
 	const close = () => set({ help: false });
 	return html`<${Modal} title="Keyboard shortcuts" onClose=${close} actions=${html`<button class="btn primary" onClick=${close}>Close</button>`}><div class="helpkeys">${keys.map(([k, d]) => html`<kbd>${k}</kbd><span>${d}</span>`)}</div></${Modal}>`;
 }
 
+// the sidebar's playlists: a shortcut, not the library (Liked, up to 5 recent, then all of them on their page)
+function SidePls() {
+	const s = store, list = s.pls;
+	if (!list) return html`<div class="plblock"></div>`;
+	const liked = list.find(p => p.builtin), rest = list.filter(p => !p.builtin);
+	const used = plUsed(), few = rest.length <= 6;
+	const shown = few ? rest.slice().sort((a, b) => cmpName(a.name, b.name)) : rest.filter(p => used[p.id]).sort((a, b) => used[b.id] - used[a.id]).slice(0, 5);
+	const cur = s.route.page === 'playlists' ? s.route.id : null;
+	const open = id => go('#/playlists/' + encodeURIComponent(id));
+	return html`<div class="plblock" role="group" aria-label="Playlists">
+		<div class="plhead"><span class="kicker">Playlists</span><span class="num">${list.length}</span><span class="grow"></span><button class="ib sm" aria-label="New playlist" title="New playlist" onClick=${() => newPlaylistDialog(id => open(id))}><${Icon} n="plus" k=${1} /></button></div>
+		${liked && html`<button class="plnav" aria-current=${cur === liked.id ? 'page' : undefined} onClick=${() => open(liked.id)}><span class="y"><${Icon} n="heart" k=${1} /></span>Liked</button>`}
+		${!few && shown.length > 0 && html`<div class="kicker plsub">Recent</div>`}
+		${shown.map(p => html`<button class="plnav side-pl" key=${p.id} aria-current=${cur === p.id ? 'page' : undefined} onClick=${() => open(p.id)}><${Icon} n="playlist" k=${1} /><span class="ell">${p.name}</span></button>`)}
+		${!few && html`<button class="plnav all" onClick=${() => go('#/playlists')}>All ${list.length} playlists<span class="grow"></span><${Icon} n="right" k=${1} /></button>`}</div>`;
+}
+function Side({ nav }) {
+	const s = store, r = s.route, sn = s.snap, root = s.roots && s.roots[0];
+	const bat = sn && sn.battery >= 0 ? sn.battery : null, conn = !s.reconnecting;
+	return html`<aside class="side" aria-label="Sections">
+		<div class="logo"><img class="logo32" src="/logo.svg" width="32" height="32" alt="" /><b>Banana Player</b></div>
+		<nav aria-label="Main" style="display:contents">${NAV.map(([k, l, ic, h]) => html`<button class="nav" aria-current=${r.page === k ? 'page' : undefined} onClick=${() => nav(k, h)}><${Icon} n=${ic} k=${2} />${l}</button>`)}</nav>
+		<${SidePls} />
+		<div class="box surface hhcard" role="group" aria-label="Your handheld">
+			<div class="hrow"><span class=${'cdot' + (conn ? '' : ' off')}></span><span class="hname">${conn ? 'Handheld' : 'Reconnecting…'}</span><span class="grow"></span>${bat != null && html`<span class="num dim" style="font-size:13px">${bat}%</span>`}</div>
+			${root && root.free != null && html`<${Storage} free=${root.free} total=${root.total} />`}
+			<button class="btn sm" onClick=${signOut}>Sign out</button>
+			<div class="lnote"><${Icon} n="lock" k=${1} />Not encrypted: home Wi-Fi only</div></div>
+		<div class="hh-mini"><span class=${'cdot' + (conn ? '' : ' off')} title=${conn ? 'Handheld connected' : 'Reconnecting…'}></span>${bat != null && html`<span class="num">${bat}%</span>`}
+			<button class="ib" aria-label="Sign out" title="Sign out" onClick=${signOut}><${Icon} n="power" k=${2} /></button></div>
+	</aside>`;
+}
+
 function Shell() {
-	const s = useStore(), r = s.route, [menu, setMenu] = useState(false), v = view();
+	const s = useStore(), r = s.route, v = view();
 	// the liked files, for the hearts on rows and menus: again whenever a playlist changes anywhere
 	useEffect(() => { loadLikes(); }, [s.plTick, s.epoch]);
-	const desk = useMedia('(min-width: 1024px)');
-	// something playing: on a phone or a tablet the player takes the whole screen; on a computer the menu folds to a rail
-	const full = r.page === 'playing' && v.has && !desk, railed = r.page === 'playing' && v.has && desk;
+	const wide = useMedia(Q_WIDE), desk = useMedia(Q_DESK);
+	// the sidebar's playlists and the handheld's free space (a computer)
+	useEffect(() => { if (desk) loadPls(); }, [desk, s.plTick, s.epoch]);
+	useEffect(() => { if (!desk || !s.fsTick) return; const t = setTimeout(() => get('/api/roots', null, { quiet: true }).then(x => set({ roots: x.roots })).catch(() => {}), 2000); return () => clearTimeout(t); }, [desk, s.fsTick]);
+	// something playing: on a phone the player takes the whole screen
+	const full = r.page === 'playing' && v.has && !wide;
 	// drag and drop onto the whole page
 	useEffect(() => {
 		let depth = 0;
@@ -2383,8 +2693,9 @@ function Shell() {
 			if (e.key === 'Escape' && store.help) return set({ help: false });
 			if (e.key === 'Escape' && store.sheetOpen && store.route.page === 'playing') return closePanel();
 			if (e.key === '?') return set({ help: !store.help });
+			if (e.key === '/') { const f = document.querySelector('[data-slash]'); if (f && f.offsetParent) { e.preventDefault(); f.focus(); } return; }
 			if (e.key === ' ' && !button) { e.preventDefault(); ctl.toggle(); }
-			else if ((e.key === 'ArrowLeft' || e.key === 'ArrowRight') && !slider && !t.closest('.eq-bars')) { e.preventDefault(); const fwd = e.key === 'ArrowRight'; if (e.shiftKey) fwd ? ctl.next() : ctl.prev(); else ctl.seekRel(fwd ? 10 : -5); }
+			else if ((e.key === 'ArrowLeft' || e.key === 'ArrowRight') && !slider) { e.preventDefault(); const fwd = e.key === 'ArrowRight'; if (e.shiftKey) fwd ? ctl.next() : ctl.prev(); else ctl.seekRel(fwd ? 10 : -5); }
 			else if (e.key === '[' || e.key === ']') ctl.chapterStep(e.key === ']' ? 1 : -1);
 			else if ((e.key === 'l' || e.key === 'L') && (sn || here)) ctl.loop();
 			else if ((e.key === 'ArrowUp' || e.key === 'ArrowDown') && !slider && !button) {
@@ -2396,28 +2707,26 @@ function Shell() {
 		addEventListener('keydown', key); return () => removeEventListener('keydown', key);
 	}, []);
 	const page = r.page === 'files' ? html`<${Files} />` : r.page === 'playlists' ? html`<${Playlists} />` : html`<${NowPlaying} />`;
-	const miniShown = v.has && r.page !== 'playing' && !s.selecting;
-	const upMin = s.upload.items.length > 0 && s.upload.min;
+	const miniShown = !wide && v.has && r.page !== 'playing' && !s.selecting;
+	const fabShown = r.page !== 'playing' && !s.selecting && !s.pick && (s.upload.items.length > 0 || (r.page === 'files' && !!r.path));
 	const nav = (k, h) => go(k === 'files' ? filesHash(store.lastDir || '') : h);
-	// the Playing page has its own bar and controls: the small player (phone) and the bottom bar (desktop) would repeat them
-	return html`<div class=${'shell' + (miniShown ? ' has-mini' : '') + (upMin ? ' has-strip' : '') + (r.page === 'playing' ? ' on-playing' : '') + (full ? ' fullplayer' + (s.sheetOpen ? ' sheet-open' : '') : '') + (railed ? ' railed' : '')}>
-		<header class="topbar"><img class="logo32" src="/logo.svg" width="32" height="32" alt="" /><span class="title grow">Banana Player</span>
-			${s.reconnecting && html`<span class="pill red" role="status">Offline</span>`}
-			<button class="ib" aria-label="More" aria-haspopup="menu" aria-expanded=${menu} onClick=${() => setMenu(!menu)}><${MoreDots} /></button>
-			${menu && html`<div class="menu" role="menu" onClick=${() => setMenu(false)}><button class="sheet-item" role="menuitem" onClick=${signOut}>Sign out</button></div>`}</header>
-		<aside class="sidebar"><div class="side-logo"><img class="logo32" src="/logo.svg" width="32" height="32" alt="" /><span class="lbl">Banana Player</span></div>
-			<nav class="side-nav" aria-label="Main">${NAV.map(([k, l, ic, h]) => html`<button aria-current=${r.page === k ? 'page' : undefined} title=${railed ? l : undefined} onClick=${() => nav(k, h)}><${Icon} n=${ic} k=${2} /><span class="lbl">${l}</span></button>`)}</nav>
-			<div class="side-foot"><button class="ib rail-only" aria-label="Sign out" title="Sign out" onClick=${signOut}><${Icon} n="power" k=${2} /></button><div class="conn" title=${s.reconnecting ? 'Reconnecting…' : 'Handheld connected'}><span class=${'dot ' + (s.reconnecting ? 'off' : '')}></span><span class="lbl">${s.reconnecting ? 'Reconnecting…' : 'Handheld connected'}</span></div><button class="btn sm ghost rail-hide" onClick=${signOut}>Sign out</button><div class="rail-hide" style="font:400 12px/1.4 var(--text);color:var(--dim)">Unencrypted: use it on your home Wi-Fi</div></div></aside>
-		<main class="main" id="main">${s.updated && !s.reconnecting && html`<div class="reconnecting updated" role="status"><span>Banana Player was updated</span><button class="btn sm primary" onClick=${() => location.reload()}>Reload</button></div>`}${s.reconnecting && html`<div class="reconnecting" role="status"><span class="dot off"></span>Reconnecting to your handheld…</div>`}${page}</main>
-		<${MiniPlayer} />
+	const upIn = e => { startUpload(entriesFromInput(e.target.files), store.lastDir || (store.roots && store.roots[0] && store.roots[0].path) || ''); e.target.value = ''; };
+	return html`<div class=${'shell' + (miniShown ? ' has-mini' : '') + (fabShown ? ' has-fab' : '') + (r.page === 'playing' ? ' on-playing' : '') + (full ? ' fullplayer' + (s.sheetOpen ? ' sheet-open' : '') : '')}>
+		<${Side} nav=${nav} />
+		<div class="mainwrap">
+			<main class="main" id="main">${s.updated && !s.reconnecting && html`<div class="reconnecting updated" role="status"><span>Banana Player was updated</span><button class="btn sm primary" onClick=${() => location.reload()}>Reload</button></div>`}${s.reconnecting && html`<div class="reconnecting" role="status"><span class="cdot off"></span>Reconnecting to your handheld…</div>`}${page}</main>
+			<${UploadFab} />
+			<${Toasts} />
+		</div>
+		${!wide && html`<${MiniPlayer} />`}
 		<nav class="tabs" aria-label="Main">${NAV.map(([k, l, ic, h]) => html`<button aria-current=${r.page === k ? 'page' : undefined} onClick=${() => nav(k, h)}><${Icon} n=${ic} k=${2} />${l}</button>`)}</nav>
-		<${PlayerBar} />
-		${s.upload.items.length > 0 && html`<${UploadPanel} />`}
+		${wide && html`<${PlayerBar} />`}
+		<input type="file" multiple hidden id="up-files" onChange=${upIn} />
+		<input type="file" hidden webkitdirectory id="up-dir" onChange=${upIn} />
 		${s.lightbox && html`<${Lightbox} />`}
 		${s.help && html`<${HelpOverlay} />`}
 		${s.modals.map(m => html`<div class=${'mwrap' + (m.out ? ' out' : '')} key=${m.id}>${m.render(m.close)}</div>`)}
 		${s.dropping && !s.overZone && html`<div class="dropover"><div>Drop to upload to ${dirLabel(store.lastDir || 'This card')}</div></div>`}
-		<${Toasts} />
 	</div>`;
 }
 const Fragment = ({ children }) => children;
@@ -2426,8 +2735,9 @@ const Fragment = ({ children }) => children;
 function App() {
 	const s = useStore();
 	const slow = useLater(s.authed === null && s.conn !== 'down', 600);
-	if (s.conn === 'down' && s.authed !== false) return html`<div class=${'downwrap' + (s.upload.items.length ? ' has-up' : '')}><${DownScreen} />${s.upload.items.length > 0 && html`<${UploadPanel} />`}<${Toasts} /></div>`;
-	if (s.authed === null) return html`<main class="login"><img src="/logo.svg" alt="" /><h1>Banana Player</h1><p class="sub" aria-live="polite">${slow ? 'Connecting…' : ' '}</p></main>`;
+	if (s.conn === 'down' && s.authed !== false) return html`<div class="downwrap"><${DownScreen} />${s.upload.items.length > 0 && html`<${UploadFab} down=${true} />`}<${Toasts} />
+		${s.modals.map(m => html`<div class=${'mwrap' + (m.out ? ' out' : '')} key=${m.id}>${m.render(m.close)}</div>`)}</div>`;
+	if (s.authed === null) return html`<main class="login"><div class="signin"><div class="brand"><img src="/logo.svg" alt="" width="64" height="64" />Banana Player</div><p class="dim" aria-live="polite">${slow ? 'Connecting…' : ' '}</p></div></main>`;
 	if (!s.authed) return html`<${Login} />`;
 	return html`<${Shell} />`;
 }

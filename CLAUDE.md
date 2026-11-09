@@ -194,6 +194,12 @@ tools/make-sprite.py                                 # regenerates web/sprite.sv
   `wakeHeld`): opened paused, the handheld's ALSA output stayed silent once played while the picture ran on. The
   page's position (`/api/browser-pos`, on play/pause/seek and every 10 s) is never applied to the paused copy; the
   bottom panel shows `Ui::shownPosition()` (extrapolated), and seeks made there count from it and go to the page.
+  **The page's layout** (`web/style.css`, `docs/design/midnight.md`'s palette): phone (tab bar, floating mini player,
+  the full player with its panel as a sheet), tablet from 700 px (icon rail, player bar), computer from 1100 px
+  (sidebar with playlists and the handheld's card); `Q_WIDE`/`Q_DESK` in app.js match the CSS's media queries (a phone
+  on its side, short and touch, stays a phone). One edged, lipped `.box` (`.btn`, `.surface`, `.yellow`, `.red`);
+  covers are the file's art over a generated gradient (`Art`, `GenCover`, keyed on the path). Uploads are the round key
+  (`UploadFab`, `UploadSheet`); web-only glyphs (`g-folder-move`) are inline symbols in `web/index.html`.
   **History in `web/app.js`:** each entry carries the load's id (`bpDoc`), how many of ours lie behind (`bpIdx`) and
   whether it came from a tap (`bpOk`); the player's chevron goes back only when `canGoBack()` (Safari skips, going
   back, an entry left by a step without a tap, and an entry from an earlier load reloads the page), else it replaces

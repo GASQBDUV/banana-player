@@ -415,9 +415,14 @@ hidden disconnects.
 
 ### In the browser
 
-Three tabs: **Playing**, **Files** and **Playlists**.
+Three sections: **Playing**, **Files** and **Playlists**. On a phone they're the tab bar at the bottom, with a small
+player floating over it; on a tablet an icon rail on the left and a player bar at the bottom; on a computer a sidebar
+(the sections, a shortcut list of playlists, and a card with the handheld's battery, free space and **Sign out**) and
+the player bar. On a phone, **Sign out** is behind the handheld button at the top right of Files and Playlists.
 
-**Playing** controls the music or video, and has a target switch at the top:
+**Playing** controls the music or video. Where it plays is a two-part switch at the top (**Handheld** · **This
+browser**), and in the player bar a button that opens the same choice, saying what happens (for example "pauses the
+handheld, carries on at 1:27"):
 
 - **On handheld** (the default): controls what the handheld plays. Play and pause, previous and next, seeking, back 5
   seconds and forward 10, loop, shuffle, volume, the equalizer (presets and bands), the sound effects, chapters, and what's
@@ -428,32 +433,47 @@ Three tabs: **Playing**, **Files** and **Playlists**.
 - While the browser plays, the handheld shows **Playing in your browser** and its bar runs on with the browser's time.
 - Switching the target while something plays carries on from the same place.
 - A file the browser can't play (AVI, AC3 or DTS sound, WMA, APE and so on) says **Plays on the handheld only**.
+- **Up next**, **Chapters**, **Tracks** (audio and subtitles), **Sound** (the volume, the equalizer's presets and its ten
+  bands, the effects) and **Details**: on a phone three keys under the controls open them as a sheet; on a tablet
+  they're a card under the player; on a computer a column beside it, while the controls are in the player bar.
 
 **Files** lists the card's folders:
 
-- **Upload** files and whole folders with the buttons, or drag them onto the page. Uploads carry on while you move
-  between pages.
+- **Upload** with the round yellow key at the bottom right: it offers **Files** or **Folder** (no Folder on iPhone or
+  iPad), or drag them onto the page (a tablet or a computer). While files go up, the key shows how many (**5/12**) and a
+  ring fills by the bytes sent; a failed file shows red on the ring and a red badge. A tap on it lists each file:
+  cancel one, **Retry** a failed one, **Pause** (what's on its way starts again from the beginning), **Cancel all**.
+  When all are up, the key ticks and a note says where they went, with **Show**. Uploads carry on while you move
+  between pages, and the key stays on every page (not over the player) while they run or failed.
 - **New folder**, **Rename**, **Move**, **Download**, and **Delete** (permanent: it asks first and can't be undone).
 - **Play** a file or folder on the handheld or in this browser, or **Add to playlist**.
-- **Select** several files and folders to do any of these at once. Rename works on one item at a time.
+- **Select** several files and folders to do any of these at once (or a long press on a row; on a computer, the box
+  that shows in front of a row under the mouse). A band of actions floats at the bottom. Rename works on one item at a
+  time.
+- On a computer, **Filter this folder** narrows the list as you type (**/** goes there).
 - Uploads and new names are limited to music, video, photo and subtitle files, and images for covers. A folder can be
   deleted from the page only if everything in it is one of those.
 
 **Playlists** are the same playlists as the handheld's Playlists section:
 
-- Create, rename, delete (the files stay where they are), and open a playlist.
+- Create, rename, delete (the files stay where they are), and open a playlist. The page shows them as cards. Past 12
+  playlists: the ones played or added to lately in a **Recent** row, then **Find a playlist** (**/** on a computer;
+  Enter opens the first match), a sort (**A–Z**, **Recent**, **Size**) and **List** or **Grid**. The list (the default
+  there) has a letter heading for each letter. The browser remembers the sort and the view. The computer's sidebar
+  lists Liked and up to five recent playlists, then **All N playlists**.
 - Drag to change the order, remove items (with **Undo**), add files from **Files**.
 - **Play** or **Shuffle play**, on the handheld or in this browser.
 
 **Like and Add to playlist** in the browser:
 
-- **The heart** likes what's playing, or unlikes it. On a phone or tablet it's in the row just above the timeline, next
-  to the volume button (the title gets the whole width). On a computer it's in the player bar at the bottom, after the
-  title, with an **Add to playlist** button. Playing in this browser, the heart is that file's.
-- **Add to playlist**: the player's **⋯** on a phone, the bar's button on a computer. A playlist that already has it
+- **The heart** likes what's playing, or unlikes it. On a phone it's beside the title, with **⋯**, and on the small
+  player; on a tablet or a computer it's in the player bar at the bottom, after the title, with an **Add to playlist**
+  button. Playing in this browser, the heart is that file's.
+- **Add to playlist**: the player's **⋯** on a phone, the bar's button on a tablet or a computer. A playlist that already has it
   says **✓ Added**; choosing it again asks **Add again**, and a second click adds a second copy. **New playlist…** makes
-  one from the list itself. With more than 7 playlists there's **Find**: Enter adds to the first match, or makes a
-  playlist of that name if none matches. The playlists you added to last come first. Liked is never listed.
+  one from the list itself. With more than 7 playlists there's **Find**: what doesn't match is dimmed, and Enter adds to the
+  first match, or makes a playlist of that name if none matches. The playlists you added to last come first, marked
+  **Recent**. Liked is never listed.
 - A song or video's **⋯** in Files has **Like** / **Unlike** (with **Undo**) and **Add to playlist…**; photos and
   folders have no Like. Liked files have a small yellow heart after their name. **Add** in a selection adds them all.
 - **Liked** is pinned at the top of Playlists. It's newest first, with no reordering: each row has a heart that unlikes
