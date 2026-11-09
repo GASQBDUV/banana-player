@@ -293,7 +293,7 @@ Dated write-ups of investigations (cause, numbers, what was ruled out, how to ve
       (behind its PIN and private-network gate, read-only) a live tail of `log.txt` and reads of mpv properties
       (`current-ao`, `af`, `lavfi-complex`, `audio-out-params`, pause, position), so a bug on the handheld can be
       watched with `curl` from a computer while it's reproduced, with no card swaps.
-- [ ] **iPhone and iPad:** playing in the page is off there (`NO_HERE` in `web/app.js`). Safari skipped a history
+- [ ] **iPhone and iPad:** playing in the page is off there (`NO_HERE` in `web/js/store.js`). Safari skipped a history
       entry made without a tap (the player opened by itself after the QR's link) and the chevron left the page;
       also check its audio session and the swipe Back, then turn it on again.
 

@@ -3,9 +3,9 @@
 import re, pathlib
 
 root = pathlib.Path(__file__).resolve().parent.parent
-src = (root / "src" / "ui.cpp").read_text()
+src = (root / "src" / "ui_glyphs.h").read_text()
 
-# G_WEB isn't in ui.cpp until the handheld side lands; the spec fixes its cells
+# G_WEB isn't in ui_glyphs.h until the handheld side lands; the spec fixes its cells
 extra = {
 	# "In this browser": a laptop (the web app's own; the handheld has no use for it)
 	"LAPTOP": [".#########.", ".#.......#.", ".#.......#.", ".#.......#.", ".#.......#.", ".#########.", "###########"],
