@@ -108,6 +108,19 @@ export function Files() {
 	useEffect(() => { if (s.epoch && (data || err)) load(!!data); }, [s.epoch]);
 	useEffect(() => { if (data && (!s.fsDir || s.fsDir === path)) load(true); }, [s.fsTick]);
 	const slow = useLater(!data && !err, 300);
+	// Up (Backspace or Alt+ArrowUp): the parent folder; not while typing, nor over a dialog
+	useEffect(() => {
+		const k = e => {
+			if (e.defaultPrevented || e.ctrlKey || e.metaKey || e.shiftKey) return;
+			if (!((e.key === 'Backspace' && !e.altKey) || (e.key === 'ArrowUp' && e.altKey))) return;
+			const t = e.target, segs = path.split('/').filter(Boolean);
+			if (segs.length < 2) return;
+			if (t && (/^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName) || t.isContentEditable)) return;
+			if (store.modals.length || store.lightbox || document.querySelector('[aria-modal="true"]')) return;
+			e.preventDefault(); go(filesHash(segs.slice(0, -1).join('/')));
+		};
+		addEventListener('keydown', k); return () => removeEventListener('keydown', k);
+	}, [path]);
 	const all = useMemo(() => data ? data.items.slice().sort((a, b) => (b.dir - a.dir) || cmpName(a.name, b.name)) : [], [data]);
 	const f = desk ? filter.trim().toLowerCase() : '';
 	const items = f ? all.filter(i => i.name.toLowerCase().includes(f)) : all;
@@ -170,6 +183,8 @@ export function Files() {
 	const upload = ents => startUpload(ents, path);
 	const onDrop = e => { e.preventDefault(); e.stopPropagation(); setOver(false); set({ dropping: false, overZone: false }); entriesFromDrop(e.dataTransfer).then(upload); };
 	const free = data && data.free;
+	const parentPath = crumbs.slice(0, -1).join('/');
+	const goUp = () => go(filesHash(parentPath));
 	const folderName = crumbs.length > 1 ? crumbs[crumbs.length - 1] : rootName(crumbs[0]);
 
 	if (!path) {
@@ -189,7 +204,7 @@ export function Files() {
 			<h1 aria-live="polite">${selCount} selected</h1>
 			${selCount < items.length ? html`<button class="btn sm" onClick=${() => setSel(items.map(i => full(i.name)))}>All</button>` : html`<button class="btn sm" onClick=${() => setSel([])}>None</button>`}</div></div>`
 		: html`<div class="phead">
-			${crumbs.length > 1 && html`<div class="crumbs"><nav aria-label="Folder path">${crumbs.slice(0, -1).map((sg, i) => html`<button onClick=${() => go(filesHash(crumbs.slice(0, i + 1).join('/')))}>${i === 0 ? rootName(sg) : sg}</button><${Icon} n="right" k=${1} cls="sep" />`)}</nav></div>`}
+			${crumbs.length > 1 && html`<div class="crumbs"><button class="ib upbtn" aria-label="Up a folder" title="Up a folder (Backspace)" onClick=${goUp}><${Icon} n="up" k=${2} /></button><nav aria-label="Folder path">${crumbs.slice(0, -1).map((sg, i) => html`<button onClick=${() => go(filesHash(crumbs.slice(0, i + 1).join('/')))}>${i === 0 ? rootName(sg) : sg}</button><${Icon} n="right" k=${1} cls="sep" />`)}</nav></div>`}
 			<div class="row"><h1>${folderName}</h1><${AppMenu} /></div>
 			${data && html`<div class="sub">${chips.map(([k, one, many, g]) => html`<span class="chip"><${Icon} n=${g} k=${1} />${plural(cnt[k], one, many)}</span>`)}<span class="grow"></span>${free != null && html`<${Storage} free=${free} total=${data.total} />`}</div>`}</div>`;
 	return html`<div class=${'page files' + (showSel ? ' selmode' : '')}>
@@ -207,7 +222,7 @@ export function Files() {
 			!data ? (slow ? html`<${Skeleton} />` : null) :
 			all.length === 0 ? html`<${Empty} icon="folder" title="This folder is empty" sub=${touchOnly ? 'Upload music, videos or photos from this device.' : 'Drop files here, or use the upload key.'} button=${pick ? undefined : 'Upload'} onClick=${() => pickUpload('files')} />` :
 			items.length === 0 ? html`<p class="note pad">Nothing here has “${filter.trim()}” in its name.</p>` : html`
-			<div class="box surface listbox"><ul class="flist">${items.map(it => { const p = full(it.name), on = sel.has(p), now = p === nowPath, playable = !it.dir && (it.kind === 'audio' || it.kind === 'video'); return html`<li class=${'frow' + (on ? ' sel' : '') + (s.fresh[p] ? ' fresh' : '') + (it.hidden ? ' hiddenf' : '') + (now && !showSel ? ' cur nowp' : '')} key=${it.name}>
+			<div class="box surface listbox"><ul class="flist">${!wide && !showSel && crumbs.length > 1 && html`<li class="frow uprow"><button class="main-btn" onClick=${goUp}><span class="tile xs"><${Icon} n="up" k=${2} /></span><span class="grow"><div class="fn ell" aria-label="Up a folder">..</div></span></button></li>`}${items.map(it => { const p = full(it.name), on = sel.has(p), now = p === nowPath, playable = !it.dir && (it.kind === 'audio' || it.kind === 'video'); return html`<li class=${'frow' + (on ? ' sel' : '') + (s.fresh[p] ? ' fresh' : '') + (it.hidden ? ' hiddenf' : '') + (now && !showSel ? ' cur nowp' : '')} key=${it.name}>
 				<button class="chk" aria-label=${(on ? 'Deselect ' : 'Select ') + it.name} aria-pressed=${on} onClick=${() => toggle(p)}><span class=${'check' + (on ? ' on' : '')}>${on && html`<${Icon} n="check" k=${2} />`}</span></button>
 				<button class="main-btn" onClick=${() => rowClick(it)} onPointerDown=${e => lpStart(e, it)} onPointerMove=${lpMove} onPointerUp=${lpEnd} onPointerCancel=${lpEnd} onContextMenu=${e => { e.preventDefault(); if (lp.current.mouse !== false && !lp.current.fired) rowSheet(it, { x: e.clientX, y: e.clientY }); }}>
 					<${RowTile} it=${it} p=${p} art=${art} />

@@ -7,6 +7,7 @@ Write the way the rest of the repo does: plain and precise, with the why. Say wh
 
 ## Index
 
+- [2026-11-10 fast skip sync](2026-11-10-fast-skip-sync.md): the handheld's Next pressed fast while a browser plays left the two on different files.
 - [2026-11-09 visualizer performance](2026-11-09-visualizer-performance.md): lag on hi-res FLAC and above 1x speed; measured on the handheld.
 - [2026-11-09 silent handoff](2026-11-09-silent-handoff.md): browser to handheld play left the handheld's sound silent.
 - [2026-11-09 art graph, stale tracks](2026-11-09-art-graph-stale-tracks.md): songs going silent and freezing in art + visualizer.

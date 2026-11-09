@@ -318,6 +318,7 @@ namespace bp
 				if (i.file == dest) selDestName = i.name;
 		dropTouch();
 		holdAt = 0;
+		fitList();	// editing has no Up row: off it
 	}
 
 	void Ui::selEnd()

@@ -373,8 +373,8 @@ namespace bp
 			holdAt = 0;
 			listTouch = false;
 			swallowTouch = true;
-			bool item = isPlDir(browseDir) && cursor < (int)browseRows.size() && browseRows[cursor].id == PL_ITEM;
-			bool file = !isPlDir(browseDir) && cursor < (int)browseRows.size() && browseRows[cursor].id == 2;
+			bool item = isPlDir(browseDir) && cursor >= 0 && cursor < (int)browseRows.size() && browseRows[cursor].id == PL_ITEM;
+			bool file = !isPlDir(browseDir) && cursor >= 0 && cursor < (int)browseRows.size() && browseRows[cursor].id == 2;
 			if ((item || file) && plStore)
 			{
 				selStart(item ? SEL_EDIT : SEL_ADD, "");

@@ -122,7 +122,7 @@ static void usage()
 		"                        each, then quit: buttons (A,B,X,Y,L,R,L2,R2,Up,Down,Left,Right,Start,Select), taps\n"
 		"                        (tap:X:Y, dtap:X:Y a double-tap) and drags (drag:X1:Y1:X2:Y2) on the bottom panel's 640x480, and info\n"
 		"                        (prints the Media info page), hold:X:Y (a finger held 1.1 s), prop:NAME\n"
-		"                        (prints one of mpv's properties)\n"
+		"                        (prints one of mpv's properties), BUTTON*N (N presses 80 ms apart)\n"
 		"buttons: A play/pause, LEFT -5 s, RIGHT +10 s, L/R previous/next video, UP/DOWN speed, X audio,\n"
 		"         Y subtitles, SELECT aspect, START settings, B twice quits\n"
 		"keyboard: Enter, arrows, PgUp/PgDn (or Q/E), X, Y, Tab, Esc twice\n");
@@ -160,7 +160,10 @@ int main(int argc, char** argv)
 			{
 				int n = 0;
 				float v[4];
-				bool ok = buttonFromName(step) != Button::None || step == "info" || step == "page" || step == "update" || step == "web" || step == "F" || step == "rows" || step == "screenshot" || step.rfind("prop:", 0) == 0 || step.rfind("shot:", 0) == 0 ||
+				// BUTTON*N: N presses 80 ms apart (a burst, faster than the steps' 0.8 s)
+				std::string::size_type star = step.find('*');
+				bool burst = star != std::string::npos && buttonFromName(step.substr(0, star)) != Button::None && atoi(step.c_str() + star + 1) > 0;
+				bool ok = burst || buttonFromName(step) != Button::None || step == "info" || step == "page" || step == "update" || step == "web" || step == "F" || step == "rows" || step == "screenshot" || step.rfind("prop:", 0) == 0 || step.rfind("shot:", 0) == 0 ||
 					(sscanf(step.c_str(), "tap:%f:%f%n", &v[0], &v[1], &n) == 2 && n == (int)step.size()) ||
 					(sscanf(step.c_str(), "dtap:%f:%f%n", &v[0], &v[1], &n) == 2 && n == (int)step.size()) ||
 					(sscanf(step.c_str(), "hold:%f:%f%n", &v[0], &v[1], &n) == 2 && n == (int)step.size()) ||
@@ -771,11 +774,23 @@ int main(int argc, char** argv)
 			static Uint32 waitFrom = 0;
 			if (player.loaded || !player.playing() || !player.error.empty()) waitFrom = 0;
 			else if (!waitFrom) waitFrom = SDL_GetTicks();
+			// the rest of a BUTTON*N step, between passes of the loop (so main sends what a press set, as for a hand), and
+			// not held up by a file opening (a burst of Next opens one after another)
+			static Button burstButton = Button::None;
+			static int burstLeft = 0;
+			static Uint32 burstAt = 0;
+			if (scripted && burstLeft > 0 && running && SDL_GetTicks() >= burstAt)
+			{
+				burstLeft--;
+				burstAt = SDL_GetTicks() + 80;
+				if (ui.press(burstButton, player)) leave();
+			}
 			if (scripted && (!waitFrom || SDL_GetTicks() - waitFrom > 3000) && running)
 			{
 				static Uint32 next = SDL_GetTicks() + 800;
 				static size_t pressed = 0;
-				if (SDL_GetTicks() >= next)
+				if (burstLeft > 0) next = SDL_GetTicks() + 800;
+				else if (SDL_GetTicks() >= next)
 				{
 					next = SDL_GetTicks() + 800;
 					if (pressed == steps.size()) running = false;
@@ -869,6 +884,13 @@ int main(int argc, char** argv)
 						{
 							for (auto& l : ui.pageLines()) printf("    %s\n", l.c_str());
 						}
+						else if (step.find('*') != std::string::npos)
+						{
+							burstButton = buttonFromName(step.substr(0, step.find('*')));
+							burstLeft = atoi(step.c_str() + step.find('*') + 1) - 1;
+							burstAt = SDL_GetTicks() + 80;
+							if (ui.press(burstButton, player)) leave();
+						}
 						else if (ui.press(buttonFromName(step), player)) leave();
 						// (no wait for mpv's answer here: a loop that doesn't draw holds mpv up as it switches files, and
 						// the timings would be the harness's; the state line can lag a step)
@@ -930,10 +952,14 @@ int main(int argc, char** argv)
 						webServer->notify("handheld-play", "{}");
 					}
 				}
-				// Prev / Next pressed here while a page plays: the page moves on
+				// Prev / Next pressed here while a page plays: the page moves on, by as many as were pressed since the last
+				// pass (n; dir alone is one, as older pages read it)
 				if (ui.browserSkip)
 				{
-					webServer->notify("handheld-skip", ui.browserSkip > 0 ? "{\"dir\":1}" : "{\"dir\":-1}");
+					char d[64];
+					snprintf(d, sizeof d, "{\"dir\":%d,\"n\":%d}", ui.browserSkip > 0 ? 1 : -1, std::abs(ui.browserSkip));
+					webServer->notify("handheld-skip", d);
+					fprintf(stderr, "web: handheld-skip %+d\n", ui.browserSkip);
 					ui.browserSkip = 0;
 				}
 				// a seek made here while a page plays the file (-5 s, +10 s, the bar): the page goes there too

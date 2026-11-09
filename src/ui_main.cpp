@@ -25,6 +25,11 @@ namespace bp
 		return browserPlaying && p.paused && b.t >= 0 && p.loaded && p.duration > 0 && p.currentPath() == b.path;
 	}
 
+	bool Ui::pageDrives(const Player& p) const
+	{
+		return browserPlaying && webClients() > 0 && p.playing() && !p.playingPhoto() && (p.paused || p.loading());
+	}
+
 	double Ui::shownPosition(const Player& p) const
 	{
 		if (!predicting(p)) return p.position;

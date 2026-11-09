@@ -325,15 +325,16 @@ namespace bp
 		}
 		if (page != Page::Main)
 		{
-			int n = (int)rows(p).size();
-			cursor = std::min(cursor, n - 1);
+			// (the browser's Up row is row -1: first; n counts it)
+			int first = listFirst(), n = (int)rows(p).size() - first;
+			cursor = std::min(cursor, n - 1 + first);
 			switch (b)
 			{
-			case Button::Up: cursor = (cursor + n - 1) % n; break;
-			case Button::Down: cursor = (cursor + 1) % n; break;
+			case Button::Up: cursor = (cursor - first + n - 1) % n + first; break;
+			case Button::Down: cursor = (cursor - first + 1) % n + first; break;
 			// a page at a time (the browser): LEFT/RIGHT, and L/R as BananaOS's lists jump
-			case Button::Left: cursor = std::max(0, cursor - ROWS_SHOWN); break;
-			case Button::Right: cursor = std::min(n - 1, cursor + ROWS_SHOWN); break;
+			case Button::Left: cursor = std::max(first, cursor - ROWS_SHOWN); break;
+			case Button::Right: cursor = std::min(n - 1 + first, cursor + ROWS_SHOWN); break;
 			case Button::A: choose(cursor, p); break;
 			case Button::B: page = home(p); break;
 			default: break;
@@ -382,7 +383,7 @@ namespace bp
 		case Button::L:
 		case Button::R:
 			// a page plays it: the page's song moves on, not this paused copy (which would start sounding here)
-			if (predicting(p)) { browserSkip = b == Button::R ? 1 : -1; break; }
+			if (pageDrives(p)) { browserSkip += b == Button::R ? 1 : -1; break; }
 			if (b == Button::L ? !p.prev() : !p.next()) p.osd(b == Button::L ? "This is the first one" : "This is the last one");
 			break;
 		case Button::Up: case Button::Down:
@@ -693,7 +694,8 @@ namespace bp
 				listScrolled = true;
 				holdAt = 0;
 				int rowsMoved = (int)std::lround((touchStartY - y) / (double)rowH);
-				scroll = std::clamp(scrollStart + rowsMoved, 0, std::max(0, n - shown));
+				int first = set || info ? 0 : listFirst();
+				scroll = std::clamp(scrollStart + rowsMoved, first, std::max(first, n - shown));
 				cursor = std::clamp(cursor, scroll, scroll + shown - 1);
 			}
 			else if (pt.kind == Pointer::Up)
@@ -826,7 +828,7 @@ namespace bp
 		{
 			if (y < ROW_Y || y >= ROW_Y + ROWS_SHOWN * ROW_H) return false;
 			int i = scroll + (y - ROW_Y) / ROW_H;
-			if (i >= (int)rows(p).size()) return false;
+			if (i >= (int)rows(p).size() || i < listFirst()) return false;
 			cursor = i;
 			listTouch = true;
 			listScrolled = false;

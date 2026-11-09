@@ -14,7 +14,7 @@ export function applySnap(s) {
 	// says "playing": Continue here starts the browser a moment before the handheld's pause shows in the state
 	// (and only once it has been seen paused on this page's file: opening it there, it can look like playing a moment)
 	if (B.active && B.meta && s.path === B.meta.p && s.paused && !s.loading) B.handheldQuiet = true;
-	if (s.paused === false && prev && prev.paused === true && B.active && B.handheldQuiet && !el.paused && !B.leaving && Date.now() - (B.announcedAt || 0) > 2000) handheldTookOver();
+	if (s.paused === false && !s.loading && prev && prev.paused === true && B.active && B.handheldQuiet && !el.paused && !B.leaving && Date.now() - (B.announcedAt || 0) > 2000) handheldTookOver();
 	if (!prev || prev.playlistSerial !== s.playlistSerial) set({ plTick: store.plTick + 1 });
 	// a playlist playing on the handheld is a recent one (the Playlists page's Recent, the sidebar's)
 	if (s.source && s.source.kind === 'playlist' && s.source.id && !s.paused && (!prev || prev.path !== s.path)) markUsed(s.source.id);
@@ -42,8 +42,9 @@ export function openSSE() {
 		goDown(r);
 	});
 	on('awake', () => clearTimeout(C.graceTimer));
-	// Prev / Next pressed on the handheld while this page plays: this page's list moves on (as its own buttons do)
-	on('handheld-skip', d => { if (B.active && B.meta && B.parked == null && (d.dir === 1 || d.dir === -1)) { markTrack(d.dir); browserNext(false, d.dir); } });
+	// Prev / Next pressed on the handheld while this page plays: this page's list moves on (as its own buttons do), by
+	// as many as were pressed (n); pressed fast, browserNext sums them and loads only the last
+	on('handheld-skip', d => { if (B.active && B.meta && B.parked == null && (d.dir === 1 || d.dir === -1)) { markTrack(d.dir); browserNext(false, d.dir, d.n || 1, true); } });
 	// the handheld seeked while this page plays its file: here too
 	on('handheld-seek', d => { if (B.active && B.meta && B.parked == null && typeof d.t === 'number' && store.snap && store.snap.path === B.meta.p && Math.abs(el.currentTime - d.t) > .5) el.currentTime = d.t; });
 	es.onerror = () => {

@@ -1,4 +1,4 @@
-import { NO_HERE, NO_HERE_WHY, lsGet, lsSet, notify, set, store } from './store.js';
+import { NO_HERE, NO_HERE_WHY, TAB_ID, lsGet, lsSet, notify, set, store } from './store.js';
 import { closeSSE, openSSE } from './events.js';
 import { errMsg, errToast, fetchT, get, post } from './api.js';
 import { markTrack, toast } from './toasts.js';
@@ -12,7 +12,9 @@ export const el = document.createElement('video');
 el.playsInline = true; el.preload = 'auto'; el.controls = false;
 document.getElementById('holder').appendChild(el);
 // parked: unloaded when the connection went, at that position (the page never plays it again by itself)
-export const B = { active: false, queue: [], index: -1, source: null, meta: null, loop: 'no', error: false, leaving: false, parked: null, parkedPlaying: false, vol: Number(lsGet('bpVol') || 80) };
+// navTok: the latest navigation (Next, Previous, a song ending, a tap), navTarget: where a Next or Previous still on its
+// way is going (several pressed fast count from there, not from the one still playing)
+export const B = { active: false, queue: [], index: -1, source: null, meta: null, loop: 'no', error: false, leaving: false, parked: null, parkedPlaying: false, vol: Number(lsGet('bpVol') || 80), navTok: 0, navTarget: null };
 el.volume = B.vol / 100;
 // playing here with the page hidden (a locked phone): keep listening; paused and hidden: stop (battery)
 el.addEventListener('play', () => {
@@ -22,11 +24,15 @@ el.addEventListener('play', () => {
 	if (B.meta && (!s || s.paused === false || !s.browserPlaying || s.path !== B.meta.p)) announce();
 });
 el.addEventListener('pause', () => { if (document.hidden) closeSSE(); });
+// every browser-play and browser-pos carries this tab and a number that only grows (across reloads too): two posts can
+// overtake each other on the way, and the handheld drops the older (it would open an older file after a newer one)
+let wordSeq = Date.now() * 1000;
+const word = o => Object.assign(o, { tab: TAB_ID, seq: ++wordSeq });
 // where this page is in its file, for the handheld: its own Play resumes from here (not from its stale paused copy)
 let posTimer = 0;
 function sendPos() {
 	if (!B.active || !B.meta || B.leaving || B.parked != null || store.conn !== 'ok' || !el.getAttribute('src')) return;
-	post('/api/browser-pos', { p: B.meta.p, t: (el.currentTime || 0).toFixed(1), playing: el.paused ? 0 : 1 }).catch(() => {});
+	post('/api/browser-pos', word({ p: B.meta.p, t: (el.currentTime || 0).toFixed(1), playing: el.paused ? 0 : 1 })).catch(() => {});
 }
 for (const ev of ['play', 'pause', 'seeked']) el.addEventListener(ev, () => {
 	sendPos();
@@ -41,7 +47,7 @@ function announce() {
 	const p = B.meta.p;
 	if (B.announced === p && Date.now() - B.announcedAt < 1500) return;
 	B.announced = p; B.announcedAt = Date.now(); B.handheldQuiet = false;
-	post('/api/browser-play', { p }).catch(() => {});
+	post('/api/browser-play', word({ p })).catch(() => {});
 }
 
 export function probeOK(m) {
@@ -58,13 +64,17 @@ export const fileUrl = p => '/api/file?p=' + encodeURIComponent(p);
 // ended (only while connected); everything else comes from a tap
 // dir: the way to look for one it can play (Previous looks back); nav: a step along the list (Next, Previous, a song
 // that ended), whose caller says when there's nothing more
-export async function browserPlay(items, index, source, pos, auto, dir, nav) {
+// tok: the navigation it belongs to (browserNext's); anything else starts a new one. Only the latest gets to load:
+// one overtaken while it looked into its file (a newer Next, a tap) gives up, saying null
+export async function browserPlay(items, index, source, pos, auto, dir, nav, tok) {
 	if (store.conn !== 'ok') return false;
 	if (NO_HERE) { toast(NO_HERE_WHY + ': it plays on the handheld'); return false; }
+	if (tok == null) { tok = ++B.navTok; B.navTarget = null; }
 	dir = dir || 1;
 	let skipped = 0;
 	for (let i = index; i >= 0 && i < items.length; i += dir) {
 		const it = items[i], m = await probe1(it.p);
+		if (tok !== B.navTok) return null;
 		if (m && !probeOK(m)) { skipped++; continue; }
 		if (auto && store.conn !== 'ok') return false;
 		const kind = kindOfName(it.p) === 'video' || (m && m.vcodec) ? 'video' : 'audio';
@@ -84,22 +94,30 @@ export async function browserPlay(items, index, source, pos, auto, dir, nav) {
 	if (skipped && !nav) toast('Plays on the handheld only', null);
 	return false;
 }
-export async function browserNext(auto, dir) {
-	dir = dir || 1;
-	const n = B.queue.length; let i = B.index + dir;
+// steps: how many at once (the handheld's presses, summed); fromHandheld: its L, which never restarts the song (as
+// there). Pressed fast, each counts from where the one before is going, and only the last one's file loads
+export async function browserNext(auto, dir, steps, fromHandheld) {
+	dir = dir || 1; steps = Math.max(1, steps || 1);
+	const n = B.queue.length, pending = B.navTarget != null, from = pending ? B.navTarget : B.index;
+	let i = from + dir * steps;
 	if (auto && B.loop === 'one') { el.currentTime = 0; el.play(); return; }
 	if (i >= n)
 	{
-		if (B.loop === 'all') i = 0;
+		if (B.loop === 'all') i = n ? i % n : 0;
 		// a song that ended: the list is over. Next pressed on the last one: it says so and the song plays on (as the
-		// handheld's Next does)
+		// handheld's Next does); pressed several times from before it: the last one
 		else if (auto) { el.pause(); toast('End of ' + (B.source && B.source.title || 'the list')); return; }
-		else { toast('This is the last one'); return; }
+		else if (from >= n - 1) { toast('This is the last one'); return; }
+		else i = n - 1;
 	}
-	if (i < 0) i = 0;
-	if (dir < 0 && el.currentTime > 3) { el.currentTime = 0; return; }
+	if (i < 0) i = B.loop === 'all' && n ? ((i % n) + n) % n : 0;
+	if (dir < 0 && !pending && !fromHandheld && el.currentTime > 3) { el.currentTime = 0; return; }
+	const tok = ++B.navTok;
+	B.navTarget = i;
 	// (the ones it can't play are passed over; none left that way: the end, as on the last one)
-	const ok = await browserPlay(B.queue, i, B.source, 0, auto, dir, true);
+	const ok = await browserPlay(B.queue, i, B.source, 0, auto, dir, true, tok);
+	if (tok !== B.navTok || ok === null) return;	// a newer one took over
+	B.navTarget = null;
 	if (ok || store.conn !== 'ok') return;
 	if (auto) { el.pause(); toast('End of ' + (B.source && B.source.title || 'the list')); }
 	else toast(dir < 0 ? 'This is the first one' : 'This is the last one');
@@ -113,14 +131,14 @@ export function handheldTookOver() {
 }
 export function browserStop() {
 	B.leaving = true; unload();
-	Object.assign(B, { active: false, meta: null, queue: [], index: -1, error: false, parked: null, parkedPlaying: false });
-	post('/api/browser-play', { stop: 1 }).catch(() => {});
+	Object.assign(B, { active: false, meta: null, queue: [], index: -1, error: false, parked: null, parkedPlaying: false, navTok: B.navTok + 1, navTarget: null });
+	post('/api/browser-play', word({ stop: 1 })).catch(() => {});
 	notify();
 }
 // forgets this page's file without telling the handheld (signed out, or the player started again)
 export function dropBrowser() {
 	B.leaving = true; unload();
-	Object.assign(B, { active: false, meta: null, queue: [], index: -1, error: false, parked: null, parkedPlaying: false });
+	Object.assign(B, { active: false, meta: null, queue: [], index: -1, error: false, parked: null, parkedPlaying: false, navTok: B.navTok + 1, navTarget: null });
 	notify();
 }
 // the connection went: stop at once (the stream can't go on), keep what and where
@@ -319,7 +337,9 @@ export async function continueHere() {
 	const pos = s.paused ? s.position : s.position + (Date.now() - store.snapAt) / 1000 * (s.speed || 1);
 	const src = s.source ? { kind: s.source.kind, title: s.source.title, id: s.source.id } : null;
 	// the file at once; the rest of its list when the handheld has said it (it can take a moment while it switches)
-	if (!await browserPlay([{ p: s.path }], 0, src, pos)) { chooseTarget('handheld'); return; }
+	const ok = await browserPlay([{ p: s.path }], 0, src, pos);
+	if (ok === null) return;	// something else was picked meanwhile
+	if (!ok) { chooseTarget('handheld'); return; }
 	chooseTarget('browser'); toast('Continuing here from ' + fmtTime(pos));
 	get('/api/source').then(q => {
 		const i = q.items ? q.items.findIndex(x => x.p === s.path) : -1;

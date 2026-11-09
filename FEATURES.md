@@ -207,6 +207,7 @@ See [Photos](#photos) for the touch screen.
 |---|---|
 | **A** (or tap it) | Open the folder, play the file, or open the playlist |
 | **B** or **Back** | Up one folder; at a section's top, back to Home |
+| **..** (the first row) | In any folder below a section's top (a card's folder, a server's, a playlist): up one, as **B** goes. A folder opens on its first item, an empty one on this row. It's never ticked or counted |
 | **UP / DOWN** | Move |
 | **LEFT / RIGHT** | Page up / down |
 | **L / R** | Previous / next section: Files, Playlists, Network, Extensions |
@@ -432,6 +433,8 @@ handheld, carries on at 1:27"):
   effects or handheld volume (a volume slider for the browser instead), and the chapters are the browser's own.
   Not on iPhone or iPad yet (it says **Not on iPhone or iPad yet**): there the dashboard is the handheld's remote.
 - While the browser plays, the handheld shows **Playing in your browser** and its bar runs on with the browser's time.
+  **L / R** on the handheld move the browser's list on, however fast they're pressed: every press counts, and both end
+  on the same file.
 - Switching the target while something plays carries on from the same place.
 - A file the browser can't play (AVI, AC3 or DTS sound, WMA, APE and so on) says **Plays on the handheld only**.
 - **Up next**, **Chapters**, **Tracks** (audio and subtitles), **Sound** (the volume, the equalizer's presets and its ten
@@ -448,9 +451,11 @@ handheld, carries on at 1:27"):
   between pages, and the key stays on every page (not over the player) while they run or failed.
 - **New folder**, **Rename**, **Move**, **Download**, and **Delete** (permanent: it asks first and can't be undone).
 - **Play** a file or folder on the handheld or in this browser, or **Add to playlist**.
-- **Select** several files and folders to do any of these at once (or a long press on a row; on a computer, the box
-  that shows in front of a row under the mouse). A band of actions floats at the bottom. Rename works on one item at a
+- **Select** several files and folders to do any of these at once (or a long press on a row; on a computer, the **Select**
+  button, or the box that fades in over a row's icon after a moment's hover). A band of actions floats at the bottom. Rename works on one item at a
   time.
+- **Up a folder** (the arrow beside the folder path, and on a phone the first row, **..**) goes to the parent folder;
+  on a computer **Backspace** or **Alt+Up** does too. A place's top has none.
 - On a computer, **Filter this folder** narrows the list as you type (**/** goes there).
 - Uploads and new names are limited to music, video, photo and subtitle files, and images for covers. A folder can be
   deleted from the page only if everything in it is one of those.

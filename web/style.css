@@ -237,7 +237,19 @@ select.sel { background: var(--btn); color: var(--cream); border: var(--bw) soli
 .check.on { background: var(--yellow); border-color: var(--yellow); animation: pop .2s var(--ease); }
 .selmode .chk, .pl-sel .pitem .chk { display: flex; }
 .selmode .frow .main-btn { padding-left: 2px; }
-@media (hover: hover) and (pointer: fine) { .frow:hover .chk { display: flex; } .frow:hover .chk:not(:hover) .check { border-color: var(--pressed); } }
+/* a mouse: no box on a plain hover. It fades in over the row's icon after .4 s of hovering there (or on keyboard focus), without moving
+   the row; until it shows it takes no clicks, so a click on the icon still opens the row */
+@media (hover: hover) and (pointer: fine) {
+	.files:not(.selmode) .frow .chk { display: flex; position: absolute; left: 6px; top: 50%; margin: 0; width: 52px; height: 52px; transform: translateY(-50%); border-radius: 10px; background: var(--surface); opacity: 0; pointer-events: none; z-index: 1; }
+	.files:not(.selmode) .frow:has(.tile:hover) .chk, .files:not(.selmode) .frow .chk:hover { animation: chkin .16s ease-out .4s both; }
+	.files:not(.selmode) .frow:has(:focus-visible) .chk, .files:not(.selmode) .frow .chk:focus-visible { opacity: 1; pointer-events: auto; animation: none; }
+	.files:not(.selmode) .frow .chk:hover .check { border-color: var(--pressed); }
+}
+@keyframes chkin { from { opacity: 0; pointer-events: none; } to { opacity: 1; pointer-events: auto; } }
+.upbtn { width: 36px; height: 36px; margin-left: -8px; margin-right: 2px; color: var(--dim); flex: none; }
+@media (hover: hover) { .upbtn:hover { color: var(--cream); } }
+.uprow .tile { color: var(--dim); }
+.uprow .fn { color: var(--dim); }
 .grip { width: 36px; height: 52px; display: flex; align-items: center; justify-content: center; color: #57545e; cursor: grab; touch-action: none; flex: none; border-radius: 8px; }
 @media (hover: hover) { .grip:hover { color: var(--dim-btn); } }
 .sortable-ghost { opacity: .35; }

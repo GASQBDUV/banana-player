@@ -105,10 +105,10 @@ namespace bp
 
 	void Ui::fitList()
 	{
-		int n = (int)browseRows.size();
-		cursor = std::clamp(cursor, 0, std::max(0, n - 1));
+		int n = (int)browseRows.size(), first = listFirst();
+		cursor = std::clamp(cursor, first, std::max(first, n - 1));
 		// the cursor in the window, and no empty rows below the list's end while there are rows above
-		scroll = std::clamp(scroll, std::max(0, cursor - ROWS_SHOWN + 1), std::min(cursor, std::max(0, n - ROWS_SHOWN)));
+		scroll = std::clamp(scroll, std::max(first, cursor - ROWS_SHOWN + 1), std::min(cursor, std::max(first, n - ROWS_SHOWN)));
 	}
 
 	// the rows' ids: 1 a folder to go into, 2 a video to open, -1 nothing (a message)
@@ -238,8 +238,8 @@ namespace bp
 		}
 		if (browseRows.empty() && !isPlDir(dir) && dir != HOMEDIR) add(-1, "Nothing to play here", "", "");
 		auto it = placeIn.find(dir);
-		cursor = it == placeIn.end() ? 0 : std::min(it->second.first, (int)browseRows.size() - 1);
-		scroll = it == placeIn.end() ? 0 : it->second.second;
+		cursor = it == placeIn.end() ? firstCursor() : std::min(it->second.first, (int)browseRows.size() - 1);
+		scroll = it == placeIn.end() ? listFirst() : it->second.second;
 		// Recent opens at its top: the most recent first, and a place in a list that changed since means little
 		if (dir == RECENT) cursor = scroll = 0;
 		fitList();
@@ -328,8 +328,8 @@ namespace bp
 			}
 		if (browseRows.empty()) add(-1, "Nothing to play here", "", "");
 		auto it = placeIn.find(l->dir);
-		cursor = it == placeIn.end() ? 0 : it->second.first;
-		scroll = it == placeIn.end() ? 0 : it->second.second;
+		cursor = it == placeIn.end() ? firstCursor() : it->second.first;
+		scroll = it == placeIn.end() ? listFirst() : it->second.second;
 		if (!netSelect.empty())
 			for (size_t i = 0; i < browsePaths.size(); i++)
 				if (browsePaths[i] == netSelect) cursor = (int)i;
@@ -400,6 +400,21 @@ namespace bp
 		enterFolder(gone ? sectionTop(tab) : dir, p);
 	}
 
+	bool Ui::upRow() const
+	{
+		if (page != Page::Browse || atHome() || atFirstPage() || browseDir == FORMDIR || browseDir == FINDNET) return false;
+		// editing a playlist's items, moving them: the list is what's being worked on
+		return selMode != SEL_EDIT && !moving;
+	}
+
+	int Ui::firstCursor() const
+	{
+		// a folder opened for the first time: on its first item; an empty one (a message alone): on Up, unless the
+		// page's own button (Add files) is what A should do there
+		bool empty = browseRows.empty() || (browseRows.size() == 1 && browseRows[0].id < 0);
+		return empty && !emptyAction() ? listFirst() : 0;
+	}
+
 	bool Ui::folderRow(int row) const
 	{
 		// a folder of the cards' (not the first page's places, nor Recent)
@@ -413,6 +428,7 @@ namespace bp
 			if (homeZone == HOME_GRID) return SECTION_NAMES[homeGrid];
 			return homeStrip < (int)recent.size() ? recent[homeStrip].path : "All recent";
 		}
+		if (cursor < 0) return upRow() ? ".." : "";
 		return cursor < (int)browsePaths.size() ? browsePaths[cursor] : "";
 	}
 
@@ -439,6 +455,8 @@ namespace bp
 					"  | " + tileSub(g));
 			return out;
 		}
+		if (upRow())
+			out.push_back(std::string(scroll < 0 ? "shown  " : "hidden ") + (cursor < 0 ? "> " : "  ") + "[up] ..");
 		for (size_t i = 0; i < browseRows.size(); i++)
 		{
 			std::string l = std::string((int)i >= scroll && (int)i < scroll + ROWS_SHOWN ? "shown  " : "hidden ") +
@@ -941,6 +959,9 @@ namespace bp
 		auto r = rows(p);
 		bool form = browse && browseDir == FORMDIR;
 		bool noAudio = !browse && trackType() == TrackType::Audio && r.size() == 1 && r[0].id < 0;
+		// ".." (up to the folder above): row -1, over the list (and over a message alone)
+		bool up = browse && upRow();
+		if (up && scroll < 0) drawUpRow(ROW_Y, cursor < 0);
 		// a message alone (nothing here, loading, no connections): in the middle of the page, not as a row to choose
 		if (browse && !form && r.size() == 1 && r[0].id < 0)
 		{
@@ -965,7 +986,7 @@ namespace bp
 		}
 		else if (noAudio) drawEmpty(G_SPEAKER, "No audio in this file", "This video has no sound track", nullptr);
 		else
-			for (int i = scroll; i < (int)r.size() && i < scroll + ROWS_SHOWN; i++)
+			for (int i = std::max(0, scroll); i < (int)r.size() && i < scroll + ROWS_SHOWN; i++)
 			{
 				int y = ROW_Y + (i - scroll) * ROW_H, mid = y + (ROW_H - 4) / 2;
 				bool at = i == cursor;
@@ -1041,13 +1062,13 @@ namespace bp
 			int slot = dragSlot();
 			if (slot >= scroll && slot <= scroll + ROWS_SHOWN) fillRound({16, ROW_Y + (slot - scroll) * ROW_H - 3, 608, 2}, ACCENT, 1);
 		}
-		int n = (int)r.size();
-		drawScrollBar(ROW_Y, ROWS_SHOWN * ROW_H - 4, scroll, ROWS_SHOWN, n);
+		int n = (int)r.size(), first = browse ? listFirst() : 0;
+		drawScrollBar(ROW_Y, ROWS_SHOWN * ROW_H - 4, scroll - first, ROWS_SHOWN, n - first);
 		if (!browse)
 		{
 			// the other tab's key, as on its tab; on Subtitle style A opens it
 			bool audio = trackType() == TrackType::Audio;
-			const char* verb = cursor < n && r[cursor].id == STYLE_ROW ? "Style" : "Choose";
+			const char* verb = cursor >= 0 && cursor < n && r[cursor].id == STYLE_ROW ? "Style" : "Choose";
 			if (noAudio) drawHints({{"X", "Subtitles"}, {"B", "Back"}});
 			else drawHints({{"A", verb}, {audio ? "X" : "Y", audio ? "Subtitles" : "Audio"}, {"B", "Back"}});
 			return;
@@ -1057,15 +1078,16 @@ namespace bp
 		const char* back = atFirstPage() ? "Home" : "Back";
 		bool plEmpty = r.size() == 1 && r[0].id < 0;
 		// a row with a menu of its own (Y): a folder, a connection, a playlist, its item
-		bool yMenu = cursor < n && (folderRow(cursor) || (browseDir == NETROOT && r[cursor].id == 4) || r[cursor].id == PL_ROW ||
+		bool yMenu = cursor >= 0 && cursor < n && (folderRow(cursor) || (browseDir == NETROOT && r[cursor].id == 4) || r[cursor].id == PL_ROW ||
 			r[cursor].id == PL_ITEM || (isNetPath(browseDir) && r[cursor].id == 1 && plStore));
-		bool file = cursor < n && (r[cursor].id == 2 || r[cursor].id == PL_ITEM);
-		if (form) drawHints({{"A", "Change"}, {"LEFT/RIGHT", "Choose"}, {"B", "Cancel"}});
+		bool file = cursor >= 0 && cursor < n && (r[cursor].id == 2 || r[cursor].id == PL_ITEM);
+		if (cursor < 0 && upRow()) drawHints({{"A", "Up"}, {"B", back}, {"X", "Options"}, {"L/R", "Sections"}});
+		else if (form) drawHints({{"A", "Change"}, {"LEFT/RIGHT", "Choose"}, {"B", "Cancel"}});
 		else if (browseDir == FINDNET) drawHints({{"A", "Add this one"}, {"B", "Back"}});
 		else if (browseDir == RECENT && plEmpty) drawHints({{"B", "Home"}, {"X", "Options"}, {"START", "Menu"}});
 		else if (browseDir == RECENT) drawHints({{"A", "Play"}, {"Y", "Menu"}, {"B", "Home"}, {"X", "Options"}, {"START", "Menu"}});
 		else if (plEmpty && isPlDir(browseDir) && plIsLiked(plCur.file)) drawHints({{"B", back}, {"L/R", "Sections"}, {"START", "Menu"}});
-		else if (browseDir == PLROOT && cursor < n && r[cursor].id == PL_NEW)
+		else if (browseDir == PLROOT && cursor >= 0 && cursor < n && r[cursor].id == PL_NEW)
 			drawHints({{"A", "New playlist"}, {"B", back}, {"X", "Options"}, {"L/R", "Sections"}});
 		else if (emptyAction() && browseDir == PLROOT)
 			drawHints({{"A", "New playlist"}, {"B", back}, {"X", "Options"}, {"L/R", "Sections"}, {"START", "Menu"}});
@@ -1075,6 +1097,14 @@ namespace bp
 		else if (plEmpty) drawHints({{"B", back}, {"X", "Options"}, {"L/R", "Sections"}, {"START", "Menu"}});
 		else if (yMenu) drawHints({{"A", file ? "Play" : "Open"}, {"B", back}, {"X", "Options"}, {"Y", "Menu"}, {"L/R", "Sections"}});
 		else drawHints({{"A", file ? "Play" : "Open"}, {"B", back}, {"X", "Options"}, {"L/R", "Sections"}});
+	}
+
+	void Ui::drawUpRow(int y, bool at)
+	{
+		int mid = y + (ROW_H - 4) / 2;
+		if (at) drawFocus({16, y, 608, ROW_H - 4});
+		drawGlyphMid(G_UP, 43, mid, at ? ACCENT : DIM);
+		drawTextMid("..", 1, at ? ACCENT : TEXT, 66, mid, 534);
 	}
 
 	void Ui::drawPlRow(int i, int mid, bool at)

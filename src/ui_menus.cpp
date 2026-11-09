@@ -68,6 +68,8 @@ namespace bp
 
 	void Ui::choose(int i, Player& p)
 	{
+		// ".." (row -1): up a folder: as B and "<" go, selecting or not
+		if (page == Page::Browse && i < 0 && upRow()) { browseUp(p); return; }
 		auto r = rows(p);
 		if (i < 0 || i >= (int)r.size()) return;
 		if (page == Page::Browse)

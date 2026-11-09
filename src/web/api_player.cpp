@@ -45,6 +45,17 @@ namespace bp
 			return req.has_param(name) ? req.get_param_value(name) : "";
 		}
 
+		// a page's browser-play / browser-pos older than its last one (seq 0: a page from before seq, always taken). Another
+		// tab's word is taken: that page plays now
+		bool staleBrowserWord(Ui& u, const std::string& tab, long long seq)
+		{
+			if (seq <= 0) return false;
+			if (tab == u.browserTab && seq < u.browserSeq) return true;
+			u.browserTab = tab;
+			u.browserSeq = seq;
+			return false;
+		}
+
 		std::string error(const std::string& message, const std::string& code = "")
 		{
 			JsonWriter j;
@@ -751,10 +762,15 @@ namespace bp
 			if (!w->resolve(value(req, "p"), real, false, res)) return;
 			double t = atof(value(req, "t").c_str());
 			bool playing = value(req, "playing") == "1";
+			std::string tab = value(req, "tab");
+			long long seq = atoll(value(req, "seq").c_str());
 			int status = 200;
-			std::string body = w->call([real, t, playing](Player& p, Ui& u) {
+			std::string body = w->call([real, t, playing, tab, seq](Player& p, Ui& u) {
 				// the handheld's paused copy isn't moved (a seek decodes a frame): its bar runs on from here (Ui::shownPosition)
 				(void)p;
+				// late (a newer word from that page came first), or about a file the page has left
+				if (staleBrowserWord(u, tab, seq) || (!u.browserFile.empty() && real != u.browserFile))
+					return std::string("{\"ok\":true,\"stale\":true}");
 				u.browserPos = {real, t, SDL_GetTicks(), playing};
 				return std::string("{\"ok\":true}");
 			}, 2000, status);
@@ -768,11 +784,20 @@ namespace bp
 			std::string real;
 			std::string vp = value(req, "p");
 			if (!stop && !vp.empty() && !w->resolve(vp, real, false, res)) return;
+			std::string tab = value(req, "tab");
+			long long seq = atoll(value(req, "seq").c_str());
 			int status = 200;
-			std::string body = w->call([stop, real](Player& p, Ui& u) {
-				if (stop) u.browserPlaying = false;
+			std::string body = w->call([stop, real, tab, seq](Player& p, Ui& u) {
+				// a page skipping fast sends one of these per file: one overtaken by the next must not open its older file
+				if (staleBrowserWord(u, tab, seq))
+				{
+					fprintf(stderr, "web: browser-play dropped (late, seq %lld < %lld): %s\n", seq, u.browserSeq, real.substr(real.rfind('/') + 1).c_str());
+					return std::string("{\"ok\":true,\"stale\":true}");
+				}
+				if (stop) { u.browserPlaying = false; u.browserFile.clear(); }
 				else
 				{
+					if (!real.empty()) u.browserFile = real;
 					if (!real.empty() && isMediaFile(real) && !isPhotoFile(real) && !(p.playing() && p.currentPath() == real))
 					{
 						u.flushPlaylist(p);

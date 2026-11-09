@@ -185,8 +185,17 @@ namespace bp
 		Uint32 browserSyncUntil = 0;
 		double browserSeenPos = -1;
 		// Prev (-1) / Next (+1) pressed here while a page plays the file: main passes it to the page (handheld-skip),
-		// which moves on in its own list; the paused copy here follows when the page opens the next
+		// which moves on in its own list; the paused copy here follows when the page opens the next. A sum, not the last
+		// press: several presses between two passes of main's loop each count
 		int browserSkip = 0;
+		// a page plays, and the handheld's L/R are its (even while the copy here still opens the page's last file, when
+		// predicting() can't say yet: stepped here, that copy would start sounding and the page would stop)
+		bool pageDrives(const Player& p) const;
+		// the page's last word (browser-play, browser-pos, stop): its tab and a number that only grows; an older one
+		// arriving late (two requests can overtake each other) is dropped, so an older file never opens after a newer
+		std::string browserTab;
+		long long browserSeq = 0;
+		std::string browserFile;	// the file the page last said it plays (browser-play)
 		// an audio track or subtitles (id 0: off) chosen, as the Audio & Subtitles page chooses one (and the web): the
 		// language remembered as the settings say, and "Audio: <its label>" over the top panel. false: no such track
 		bool chooseTrack(Player& p, TrackType type, int64_t id);
@@ -446,6 +455,12 @@ namespace bp
 		std::map<std::string, std::vector<std::string>> netNames;	// netFolderNames'
 		std::string netOpenPending;	// a network file to open once its folder is listed
 		void browseUp(Player& p);
+		// a folder below a section's top (a card's folder, a server's, a playlist): a ".." row (up a folder) above the
+		// list. It isn't one of browseRows (a playlist's rows are its items' indices): it's row -1, where the cursor and
+		// the scroll can be (listFirst()), so nothing that counts, selects or plays rows ever sees it
+		bool upRow() const;
+		int listFirst() const { return upRow() ? -1 : 0; }
+		void drawUpRow(int y, bool at);
 		// the browser's cursor on a row and its window as full as the list allows (a list that came back shorter:
 		// a scroll from before would show its last rows only)
 		void fitList();
@@ -736,6 +751,7 @@ namespace bp
 		static constexpr int STATUS_Y = 100, LINE1_Y = 378, LINE2_Y = 403;	// the player's status line, its two track lines
 		// the Network tab with no connections: its page offers Add connection; Playlists with none, New playlist
 		bool emptyAction() const;
+		int firstCursor() const;	// where a folder opened afresh puts the cursor
 		void doEmptyAction(Player& p);
 		static constexpr int FOOT_Y = 458, SUB_Y = 70;	// the footer's line, the browser's "where" line (their middles)
 		void drawSettings(const Player& p);
