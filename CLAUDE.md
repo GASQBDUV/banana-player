@@ -89,8 +89,11 @@ tools/make-sprite.py                                 # regenerates web/sprite.sv
   has to be set by id. A graph's picture never ends, so mpv never ends a song that has one (every song without art):
   `checkSongEnd()` ends it, or restarts it for Loop one, once the clock passes the duration. Circle's graph reads
   two `remap` tables with `movie=` from the state folder (`graphFor()` writes them first; without them it's Bars).
-  In art + visualizer (Bars, Waves, Spectrum, Timeline) the art is fitted once and only the 640×200 strip is drawn per frame; time any
+  In art + visualizer (Bars, Waves, Spectrum, Peaks) the art is fitted once and only the 640×200 strip is drawn per frame; time any
   new graph against Art+viz Bars (~0.85 ms/frame on the Mac, ~4 on the handheld), not only Visualizer Bars.
+  Offered: Bars, Waves, Circle, Peaks (`VIS_SHOWN`; `stepVisualizer` cycles them). Spectrum is hidden, its code kept:
+  a setting naming it reads as Bars. Peaks draws from 64 numbers (showfreqs measures, `lagfun` on exp() values makes
+  the caps fall evenly), at half size with `lut2` against a still height picture, only the luma scaled up.
   Keep visualizers cheap: Circle was shaped by timing `ffmpeg -filter_complex_threads 1` against Bars per frame. (Numbers and the handheld benchmark: docs/notes/2026-11-09-visualizer-performance.md, tools/viz-bench/.)
   Every visual branch starts with `aformat=sample_rates=44100|48000` (mono where channels share a colour; a 192 kHz
   file otherwise costs up to 2× and draws ultrasound), makes at most 30 frames per second of the song (the filter's own
@@ -101,7 +104,8 @@ tools/make-sprite.py                                 # regenerates web/sprite.sv
   (its clock stops, so the song never ends, and memory grows by gigabytes; on the handheld, a freeze). Test such a
   graph in mpv with a memory watchdog: the ffmpeg CLI keeps running endless sources even after the output ends.
   Music's equalizer and effect are one `af`, after the lavfi-complex graph (so the visualizer sees the original sound):
-  `@bpeq` (10 equalizer biquads plus a pre-gain from bpcore's `eqPeakDb`), then `@bpfx` (the effect), built by `syncEq`
+  `@bpin` first, always (over 48 kHz to 48 kHz, the rate ALSA's plug plays at, so the EQ, effect and scaletempo2 never
+  run at 96/192 kHz; and the af's output rate, which mpv reopens the output for, never changes with the EQ), then `@bpeq` (10 equalizer biquads plus a pre-gain from bpcore's `eqPeakDb`), then `@bpfx` (the effect), built by `syncEq`
   and `fxPart`. Band edits go live by `af-command` (`syncEq`), which `prop:af` doesn't show. Anything that rebuilds
   the chain (loadfile, lavfi-complex) needs `syncEq(true)` first. Setting the same af string again is a no-op. Reverb
   impulse responses are synthesized by bpcore (`soundfx`) and written to the state dir as `ir-<key>.wav`. Display

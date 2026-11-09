@@ -304,8 +304,8 @@ namespace bp
 		std::string circleMaps;	// where they are, once made
 		std::string graphSet;	// lavfi-complex as last set (prop)
 		uint64_t displayDueAt = 0;	// the display changed: its graph applied then (checkDisplay)
-		// The equalizer and the sound effect as mpv has them: af = the EQ's entry (@bpeq), then the effect's (@bpfx),
-		// either left out when off. afSet: the af last set (prop; af-command's changes don't show in mpv's af);
+		// The equalizer and the sound effect as mpv has them: af = a song's input entry (@bpin), the EQ's (@bpeq),
+		// then the effect's (@bpfx), either left out when off. afSet: the af last set (prop; af-command's changes don't show in mpv's af);
 		// afFxSet: its effect entry; eqLive: the gains playing. syncEq brings mpv to the settings: a band's change by
 		// af-command (heard at once, no gap), unless the chain is about to be rebuilt anyway (rebuilding: a loadfile,
 		// a graph or track change, which rebuild it from the af string and lose af-command's gains) or the filters
@@ -316,7 +316,14 @@ namespace bp
 		std::string eqPart() const;	// the EQ's entry for this file ("" off, flat, or not a song)
 		std::string fxPart();		// the effect's, its impulse response written first ("" none)
 		std::string afWant() { return joinAf(eqPart(), fxPart()); }
-		static std::string joinAf(const std::string& eq, const std::string& fx) { return eq.empty() ? fx : fx.empty() ? eq : eq + "," + fx; }
+		// a song's af: its input entry (@bpin, bpcore's afInputFilter), then the EQ's and the effect's; a video's none
+		std::string joinAf(const std::string& eq, const std::string& fx) const
+		{
+			std::string s = isAudio ? afInputFilter() : "";
+			for (const std::string* p : {&eq, &fx})
+				if (!p->empty()) s += (s.empty() ? "" : ",") + *p;
+			return s;
+		}
 		std::string irWritten;		// the impulse responses known to be on disk this run (" key" each)
 		void sendEqCommand(const char* command, const std::string& arg, const std::string& target);
 		int eqInFlight = 0;			// af-commands not answered yet

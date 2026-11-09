@@ -1313,7 +1313,7 @@ namespace bp
 		// the filters themselves as they are (the EQ in, the same effect) and no rebuild coming: each band that moved,
 		// by af-command, heard at once with no gap in the sound (mpv's af stays the string it was set to). Else af as
 		// a whole, unless it's the one mpv has (a rebuild starts from it; af set to itself does nothing anyway)
-		bool live = !rebuilding && !eq.empty() && afSet.rfind("@bpeq:", 0) == 0 && fx == afFxSet;
+		bool live = !rebuilding && !eq.empty() && afSet.find("@bpeq:") != std::string::npos && fx == afFxSet;
 		if (!live)
 		{
 			if (want != afSet) prop("af", want);
@@ -1975,7 +1975,7 @@ namespace bp
 			std::string vis = graph.find("showwaves") != std::string::npos ? "Waves"
 							  : graph.find("showspectrum") != std::string::npos ? "Spectrum"
 							  : graph.find("] remap [") != std::string::npos ? "Circle"
-							  : graph.find("showvolume") != std::string::npos ? "Timeline" : "Bars";
+							  : graph.find("lagfun") != std::string::npos ? "Peaks" : "Bars";
 			row("Top screen", graph == blankGraph() ? "Title only"
 				: graph.find("[vid1]") != std::string::npos ? "Album art + " + vis
 				: !graph.empty() ? "Visualizer: " + vis

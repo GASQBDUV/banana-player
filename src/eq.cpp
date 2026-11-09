@@ -157,6 +157,8 @@ namespace bp
 		return num(-std::ceil(peak * 10 - 1e-9) / 10, false) + "dB";
 	}
 
+	std::string afInputFilter() { return "@bpin:lavfi=[aformat=sample_rates=44100|48000]"; }
+
 	std::string eqFilterString(const EqGains& g)
 	{
 		if (eqFlat(g)) return "";

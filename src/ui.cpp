@@ -122,9 +122,9 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 		"##.##.##.##")
 	GLYPH(G_VIS_WAVES, "..##.......", ".#..#......", "#....#.....", ".....#....#", "......#..#.", ".......##..")
 	GLYPH(G_VIS_SPECTRUM, "...#.......", "..###...#..", "..####.###.", ".#########.", ".##########", "###########")
-	// Timeline: thin bars of a time series, a gap across them where the bass's part meets the rest's
-	GLYPH(G_VIS_TIMELINE, "........#..", "..#.....#..", "..#.#...#.#", "#.#.#.#.#.#", "#.#.#.#.#.#", "...........",
-		"#.#.#.#.#.#", "#.#.#.#.#.#")
+	// Peaks: bars with a cap held over each, a gap under the caps of the bars that fell
+	GLYPH(G_VIS_PEAKS, "...##......", ".........##", "##.##......", "......##.##", "##.##.##.##", "##.##.##.##", "##.##.##.##",
+		"##.##.##.##")
 	GLYPH(G_VIS_CIRCLE, ".....#.....", ".#...#...#.", "..#.....#..", "....###....", "...#...#...", "##.#...#.##", "...#...#...",
 		"....###....", "..#.....#..", ".#...#...#.", ".....#.....")
 	// playlists: one (lines and a note), a select box empty and ticked, a row's grip, Move, Shuffle
@@ -226,7 +226,7 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 	}
 	static const char* SHOW_SHORT[SHOWS] = {"Art", "Both", "Viz", "None"};	// MusicShow on a button
 	static const char* LOOP_SHORT[LOOPS] = {"Off", "All", "One"};		// Loop on a button (beside its mark)
-	static const Ui::Glyph* const VIS_GLYPHS[VISUALIZERS] = {&G_VIS_BARS, &G_VIS_WAVES, &G_VIS_SPECTRUM, &G_VIS_CIRCLE, &G_VIS_TIMELINE};
+	static const Ui::Glyph* const VIS_GLYPHS[VISUALIZERS] = {&G_VIS_BARS, &G_VIS_WAVES, &G_VIS_SPECTRUM, &G_VIS_CIRCLE, &G_VIS_PEAKS};
 	// a show mode's mark: the visualizer ones take the style's
 	static const Ui::Glyph* showGlyph(int show, int vis)
 	{
@@ -1477,7 +1477,7 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 		const int T = TOGGLE_ROW;
 		if (row >= STYLE_ROW0 && row < STYLE_ROW0 + STYLE_KEYS) return "How plain subtitles (SRT, VTT...) look. Styled ones (ASS) keep theirs.";
 		if (row == MUSIC_ROW) return "What the top screen shows while a song plays (SELECT while playing).";
-		if (row == VIS_ROW) return "How the music is drawn: Bars, Waves, Spectrum, Circle or Timeline (SELECT while playing).";
+		if (row == VIS_ROW) return "How the music is drawn: Bars, Waves, Circle or Peaks (SELECT while playing).";
 		if (row == SOUND_ROW) return "Equalizer and effects for music (not videos). A opens it";
 		if (row == CLOCK_ROW) return "The time in the top corner of this screen";
 		if (row == SCREEN_OFF_ROW) return "While a song or video plays, this screen goes dark after that long untouched. A touch brings it back.";
@@ -1812,7 +1812,7 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 		Settings s = p.settings;
 		if (row - STYLE_ROW0 < STYLE_KEYS) stepStyle(s.style, (StyleKey)(row - STYLE_ROW0), dir);
 		else if (row == MUSIC_ROW) s.musicShow = ((s.musicShow + dir) % SHOWS + SHOWS) % SHOWS;
-		else if (row == VIS_ROW) s.visualizer = ((s.visualizer + dir) % VISUALIZERS + VISUALIZERS) % VISUALIZERS;
+		else if (row == VIS_ROW) s.visualizer = stepVisualizer(s.visualizer, dir);
 		else if (row == CLOCK_ROW) s.clock = ((s.clock + dir) % CLOCKS + CLOCKS) % CLOCKS;
 		// (not round: Never at one end, 5 minutes at the other)
 		else if (row == SCREEN_OFF_ROW) s.screenOffAfter = std::clamp(s.screenOffAfter + dir, 0, SCREEN_OFFS - 1);
@@ -6403,7 +6403,7 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 	{
 		Settings s = p.settings;
 		if (row == 0) s.musicShow = (value % SHOWS + SHOWS) % SHOWS;
-		else s.visualizer = (value % VISUALIZERS + VISUALIZERS) % VISUALIZERS;
+		else s.visualizer = value >= 0 && value < VISUALIZERS ? value : VIS_BARS;	// a visualizer, not a chip
 		if (s.musicShow != p.settings.musicShow || s.visualizer != p.settings.visualizer) p.setSettings(s);
 	}
 
@@ -6413,7 +6413,10 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 		switch (b)
 		{
 		case Button::Up: case Button::Down: displayRow = 1 - displayRow; break;
-		case Button::Left: case Button::Right: displaySet(displayRow, now + (b == Button::Right ? 1 : -1), p); break;
+		case Button::Left: case Button::Right:
+			// Style steps through the offered ones only (Spectrum is hidden)
+			displaySet(displayRow, displayRow ? stepVisualizer(now, b == Button::Right ? 1 : -1) : now + (b == Button::Right ? 1 : -1), p);
+			break;
 		case Button::Select: displaySet(0, p.settings.musicShow + 1, p); break;
 		case Button::A: case Button::B: displayOpen = false; break;
 		default: break;
@@ -6446,7 +6449,7 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 		{
 			int id = pressedBtn - CHIP_BTN;
 			pressedBtn = -1;
-			if (displayChip(id / 8, id % 8).hit(x, y)) displaySet(id / 8, id % 8, p);
+			if (displayChip(id / 8, id % 8).hit(x, y)) displaySet(id / 8, id / 8 ? VIS_SHOWN[id % 8] : id % 8, p);
 		}
 		return false;
 	}
@@ -6454,7 +6457,7 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 	void Ui::drawDisplay(const Player& p)
 	{
 		static const char* SHOW_NAMES[SHOWS] = {"Album art", "Art + viz", "Visualizer", "None"};
-		static const char* STYLE_NAMES[VISUALIZERS] = {"Bars", "Waves", "Spectrum", "Circle", "Timeline"};
+		static const char* STYLE_NAMES[VISUALIZERS] = {"Bars", "Waves", "Spectrum", "Circle", "Peaks"};
 		drawDialog({32, 84, 576, 300}, "Display");
 		int show = std::clamp(p.settings.musicShow, 0, SHOWS - 1), vis = std::clamp(p.settings.visualizer, 0, VISUALIZERS - 1);
 		// the art alone, or the title alone: no visualizer, its style muted (still changeable, for later)
@@ -6468,18 +6471,20 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 			for (int i = 0; i < displayChips(r); i++)
 			{
 				Rect c = displayChip(r, i);
-				bool sel = i == (r ? vis : show), dim = r && muted;
+				// Style's chips are the offered visualizers (VIS_SHOWN), not every one
+				int item = r ? VIS_SHOWN[i] : i;
+				bool sel = item == (r ? vis : show), dim = r && muted;
 				SDL_Color bg = pressedBtn == CHIP_BTN + r * 8 + i ? PRESSED : sel ? (dim ? DIM : ACCENT) : dim ? TRACK : BUTTON;
 				SDL_Color ink = sel ? ON_ACCENT : dim ? DIM : TEXT;
 				drawBox(c, bg, R_BUTTON);
-				const Glyph* g = r ? VIS_GLYPHS[i] : i == SHOW_BOTH ? &G_ARTVIZ : showGlyph(i, vis);
+				const Glyph* g = r ? VIS_GLYPHS[item] : i == SHOW_BOTH ? &G_ARTVIZ : showGlyph(i, vis);
 				drawGlyphMid(*g, c.x + c.w / 2, c.y + 20, ink);
-				drawTextMid(r ? STYLE_NAMES[i] : SHOW_NAMES[i], 0, ink, c.x + c.w / 2, c.y + 46, c.w - 8, 2);
+				drawTextMid(r ? STYLE_NAMES[item] : SHOW_NAMES[i], 0, ink, c.x + c.w / 2, c.y + 46, c.w - 8, 2);
 			}
 		}
 		const char* help = show == SHOW_ART ? "The style shows with Art + viz or Visualizer"
 			: show == SHOW_BOTH ? (vis == VIS_CIRCLE ? "Bars round a ring, the art inside it" : "The visualizer over the bottom of the art")
-			: show == SHOW_VIS ? (vis == VIS_TIMELINE ? "The last moments scrolling by: the bass in coral" : "The visualizer alone")
+			: show == SHOW_VIS ? (vis == VIS_PEAKS ? "Bars with caps that hold their highest and fall back" : "The visualizer alone")
 			: "Just the title: the lightest on the battery";
 		drawTextMid(help, 0, DIM, W / 2, 352, 544, 2);
 		drawHints({{"D-PAD", "Change"}, {"SELECT", "Show"}, {"B", "Done"}});

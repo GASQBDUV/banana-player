@@ -322,10 +322,10 @@ static void testSettings()
 	CHECK_EQ(d.loop, (int)LOOP_OFF);
 	Settings m;
 	m.musicShow = SHOW_BOTH;
-	m.visualizer = VIS_SPECTRUM;
+	m.visualizer = VIS_WAVES;
 	m.loop = LOOP_ONE;
 	Settings mb = parseSettings(serializeSettings(m));
-	CHECK_EQ(mb.musicShow == SHOW_BOTH && mb.visualizer == VIS_SPECTRUM && mb.loop == LOOP_ONE, true);
+	CHECK_EQ(mb.musicShow == SHOW_BOTH && mb.visualizer == VIS_WAVES && mb.loop == LOOP_ONE, true);
 	CHECK_EQ(visualizerGraph(VIS_WAVES, false).rfind("[aid1] asplit [ao] [v]; [v] aformat=sample_rates=44100|48000,showwaves", 0), (size_t)0);
 	CHECK_EQ(visualizerGraph(VIS_SPECTRUM, true).find("[vid1]") != std::string::npos, true);
 	CHECK_EQ(visualizerGraph(VIS_SPECTRUM, true).find("showspectrum=s=640x200") != std::string::npos, true);
@@ -378,28 +378,45 @@ static void testSettings()
 		rmdir(cdir);
 	}
 	CHECK_EQ(parseSettings("visualizer = circle\n").visualizer, (int)VIS_CIRCLE);
-	// Timeline: read and written back by its id; a column a frame tiled into the scrolling picture, mono for any input
-	CHECK_EQ(parseSettings("visualizer = timeline\n").visualizer, (int)VIS_TIMELINE);
+	// Peaks: read and written back by its id; Timeline (its first form) reads as Peaks
+	CHECK_EQ(parseSettings("visualizer = peaks\n").visualizer, (int)VIS_PEAKS);
+	CHECK_EQ(parseSettings("visualizer = timeline\n").visualizer, (int)VIS_PEAKS);
 	{
 		Settings t;
-		t.visualizer = VIS_TIMELINE;
-		CHECK_EQ(serializeSettings(t).find("visualizer = timeline\n") != std::string::npos, true);
-		CHECK_EQ(parseSettings(serializeSettings(t)).visualizer, (int)VIS_TIMELINE);
-		CHECK_EQ(std::string(visualizerLabel(VIS_TIMELINE)), std::string("Timeline"));
-		std::string v = visualizerGraph(VIS_TIMELINE, false), a = visualizerGraph(VIS_TIMELINE, true);
-		CHECK_EQ(v.rfind("[aid1] asplit [ao] [a]; [a] aformat=sample_rates=44100|48000:channel_layouts=mono,", 0), (size_t)0);
-		// drawn lying down and turned upright; the grid's lines in the strip, yuv420p (no full-frame conversion)
-		CHECK_EQ(v.find("pad=480:8:0:0:black@0,format=yuv420p,drawbox=x=383:") != std::string::npos, true);
-		CHECK_EQ(v.find("drawbox=x=95:y=0:w=1:h=8:c=white@0.1:t=fill,tile=1x80:overlap=79:init_padding=79,transpose=cclock [vo]") != std::string::npos, true);
-		CHECK_EQ(v.find("showvolume=r=30:b=0:w=914:h=6:f=0:t=0:v=0:o=h") != std::string::npos, true);
-		CHECK_EQ(v.find("crop=480:6:434:0,pad=480:8") != std::string::npos, true);
-		CHECK_EQ(a.find("showvolume=r=30:b=0:w=380:h=6") != std::string::npos, true);
-		// over the art: clear round the bars, laid on the art's slice premultiplied, no colour key
-		CHECK_EQ(a.find("tile=1x80:overlap=79:init_padding=79:color=black@0,transpose=cclock [s]") != std::string::npos, true);
-		CHECK_EQ(a.find("[under] [s] overlay=format=rgb:alpha=premultiplied [strip]") != std::string::npos, true);
-		CHECK_EQ(a.find("colorkey"), std::string::npos);
-		CHECK_EQ(a.find("[vid1]") != std::string::npos && a.find("drawbox") == std::string::npos, true);	// no grid over the art
-		CHECK_EQ(v.find("loop=") == std::string::npos && a.find("loop=") == std::string::npos, true);
+		t.visualizer = VIS_PEAKS;
+		CHECK_EQ(serializeSettings(t).find("visualizer = peaks\n") != std::string::npos, true);
+		CHECK_EQ(parseSettings(serializeSettings(t)).visualizer, (int)VIS_PEAKS);
+		CHECK_EQ(std::string(visualizerLabel(VIS_PEAKS)), std::string("Peaks"));
+		std::string v = visualizerGraph(VIS_PEAKS, false), a = visualizerGraph(VIS_PEAKS, true);
+		for (const std::string& g : {v, a})
+		{
+			CHECK_EQ(g.find("[a] aformat=sample_rates=44100|48000:channel_layouts=mono,showfreqs=s=64x256:") != std::string::npos, true);
+			CHECK_EQ(g.find("lagfun=decay=") != std::string::npos, true);	// the caps' fall
+			CHECK_EQ(g.find("loop=") == std::string::npos && g.find("colorkey") == std::string::npos, true);
+			CHECK_EQ(g.find("rgb"), std::string::npos);	// YUV throughout: no picture converted from RGB each frame
+		}
+		// drawn at half size in YUV (the chroma's size), only the luma scaled up, nearest; the grid's lines after
+		CHECK_EQ(v.find("[pky] scale=640:480:flags=neighbor [pkY]") != std::string::npos, true);
+		CHECK_EQ(v.find("[pkY] [pkU] [pkW] mergeplanes=0x001020:yuv420p,drawbox=x=0:y=96:") != std::string::npos, true);
+		CHECK_EQ(v.rfind(":c=white@0.1:t=fill [vo]") == v.size() - std::string(":c=white@0.1:t=fill [vo]").size(), true);
+		// over the art: no alpha nor overlay, the art's planes kept where nothing's drawn; no grid
+		CHECK_EQ(a.find("crop=640:200:0:280,extractplanes=y+u+v [pkay] [pkau] [pkav]") != std::string::npos, true);
+		CHECK_EQ(a.find("[pkY] [pkU] [pkW] mergeplanes=0x001020:yuv420p [strip]; [top] [strip] vstack [vo]") != std::string::npos, true);
+		CHECK_EQ(a.find("overlay") == std::string::npos && a.find("drawbox") == std::string::npos, true);
+	}
+	// Spectrum: hidden (its graph kept); a setting naming it reads, and is written back, as Bars; the cycle skips it
+	CHECK_EQ(parseSettings("visualizer = spectrum\n").visualizer, (int)VIS_BARS);
+	CHECK_EQ(serializeSettings(parseSettings("visualizer = spectrum\n")).find("visualizer = bars\n") != std::string::npos, true);
+	CHECK_EQ(parseSettings("audio-display = spectrum\n").visualizer, (int)VIS_BARS);
+	CHECK_EQ(stepVisualizer(VIS_WAVES, 1), (int)VIS_CIRCLE);
+	CHECK_EQ(stepVisualizer(VIS_CIRCLE, -1), (int)VIS_WAVES);
+	CHECK_EQ(stepVisualizer(VIS_PEAKS, 1), (int)VIS_BARS);
+	CHECK_EQ(stepVisualizer(VIS_BARS, -1), (int)VIS_PEAKS);
+	CHECK_EQ(stepVisualizer(VIS_SPECTRUM, 1), (int)VIS_WAVES);	// from a hidden one: as from Bars
+	{
+		int seen = 0;
+		for (int i = 0, v = VIS_BARS; i < VIS_SHOWN_COUNT; i++, v = stepVisualizer(v, 1)) seen |= 1 << v;
+		CHECK_EQ(seen, (1 << VIS_BARS) | (1 << VIS_WAVES) | (1 << VIS_CIRCLE) | (1 << VIS_PEAKS));
 	}
 	CHECK_EQ(std::string(loopLabel(LOOP_ALL)), std::string("Loop all"));
 	// the setting before 0.1.1, carried over
@@ -1139,6 +1156,9 @@ static void testEq()
 	// the filter
 	CHECK_EQ(eqFlat(EqGains{}), true);
 	CHECK_EQ(eqFilterString(EqGains{}), std::string(""));
+	// a song's af starts with its input brought to 44.1/48 kHz (the EQ, effect and speed work at that rate; the af's
+	// output rate then never changes with the EQ, which would reopen the sound output)
+	CHECK_EQ(afInputFilter(), std::string("@bpin:lavfi=[aformat=sample_rates=44100|48000]"));
 	CHECK_EQ(eqFlat(bass), false);
 	CHECK_EQ(eqBandTarget(3), std::string("equalizer@b3"));
 	std::string pre = eqPreGainArg(bass);

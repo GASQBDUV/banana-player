@@ -25,8 +25,8 @@ namespace bp
 
 	static const char* SHOW_IDS[SHOWS] = {"art", "both", "visualizer", "none"};
 	static const char* SHOW_LABELS[SHOWS] = {"Album art", "Art + visualizer", "Visualizer", "None"};
-	static const char* VIS_IDS[VISUALIZERS] = {"bars", "waves", "spectrum", "circle", "timeline"};
-	static const char* VIS_LABELS[VISUALIZERS] = {"Bars", "Waves", "Spectrum", "Circle", "Timeline"};
+	static const char* VIS_IDS[VISUALIZERS] = {"bars", "waves", "spectrum", "circle", "peaks"};
+	static const char* VIS_LABELS[VISUALIZERS] = {"Bars", "Waves", "Spectrum", "Circle", "Peaks"};
 	static const char* LOOP_IDS[LOOPS] = {"off", "all", "one"};
 	static const char* CLOCK_IDS[CLOCKS] = {"24h", "12h", "off"};
 	static const char* SCREEN_OFF_IDS[SCREEN_OFFS] = {"never", "15s", "30s", "1m", "2m", "5m"};
@@ -46,6 +46,19 @@ namespace bp
 
 	const char* musicShowLabel(int v) { return SHOW_LABELS[v >= 0 && v < SHOWS ? v : 0]; }
 	const char* visualizerLabel(int v) { return VIS_LABELS[v >= 0 && v < VISUALIZERS ? v : 0]; }
+
+	int visualizerSlot(int v)
+	{
+		for (int i = 0; i < VIS_SHOWN_COUNT; i++)
+			if (VIS_SHOWN[i] == v) return i;
+		return 0;
+	}
+
+	int stepVisualizer(int v, int dir)
+	{
+		int i = visualizerSlot(v) + (dir < 0 ? -1 : 1);
+		return VIS_SHOWN[(i % VIS_SHOWN_COUNT + VIS_SHOWN_COUNT) % VIS_SHOWN_COUNT];
+	}
 	const char* loopLabel(int v) { return LOOP_LABELS[v >= 0 && v < LOOPS ? v : 0]; }
 
 	// Circle: the spectrum's bars (BARS_W x BARS_H, low notes left, growing up) and beside them PALETTE columns, the
@@ -150,36 +163,70 @@ namespace bp
 			"[ring] [cover] overlay=x=(W-w)/2:y=" + std::to_string((int)CENTRE_Y) + "-h/2:eof_action=repeat:format=gbrp [vo]";
 	}
 
-	// Timeline: each frame one 8-pixel bar's strip (a 6-pixel bar and a gap) for the last 30th of a second, and the
-	// last 80 together, the newest on the right (tile's overlap: each frame shifts the picture one bar). A bar is the
-	// sound's level in dB (showvolume's RMS, -50 dB at the foot, 0 at the top), green, with the bass's level (below
-	// 150 Hz, 20 dB down, so it sits under the rest) coral over it. showvolume's log scale spans ~95 dB: the bar is
-	// drawn longer than the picture and only its loud end kept, which spreads 50 dB over the height.
-	// The bars are drawn lying down (rows) and the picture turned upright at the end: tile copies an overlapped
-	// picture rect by rect, a row of pixels at a time, so 80 upright columns were 80 x 480 tiny copies a frame
-	// (3.6 ms on the A55s), 80 rows a few hundred long ones, and transpose costs less than the difference. Only the
-	// strip is converted (yuv420p alone, 480x8; over the art it stays RGBA, clear round its bars, alpha 0 or 255, so
-	// it's premultiplied as it is, and the tile's padding clear too). The grid is in the strip, so it starts on the
-	// right with the bars
-	static std::string timelineDraw(int h, bool grid)
+	// Peaks: the spectrum in 64 bars (coral), each with a cap (green) that sits on the bar's highest point and falls
+	// back slowly. Bars draws each frame at full size in showfreqs, which paints pixel by pixel; here showfreqs only
+	// measures (64 columns, averaged down to one row, one value a bar), and the picture is made from those numbers:
+	// - the caps: a value held and let fall by lagfun, which keeps max(now, last x decay). Its decay is a product, so
+	//   the values go through exp() before it and log() after (16 bits for the range): a product in exp() is a
+	//   constant step in the value, a cap falling at an even speed
+	// - the drawing at half size (320x240; 320x100 over the art): each row of numbers stretched to a picture (scale
+	//   on one row, then pad and fillborders: row copies), and two lut2 against a still "height of this row" picture
+	//   (one frame, repeated: lut2's secondary input) give each pixel a cap, a bar or nothing (gaps: a 1-column one
+	//   every 5). Half size is the chroma's size at full size, so the colour planes come from it as they are
+	// - full size: only the luma, scaled x2 (nearest: a bar 8 pixels, a gap 2, a cap 4)
+	// No RGB anywhere, nothing converted: YUV straight to mpv. Over the art no alpha either: the art's slice (made
+	// once, one frame) is split into its planes and each plane is a lut2's second input, kept where nothing's drawn
+	static std::string peaksGraph(bool overCover)
 	{
-		int len = h * 20 * 100 / (21 * 50);
-		std::string H = std::to_string(h);
-		std::string vol = "showvolume=r=30:b=0:w=" + std::to_string(len) + ":h=6:f=0:t=0:v=0:o=h:m=r:ds=log:c=";
-		// showvolume's colours are 0xAABBGGRR: coral #F0806E, green #9EDB98
-		std::string g = "[a] aformat=sample_rates=44100|48000:channel_layouts=mono,asplit [tla] [tlb]; "
-						"[tlb] lowpass=f=150,volume=-20dB," + vol + "0xff6e80f0 [tlc]; "
-						"[tla] " + vol + "0xff98db9e [tlg]; "
-						"[tlg] [tlc] overlay=format=rgb,crop=" + H + ":6:" + std::to_string(len - h) + ":0,pad=" + H + ":8:0:0:black@0";
-		// a faint line every 96 pixels from the top (white at 10%: #19 on black, a shade lighter over a bar), drawn in
-		// the strip (the strip's x is the height from the foot): a still grid lightened under the bars (blend, with
-		// its frame sync) cost 1 ms a frame on the A55s, these next to nothing
-		if (grid)
+		const int N = 64, BW = 5, W = N * BW;	// at half size: a bar 4 columns and a 1-column gap
+		const int H = overCover ? 100 : 240;
+		const std::string w = std::to_string(W), h = std::to_string(H);
+		// the cap 4 pixels at full size (2 rows here), in the height's 251 steps; the fall, ~2.4 s for the whole
+		// height: 3.4 steps a frame, a decay of exp(-3.4/24) in the exp(value/24) domain
+		const std::string cap = std::to_string((2 * 251 + H / 2) / H);
+		const int mid = H / 2 - 1;
+		const std::string stretch = "scale=" + w + ":1:flags=neighbor,pad=" + w + ":" + h + ":0:" + std::to_string(mid) +
+									",fillborders=top=" + std::to_string(mid) + ":bottom=" + std::to_string(H - 1 - mid) +
+									":mode=smear,setsar=1";
+		// coral #F0806E and green #9EDB98 in BT.601 limited YUV (mpv's reading of a picture this size): Y 153/182,
+		// U 103/108, V 178/106; black 16/128/128
+		std::string g = "[aid1] asplit [ao] [a]; ";
+		if (overCover)
+			g += "[vid1] scale=640:480:force_original_aspect_ratio=decrease,pad=640:480:-1:-1:black,setsar=1,format=yuv420p,"
+				 "settb=AVTB,split [art1] [art2]; [art1] crop=640:280:0:0 [top]; [art2] crop=640:200:0:280,extractplanes=y+u+v "
+				 "[pkay] [pkau] [pkav]; ";
+		g += "[a] aformat=sample_rates=44100|48000:channel_layouts=mono,showfreqs=s=" + std::to_string(N) +
+			 "x256:mode=bar:cmode=combined:ascale=log:fscale=log:win_size=1024:rate=30:colors=white,scale=" + std::to_string(N) +
+			 ":1:flags=area,format=gray,lut=c0='val*252/255',split [pkv] [pkp]; "
+			 "[pkp] format=gray16le,lut=c0='65535*exp((val/257-252)/24)',lagfun=decay=0.8679,"
+			 "lut=c0='clip(257*(252+24*log(max(val,1)/65535)),0,257*250)',format=gray," + stretch + " [pkP]; "
+			 "[pkv] " + stretch + " [pkV]; "
+			 "color=black:s=" + w + "x" + h + ":r=1:d=1,format=gray,geq=lum='if(gte(mod(X," + std::to_string(BW) + ")," +
+			 std::to_string(BW - 1) + "),253,1+floor(251*(" + h + "-1-Y)/(" + h + "-1)))' [pkR]; "
+			 // 254: a cap (over the cap's value, within cap steps of it), else the row's height (253: a gap)
+			 "[pkP] [pkR] lut2=c0='if(gt(y,x)*lte(y,x+" + cap + "),254,y)' [pkQ]; ";
+		if (overCover)
 		{
-			g += ",format=yuv420p";
-			for (int y = 96; y < h; y += 96) g += ",drawbox=x=" + std::to_string(h - 1 - y) + ":y=0:w=1:h=8:c=white@0.1:t=fill";
+			// what each pixel is (0 nothing, 1 bar, 2 cap), then each plane: the art's where nothing, else a colour
+			auto paint = [](const char* bar, const char* capc) {
+				return std::string("'if(eq(x,0),y,if(eq(x,1),") + bar + "," + capc + "))'";
+			};
+			return g + "[pkV] [pkQ] lut2=c0='if(eq(y,254),2,if(lte(y,x)*lt(y,253),1,0))',split=3 [pkc0] [pkc1] [pkc2]; "
+					   "[pkc0] scale=640:200:flags=neighbor [pkcy]; "
+					   "[pkcy] [pkay] lut2=c0=" + paint("153", "182") + " [pkY]; "
+					   "[pkc1] [pkau] lut2=c0=" + paint("103", "108") + " [pkU]; "
+					   "[pkc2] [pkav] lut2=c0=" + paint("178", "106") + " [pkW]; "
+					   "[pkY] [pkU] [pkW] mergeplanes=0x001020:yuv420p [strip]; [top] [strip] vstack [vo]";
 		}
-		return g + ",tile=1x80:overlap=79:init_padding=79" + (grid ? "" : ":color=black@0") + ",transpose=cclock";
+		// the luma at half size, then U and V from it (a lut each) and the luma scaled up
+		g += "[pkV] [pkQ] lut2=c0='if(eq(y,254),182,if(lte(y,x)*lt(y,253),153,16))',split=3 [pky] [pku] [pkw]; "
+			 "[pky] scale=640:480:flags=neighbor [pkY]; "
+			 "[pku] lut=c0='if(eq(val,182),108,if(eq(val,153),103,128))' [pkU]; "
+			 "[pkw] lut=c0='if(eq(val,182),106,if(eq(val,153),178,128))' [pkW]; "
+			 "[pkY] [pkU] [pkW] mergeplanes=0x001020:yuv420p";
+		// a faint line every 96 pixels (white at 10%), over the bars too: four 1-pixel boxes
+		for (int y = 96; y < 480; y += 96) g += ",drawbox=x=0:y=" + std::to_string(y) + ":w=640:h=1:c=white@0.1:t=fill";
+		return g + " [vo]";
 	}
 
 	std::string visualizerGraph(int vis, bool overCover, const std::string& mapsDir)
@@ -207,7 +254,7 @@ namespace bp
 		case VIS_SPECTRUM: draw = in + ",showspectrum=" + size + ":slide=scroll:mode=combined:color=fire:scale=log:fps=30"; break;
 		default: draw = in + ":channel_layouts=mono,showfreqs=" + size + ":mode=bar:cmode=combined:ascale=log:fscale=log:win_size=1024:rate=30:colors=" + ink; break;
 		}
-		if (vis == VIS_TIMELINE && !overCover) return "[aid1] asplit [ao] [a]; " + timelineDraw(h, true) + " [vo]";
+		if (vis == VIS_PEAKS) return peaksGraph(overCover);
 		// near the format the filter draws in, which mpv shows as it is: converting each frame to yuv420p cost 6.5-7 ms
 		// a frame on the A55s, more than drawing Waves or Spectrum. RGBA's alpha dropped (rgb0, a byte shuffle: 0.5 ms):
 		// mpv would lay a clear background over a checkerboard; Spectrum's YUV as it comes
@@ -222,9 +269,7 @@ namespace bp
 		// (its loudness, 4x: only the near-black clear, as colorkey did, without its 5 ms a frame).
 		// vstack repeats the top's ended frame, as Circle's hstack does
 		bool yuv = vis == VIS_SPECTRUM;
-		std::string strip = vis == VIS_TIMELINE ? timelineDraw(h, false)
-						  : yuv					? "[a] " + draw + ":opacity=4,format=yuva444p"
-												: "[a] " + draw;
+		std::string strip = yuv ? "[a] " + draw + ":opacity=4,format=yuva444p" : "[a] " + draw;
 		return "[aid1] asplit [ao] [a]; "
 			   "[vid1] scale=640:480:force_original_aspect_ratio=decrease,pad=640:480:-1:-1:black,setsar=1,format=rgba" +
 			   std::string(yuv ? ",scale=out_range=full,format=yuv444p" : "") + ",settb=AVTB,split [art1] [art2]; "
@@ -282,6 +327,9 @@ namespace bp
 				if (key == "music-show" && value == SHOW_IDS[v]) s.musicShow = v;
 			for (int v = 0; v < VISUALIZERS; v++)
 				if (key == "visualizer" && value == VIS_IDS[v]) s.visualizer = v;
+			// Timeline (0.5.x, briefly) became Peaks; Spectrum is hidden, read as Bars
+			if (key == "visualizer" && value == "timeline") s.visualizer = VIS_PEAKS;
+			if (key == "visualizer" && s.visualizer == VIS_SPECTRUM) s.visualizer = VIS_BARS;
 			for (int v = 0; v < LOOPS; v++)
 				if (key == "loop" && value == LOOP_IDS[v]) s.loop = v;
 			for (int v = 0; v < CLOCKS; v++)
@@ -304,7 +352,7 @@ namespace bp
 				else if (value == "bars" || value == "waves" || value == "spectrum")
 				{
 					s.musicShow = SHOW_VIS;
-					s.visualizer = value == "bars" ? VIS_BARS : value == "waves" ? VIS_WAVES : VIS_SPECTRUM;
+					s.visualizer = value == "waves" ? VIS_WAVES : VIS_BARS;	// Spectrum: hidden, as Bars
 				}
 				else s.musicShow = SHOW_ART;
 			}

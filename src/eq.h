@@ -34,6 +34,11 @@ namespace bp
 	// the curve's highest point (1/12-octave steps, 20 Hz to 20 kHz): what the pre-gain takes off so a boost can't clip
 	double eqPeakDb(const EqGains&);
 
+	// a song's first af entry, always there (EQ or effect or neither): a file over 48 kHz brought to 48 kHz, what the
+	// handheld's output runs at anyway (ALSA's plug, hw at 48000), before the EQ, the effect and mpv's speed work on it.
+	// 2-4x less of all three at 96/192 kHz. Always in, so the af's output rate is the file's own for its whole run: mpv
+	// reopens the sound output when that rate changes (an EQ switched on or off would cost a gap), not the format
+	std::string afInputFilter();
 	// mpv's `af` value, "" when flat. All bands are always in it when it isn't, so af-command can reach each one
 	std::string eqFilterString(const EqGains&);
 	// af-command's target for a band: "equalizer@b3"

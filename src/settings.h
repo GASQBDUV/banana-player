@@ -12,8 +12,16 @@ namespace bp
 	// None: neither, the title alone on black (the lightest)
 	enum MusicShow { SHOW_ART, SHOW_BOTH, SHOW_VIS, SHOW_NONE, SHOWS };
 	// Circle: the bars round a ring (cyan to purple to pink), drawn by looking each pixel up in two tables (remap)
-	// Timeline: the last moments as bars scrolling left, the bass coral under the rest green
-	enum Visualizer { VIS_BARS, VIS_WAVES, VIS_SPECTRUM, VIS_CIRCLE, VIS_TIMELINE, VISUALIZERS };
+	// Peaks: a spectrum analyser's bars (coral) with a cap over each (green) that holds the bar's top and falls back
+	// Spectrum is hidden (the owner's call: its look), its graph kept: nothing offers it and a setting naming it reads
+	// as Bars; VIS_SHOWN lists what's offered, in order
+	enum Visualizer { VIS_BARS, VIS_WAVES, VIS_SPECTRUM, VIS_CIRCLE, VIS_PEAKS, VISUALIZERS };
+	constexpr int VIS_SHOWN[] = {VIS_BARS, VIS_WAVES, VIS_CIRCLE, VIS_PEAKS};
+	constexpr int VIS_SHOWN_COUNT = (int)(sizeof(VIS_SHOWN) / sizeof(VIS_SHOWN[0]));
+	// a visualizer's place in VIS_SHOWN (a hidden one: Bars's, 0)
+	int visualizerSlot(int v);
+	// the next one offered after v (dir 1) or before it (-1), round
+	int stepVisualizer(int v, int dir);
 	// music only (a video never loops): all = back to the folder's first file after its last
 	enum Loop { LOOP_OFF, LOOP_ALL, LOOP_ONE, LOOPS };
 	// the clock in the bottom panel's header

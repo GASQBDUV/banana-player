@@ -620,8 +620,8 @@ namespace bp
 		bool displayKey(Button b, Player& p);
 		bool displayPointer(const Pointer& pt, int x, int y, Player& p);
 		void drawDisplay(const Player& p);
-		// a row's chips share the dialog's width: Show's 4, Style's one a visualizer
-		static int displayChips(int row) { return row ? VISUALIZERS : SHOWS; }
+		// a row's chips share the dialog's width: Show's 4, Style's one an offered visualizer (VIS_SHOWN)
+		static int displayChips(int row) { return row ? VIS_SHOWN_COUNT : SHOWS; }
 		Rect displayChip(int row, int i) const
 		{
 			int n = displayChips(row), w = (544 - (n - 1) * 8) / n;
