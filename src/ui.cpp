@@ -2,6 +2,7 @@
 #include "format.h"
 #include "playlist.h"
 #include "netpath.h"
+#include "theme.h"
 #include <algorithm>
 #include <cmath>
 #include <cstring>
@@ -17,12 +18,19 @@
 
 namespace bp
 {
-	// BananaOS's colours
-	static const SDL_Color BG{0x17, 0x16, 0x1C, 255}, CREAM{0xF1, 0xED, 0xE2, 255}, YELLOW{0xF0, 0xB4, 0x29, 255},
-		TEAL{0x23, 0x43, 0x46, 255}, DIM{0x8A, 0x86, 0x7C, 255}, RED{0xE0, 0x5A, 0x4F, 255}, SCREEN{0x3A, 0x3A, 0x44, 255},
-		PRESSED{0x3A, 0x6E, 0x72, 255},
-		// a panel's body (dialogs, empty states), and secondary text on teal (DIM there is too faint)
-		SURFACE{0x21, 0x1F, 0x28, 255}, DIM_TEAL{0xB4, 0xAF, 0xA3, 255};
+	// the palette (theme.h) as SDL colours
+	static constexpr SDL_Color sdl(theme::Rgb c, Uint8 a = 255) { return {c.r, c.g, c.b, a}; }
+	static constexpr SDL_Color BG = sdl(theme::BG), TEXT = sdl(theme::TEXT), ACCENT = sdl(theme::ACCENT),
+		BUTTON = sdl(theme::BUTTON), DIM = sdl(theme::DIM), DANGER = sdl(theme::DANGER), SCREEN = sdl(theme::SCREEN),
+		PRESSED = sdl(theme::PRESSED), SURFACE = sdl(theme::SURFACE), DIM_ON = sdl(theme::DIM_ON),
+		ON_ACCENT = sdl(theme::ON_ACCENT), TRACK = sdl(theme::TRACK), KNOB = sdl(theme::KNOB), RULE = sdl(theme::RULE);
+	using theme::R_BUTTON;
+	using theme::R_TILE;
+	using theme::R_DIALOG;
+	using theme::R_CHIP;
+	using theme::R_FIELD;
+	using theme::R_BAR;
+	using theme::R_KNOB;
 	static const int SIZES[3] = {18, 24, 32};
 	static const Uint32 QUIT_WINDOW_MS = 2000, SCRUB_MS = 100;
 	static const double BACK_S = 5, FORWARD_S = 10;
@@ -382,6 +390,8 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 	{
 		if (photoTex) SDL_DestroyTexture(photoTex);
 		for (auto& c : cache) SDL_DestroyTexture(c.second);
+		for (auto* t : corners)
+			if (t) SDL_DestroyTexture(t);
 		for (auto* f : fonts)
 			if (f) TTF_CloseFont(f);
 		if (pinFont) TTF_CloseFont(pinFont);
@@ -1683,7 +1693,7 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 	{
 		Rect pr = quickPanel();
 		drawDialog(pr, "");
-		drawTextMid("Quick settings", 1, YELLOW, pr.x + 24, pr.y + 28);
+		drawTextMid("Quick settings", 1, ACCENT, pr.x + 24, pr.y + 28);
 		auto rows = quickRows();
 		for (int i = 0; i < (int)rows.size(); i++)
 		{
@@ -1692,17 +1702,12 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 			int row = rows[i], mid = r.y + r.h / 2;
 			if (row == Q_QUIT)
 			{
-				fill(r, pressedBtn == 302 + i * 4 ? PRESSED : RED);
+				bool down = pressedBtn == 302 + i * 4;
+				drawBox(r, down ? PRESSED : DANGER, R_BUTTON, at);
+				SDL_Color ink = down ? TEXT : ON_ACCENT;	// black on the red: cream reads 2.4:1 there
 				int tw = (int)std::lround(textWidth("Quit Banana Player", 1) / sx), gw = glyphW(G_POWER), x = r.x + r.w / 2 - (tw + gw + 12) / 2;
-				drawGlyphMid(G_POWER, x + gw / 2, mid, CREAM);
-				drawTextMid("Quit Banana Player", 1, CREAM, x + gw + 12, mid);
-				if (at)
-				{
-					fill({r.x, r.y, r.w, 3}, YELLOW);
-					fill({r.x, r.y + r.h - 3, r.w, 3}, YELLOW);
-					fill({r.x, r.y, 3, r.h}, YELLOW);
-					fill({r.x + r.w - 3, r.y, 3, r.h}, YELLOW);
-				}
+				drawGlyphMid(G_POWER, x + gw / 2, mid, ink);
+				drawTextMid("Quit Banana Player", 1, ink, x + gw + 12, mid);
 				continue;
 			}
 			if (at) drawFocus(r);
@@ -1710,10 +1715,10 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 			{
 				// a tick box
 				Rect box{r.x + 16, mid - 13, 26, 26};
-				fill(box, at ? YELLOW : CREAM);
-				fill({box.x + 2, box.y + 2, box.w - 4, box.h - 4}, at ? TEAL : SURFACE);
-				if (p.settings.sameBrightness) drawGlyphMid(G_CHECK, box.x + box.w / 2, box.y + box.h / 2, YELLOW);
-				drawTextMid("Same brightness for both screens", 1, at ? YELLOW : CREAM, r.x + 56, mid, r.w - 66);
+				fillRound(box, at ? ACCENT : TEXT, R_FIELD);
+				fillRound({box.x + 2, box.y + 2, box.w - 4, box.h - 4}, at ? BUTTON : SURFACE, R_FIELD - 2);
+				if (p.settings.sameBrightness) drawGlyphMid(G_CHECK, box.x + box.w / 2, box.y + box.h / 2, ACCENT);
+				drawTextMid("Same brightness for both screens", 1, at ? ACCENT : TEXT, r.x + 56, mid, r.w - 66);
 				continue;
 			}
 			if (row == Q_WEB)
@@ -1721,25 +1726,18 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 				// a tick box (on or off), its name, and while it's on a button to its page in Settings
 				bool on = p.settings.webDashboard, onSwitch = at && (quickSub == 0 || !on);
 				Rect box{r.x + 16, mid - 13, 26, 26};
-				fill(box, onSwitch ? YELLOW : CREAM);
-				fill({box.x + 2, box.y + 2, box.w - 4, box.h - 4}, at ? TEAL : SURFACE);
-				if (on) drawGlyphMid(G_CHECK, box.x + box.w / 2, box.y + box.h / 2, YELLOW);
-				drawTextMid("Web dashboard", 1, onSwitch ? YELLOW : CREAM, r.x + 56, mid, 200);
+				fillRound(box, onSwitch ? ACCENT : TEXT, R_FIELD);
+				fillRound({box.x + 2, box.y + 2, box.w - 4, box.h - 4}, at ? BUTTON : SURFACE, R_FIELD - 2);
+				if (on) drawGlyphMid(G_CHECK, box.x + box.w / 2, box.y + box.h / 2, ACCENT);
+				drawTextMid("Web dashboard", 1, onSwitch ? ACCENT : TEXT, r.x + 56, mid, 200);
 				if (on)
 				{
 					Rect b = quickPinBtn(i);
-					fill(b, pressedBtn == 303 + i * 4 ? PRESSED : at ? BG : TEAL);
-					if (at && quickSub == 1)
-					{
-						fill({b.x, b.y, b.w, 2}, YELLOW);
-						fill({b.x, b.y + b.h - 2, b.w, 2}, YELLOW);
-						fill({b.x, b.y, 2, b.h}, YELLOW);
-						fill({b.x + b.w - 2, b.y, 2, b.h}, YELLOW);
-					}
+					drawBox(b, pressedBtn == 303 + i * 4 ? PRESSED : at ? BG : BUTTON, R_BUTTON, at && quickSub == 1);
 					drawButton({b.x, b.y, b.w - 20, b.h}, nullptr, "Settings", nullptr, false, 1);	// (centred in what the arrow leaves)
-					drawGlyphMid(G_RIGHT, b.x + b.w - 18, b.y + b.h / 2, CREAM);
+					drawGlyphMid(G_RIGHT, b.x + b.w - 18, b.y + b.h / 2, TEXT);
 				}
-				else drawTextMid("Off", 0, at ? DIM_TEAL : DIM, r.x + r.w - 16, mid, 0, 1);
+				else drawTextMid("Off", 0, at ? DIM_ON : DIM, r.x + r.w - 16, mid, 0, 1);
 				continue;
 			}
 			int pct;
@@ -1755,19 +1753,18 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 				pct = pm < 0 ? -1 : (pm + 5) / 10;
 				label = row == Q_BOTTOM ? "Bottom" : p.settings.sameBrightness ? "Brightness" : "Top";
 			}
-			SDL_Color ink = at ? YELLOW : CREAM;
+			SDL_Color ink = at ? ACCENT : TEXT;
 			drawGlyphMid(row == Q_VOLUME ? G_SPEAKER : G_SUN, r.x + 25, mid, ink);
 			drawTextMid(label, 1, ink, r.x + 46, mid, 146);
-			drawTextMid(pct < 0 ? "-" : std::to_string(pct) + "%", 0, at ? DIM_TEAL : DIM, quickMinus(i).x - 6, mid, 0, 1);
+			drawTextMid(pct < 0 ? "-" : std::to_string(pct) + "%", 0, at ? DIM_ON : DIM, quickMinus(i).x - 6, mid, 0, 1);
 			for (int k = 0; k < 2; k++)
 			{
 				Rect bt = k ? quickPlus(i) : quickMinus(i);
-				fill(bt, pressedBtn == 300 + i * 4 + k ? PRESSED : at ? BG : TEAL);
-				drawGlyphMid(k ? G_PLUS : G_MINUS, bt.x + bt.w / 2, bt.y + bt.h / 2, CREAM);
+				drawBox(bt, pressedBtn == 300 + i * 4 + k ? PRESSED : at ? BG : BUTTON, R_BUTTON);
+				drawGlyphMid(k ? G_PLUS : G_MINUS, bt.x + bt.w / 2, bt.y + bt.h / 2, TEXT);
 			}
 			Rect bar = quickBar(i);
-			fill(bar, at ? BG : TEAL);
-			if (pct > 0) fill({bar.x, bar.y, bar.w * std::min(pct, 100) / 100, bar.h}, YELLOW);
+			drawLevel(bar, pct > 0 ? bar.w * std::min(pct, 100) / 100 : 0, at ? BG : TRACK);
 		}
 		if (p.settings.buttonHotkeys) drawHints({{"UP/DOWN", "Choose"}, {"LEFT/RIGHT", "Change"}, {"F/B", "Close"}});
 		else drawFooterText("Tap outside to close", DIM);
@@ -2984,12 +2981,134 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 		SDL_SetRenderDrawBlendMode(ren, c.a < 255 ? SDL_BLENDMODE_BLEND : SDL_BLENDMODE_NONE);
 		SDL_SetRenderDrawColor(ren, c.r, c.g, c.b, c.a);
 		// by its edges on the panel's pixels: rects side by side meet, and the same width comes out the same everywhere
+		SDL_Rect d = devRect(r);
+		SDL_RenderFillRect(ren, &d);
+	}
+
+	SDL_Rect Ui::devRect(Rect r) const
+	{
 		int x0 = (int)std::lround(r.x * sx), y0 = (int)std::lround(r.y * sy);
 		int x1 = (int)std::lround((r.x + r.w) * sx), y1 = (int)std::lround((r.y + r.h) * sy);
 		if (r.w > 0 && x1 <= x0) x1 = x0 + 1;
 		if (r.h > 0 && y1 <= y0) y1 = y0 + 1;
-		SDL_Rect d{x0, y0, x1 - x0, y1 - y0};
-		SDL_RenderFillRect(ren, &d);
+		return {x0, y0, x1 - x0, y1 - y0};
+	}
+
+	int Ui::devRadius(int rad) const
+	{
+		// whole pixels: on the RG DS Plus (x1.6) a 10 is 16, a 14 is 22
+		return std::max(0, (int)std::lround(rad * std::min(sx, sy)));
+	}
+
+	SDL_Texture* Ui::corner(int R)
+	{
+		if (R < (int)corners.size() && corners[R]) return corners[R];
+		if (R >= (int)corners.size()) corners.resize(R + 1, nullptr);
+		// the top-left quarter of a circle centred on (R, R), white, its coverage (4x4 samples a pixel) as alpha:
+		// smooth, as BananaOS's menu draws its corners
+		SDL_Surface* s = SDL_CreateRGBSurfaceWithFormat(0, R, R, 32, SDL_PIXELFORMAT_RGBA32);
+		if (!s) return nullptr;
+		SDL_LockSurface(s);
+		for (int y = 0; y < R; y++)
+		{
+			Uint8* row = (Uint8*)s->pixels + y * s->pitch;
+			for (int x = 0; x < R; x++)
+			{
+				int in = 0;
+				for (int j = 0; j < 4; j++)
+					for (int i = 0; i < 4; i++)
+					{
+						float dx = R - (x + (i + 0.5f) / 4), dy = R - (y + (j + 0.5f) / 4);
+						in += dx * dx + dy * dy <= (float)R * R;
+					}
+				row[x * 4] = row[x * 4 + 1] = row[x * 4 + 2] = 255;
+				row[x * 4 + 3] = (Uint8)(in * 255 / 16);
+			}
+		}
+		SDL_UnlockSurface(s);
+		SDL_Texture* t = SDL_CreateTextureFromSurface(ren, s);
+		SDL_FreeSurface(s);
+		if (t) SDL_SetTextureBlendMode(t, SDL_BLENDMODE_BLEND);
+		corners[R] = t;
+		return t;
+	}
+
+	void Ui::roundDev(SDL_Rect d, SDL_Color c, int R, int mask)
+	{
+		R = std::min({R, d.w / 2, d.h / 2});
+		SDL_SetRenderDrawBlendMode(ren, c.a < 255 ? SDL_BLENDMODE_BLEND : SDL_BLENDMODE_NONE);
+		SDL_SetRenderDrawColor(ren, c.r, c.g, c.b, c.a);
+		SDL_Texture* t = R > 0 && mask ? corner(R) : nullptr;
+		if (!t)
+		{
+			SDL_RenderFillRect(ren, &d);
+			return;
+		}
+		// the middle full height; each side between its corners (a square one where a corner isn't rounded)
+		SDL_Rect mid{d.x + R, d.y, d.w - 2 * R, d.h};
+		SDL_Rect left{d.x, d.y + R, R, d.h - 2 * R}, right{d.x + d.w - R, d.y + R, R, d.h - 2 * R};
+		SDL_Rect rects[7] = {mid, left, right};
+		int n = 3;
+		SDL_Rect at[4] = {{d.x, d.y, R, R}, {d.x + d.w - R, d.y, R, R}, {d.x, d.y + d.h - R, R, R}, {d.x + d.w - R, d.y + d.h - R, R, R}};
+		for (int k = 0; k < 4; k++)
+			if (!(mask & (1 << k))) rects[n++] = at[k];
+		SDL_RenderFillRects(ren, rects, n);
+		SDL_SetTextureColorMod(t, c.r, c.g, c.b);
+		SDL_SetTextureAlphaMod(t, c.a);
+		static const SDL_RendererFlip flips[4] = {SDL_FLIP_NONE, SDL_FLIP_HORIZONTAL, SDL_FLIP_VERTICAL,
+			(SDL_RendererFlip)(SDL_FLIP_HORIZONTAL | SDL_FLIP_VERTICAL)};
+		for (int k = 0; k < 4; k++)
+			if (mask & (1 << k)) SDL_RenderCopyEx(ren, t, nullptr, &at[k], 0, nullptr, flips[k]);
+	}
+
+	void Ui::fillRound(Rect r, SDL_Color c, int rad, int mask)
+	{
+		roundDev(devRect(r), c, devRadius(rad), mask);
+	}
+
+	void Ui::fillRoundBand(Rect box, int rad, int y0, int y1, SDL_Color c, int x1)
+	{
+		// the rounded box drawn only between y0 and y1 (and left of x1): a line along its edge keeps its corners
+		SDL_Rect d = devRect(box), keep;
+		bool had = SDL_RenderIsClipEnabled(ren);
+		if (had) SDL_RenderGetClipRect(ren, &keep);
+		int top = (int)std::lround(y0 * sy), bottom = (int)std::lround(y1 * sy);
+		int right = x1 >= 0 ? (int)std::lround(x1 * sx) : d.x + d.w;
+		SDL_Rect band{d.x, top, right - d.x, bottom - top};
+		if (had && !SDL_IntersectRect(&band, &keep, &band)) return;
+		if (band.w <= 0 || band.h <= 0) return;
+		SDL_RenderSetClipRect(ren, &band);
+		roundDev(d, c, devRadius(rad), ROUND_ALL);
+		SDL_RenderSetClipRect(ren, had ? &keep : nullptr);
+	}
+
+	static theme::Rgb rgb(SDL_Color c) { return {c.r, c.g, c.b}; }
+
+	void Ui::drawLevel(Rect track, int w, SDL_Color trackInk, SDL_Color fillInk)
+	{
+		// a bar: its track rounded, its fill rounded on its left end only (as the track's corner there)
+		fillRound(track, trackInk, R_BAR);
+		if (!fillInk.a) fillInk = ACCENT;
+		if (w > 0) fillRound({track.x, track.y, std::min(w, track.w), track.h}, fillInk, R_BAR, w >= track.w ? ROUND_ALL : ROUND_TL | ROUND_BL);
+	}
+
+	void Ui::drawBox(Rect r, SDL_Color c, int rad, bool focus)
+	{
+		drawBox(r, c, rad, focus ? ACCENT : sdl(theme::edgeOf(rgb(c))));
+	}
+
+	void Ui::drawBox(Rect r, SDL_Color c, int rad, SDL_Color edge)
+	{
+		// the edge as the whole box, the lip inside it, the fill over all but the lip's band: 3 rounded fills
+		SDL_Rect d = devRect(r);
+		int R = devRadius(rad), e = std::max(1, devRadius(theme::EDGE)), lip = devRadius(theme::LIP);
+		roundDev(d, edge, R, ROUND_ALL);
+		SDL_Rect in{d.x + e, d.y + e, d.w - 2 * e, d.h - 2 * e};
+		if (in.w <= 0 || in.h <= 0) return;
+		int Ri = std::max(0, R - e);
+		roundDev(in, sdl(theme::lipOf(rgb(c))), Ri, ROUND_ALL);
+		in.h -= lip;
+		if (in.h > 0) roundDev(in, c, Ri, ROUND_ALL);
 	}
 
 	void Ui::draw(const Player& p, bool force)
@@ -3146,7 +3265,7 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 			if (c.empty()) return;
 			int cr = edge - (edge == right ? 0 : 10);
 			if (cr - (int)std::lround(textWidth(c, 0) / sx) < minX) return;
-			drawTextMid(c, 0, touchLocked && page == Page::Main ? DIM : CREAM, cr, y + 8, 0, 1);
+			drawTextMid(c, 0, touchLocked && page == Page::Main ? DIM : TEXT, cr, y + 8, 0, 1);
 		};
 		if (battery.percent < 0)
 		{
@@ -3157,17 +3276,17 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 		// the body (an outline, filled to the charge) and its nub; the percent before it, the bolt before that
 		const int bw = 30, bh = 16;
 		int x = right - bw - 3;
-		SDL_Color ink = battery.charging ? YELLOW : battery.percent <= 15 ? RED : CREAM;
-		fill({x, y, bw, bh}, CREAM);
+		SDL_Color ink = battery.charging ? ACCENT : battery.percent <= 15 ? DANGER : TEXT;
+		fill({x, y, bw, bh}, TEXT);
 		fill({x + 2, y + 2, bw - 4, bh - 4}, BG);
 		int level = (bw - 6) * battery.percent / 100;
 		if (level > 0) fill({x + 3, y + 3, level, bh - 6}, ink);
-		fill({x + bw, y + 5, 3, bh - 10}, CREAM);
+		fill({x + bw, y + 5, 3, bh - 10}, TEXT);
 		int left = x;
 		if (p.settings.batteryPercent)
 		{
 			std::string pct = std::to_string(battery.percent) + "%";
-			drawText(pct, 0, battery.percent <= 15 && !battery.charging ? RED : CREAM, x - 6, y - 2, 0, 1);
+			drawText(pct, 0, battery.percent <= 15 && !battery.charging ? DANGER : TEXT, x - 6, y - 2, 0, 1);
 			left = x - 6 - (int)(textWidth(pct, 0) / sx) - 4;
 		}
 		if (battery.charging)
@@ -3177,7 +3296,7 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 			int bx = left - 14, by = y + 1;
 			for (int r = 0; r < 7; r++)
 				for (int c = 0; c < 5; c++)
-					if (BOLT[r][c] == '#') fill({bx + c * 2, by + r * 2, 2, 2}, YELLOW);
+					if (BOLT[r][c] == '#') fill({bx + c * 2, by + r * 2, 2, 2}, ACCENT);
 			left = bx;
 		}
 		drawWebIndicator(left - 8, y + 8, p);
@@ -3274,22 +3393,21 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 			sub = updater->message();
 			break;
 		}
-		drawTextMid(title, 1, YELLOW, W / 2, top + 30, 392, 2);
-		drawTextMid(sub, 0, CREAM, W / 2, top + 62, 392, 2);
+		drawTextMid(title, 1, ACCENT, W / 2, top + 30, 392, 2);
+		drawTextMid(sub, 0, TEXT, W / 2, top + 62, 392, 2);
 		if (updater->state() == Updater::State::Downloading)
 		{
 			// the bar
 			int pct = std::max(0, updater->progress());
-			fill({156, top + 84, 328, 8}, TEAL);
-			fill({156, top + 84, 328 * pct / 100, 8}, YELLOW);
+			drawLevel({156, top + 84, 328, 8}, 328 * pct / 100, TRACK);
 		}
 		for (int i = 0; i < (int)items.size(); i++)
 		{
 			Rect r = popupRow(i);
 			bool at = i == popupCursor;
-			if (pressedBtn == 200 + i) fill(r, PRESSED);
+			if (pressedBtn == 200 + i) drawBox(r, PRESSED, R_BUTTON);
 			else if (at) drawFocus(r);
-			drawTextMid(items[i], 1, at ? YELLOW : CREAM, W / 2, r.y + r.h / 2, r.w - 10, 2);
+			drawTextMid(items[i], 1, at ? ACCENT : TEXT, W / 2, r.y + r.h / 2, r.w - 10, 2);
 		}
 		drawHints({{"A", "Choose"}, {"B", items.size() > 1 ? "Later" : "Close"}});
 	}
@@ -3308,10 +3426,10 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 		// a playlist's Delete, pressed once: what it doesn't do
 		bool plArmed = ctxArmed && ctxCursor < (int)ctxItems.size() && ctxItems[ctxCursor] == CTX_PL_DELETE;
 		if (ctxExtra() && (!ctxNote.empty() || plArmed))
-			drawTextMid(plArmed ? "Your files stay where they are" : ctxNote, 0, plArmed ? YELLOW : DIM, W / 2, box.y + 60, 368, 2);
+			drawTextMid(plArmed ? "Your files stay where they are" : ctxNote, 0, plArmed ? ACCENT : DIM, W / 2, box.y + 60, 368, 2);
 		else if (ctxExtra())
 			drawTextMid(ctxStatus.empty() ? std::string(sv ? std::string(netTypeLabel(sv->type)) + "  " + sv->host : "") : ctxStatus, 0,
-				ctxStatus == "It works" ? YELLOW : DIM, W / 2, box.y + 60, 368, 2);
+				ctxStatus == "It works" ? ACCENT : DIM, W / 2, box.y + 60, 368, 2);
 		for (int i = 0; i < (int)ctxItems.size(); i++)
 		{
 			int it = ctxItems[i];
@@ -3321,14 +3439,14 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 			for (auto& x : recent)
 				if (x.path == ctxRecent) ri = &x;
 			std::string note;
-			SDL_Color noteInk = i == ctxCursor ? DIM_TEAL : DIM;
+			SDL_Color noteInk = i == ctxCursor ? DIM_ON : DIM;
 			if (it == CTX_R_SHOW && ri) note = ri->where;
 			if (it == CTX_HIDDEN) note = showHidden ? "On" : "Off";
 			if (it == CTX_CLEAR_RECENT)
 			{
 				bool armedClear = ctxArmed && i == ctxCursor;
 				note = recent.empty() ? "Empty" : armedClear ? "Press again to clear" : "Press twice";
-				if (armedClear) noteInk = YELLOW;
+				if (armedClear) noteInk = ACCENT;
 			}
 			std::string resume = ri && !ri->at.empty() ? "Resume from " + ri->at : "Play";
 			bool likedR = it == CTX_R_LIKE && plStore && plStore->isLiked(ctxRecent);
@@ -3357,11 +3475,11 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 				: it == CTX_PL_RENAME ? &G_PENCIL : it == CTX_PL_DEDUP || it == CTX_PL_REMOVE ? &G_MINUS : it == CTX_PL_SHOW ? &G_FOLDER
 				: it == CTX_PL_ADD_FILES ? &G_PLUS : it == CTX_PL_ADD_FOLDER ? &G_FOLDER : it == CTX_PL_SELECT || it == CTX_SELECT_FILES ? &G_BOX_ON
 				: it == CTX_PL_MOVE ? &G_MOVE : it == CTX_ADD_TO ? &G_PLAYLIST : it == CTX_WEB ? &G_WEB : &G_CROSS;
-			drawDialogRow(ctxRow(i), g, label, i == ctxCursor, pressedBtn == 100 + i, del ? (armed ? YELLOW : RED) : it == CTX_CANCEL ? DIM
-				: it == CTX_R_LIKE && !likedR ? YELLOW : CREAM, note, noteInk);
+			drawDialogRow(ctxRow(i), g, label, i == ctxCursor, pressedBtn == 100 + i, del ? (armed ? ACCENT : DANGER) : it == CTX_CANCEL ? DIM
+				: it == CTX_R_LIKE && !likedR ? ACCENT : TEXT, note, noteInk);
 		}
 		// a menu too long for its line (a playlist's): Delete's word on the footer instead
-		if (plArmed && !ctxExtra()) drawFooterText("Your files stay where they are", YELLOW);
+		if (plArmed && !ctxExtra()) drawFooterText("Your files stay where they are", ACCENT);
 		else drawHints({{"A", "Choose"}, {"B", "Close"}});
 	}
 
@@ -3385,19 +3503,17 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 
 	void Ui::drawExit(const Player&)
 	{
-		drawTextMid("Quit Banana Player?", 2, CREAM, W / 2, 132, 0, 2);
+		drawTextMid("Quit Banana Player?", 2, TEXT, W / 2, 132, 0, 2);
 		drawTextMid("Your place in what you were playing is kept.", 0, DIM, W / 2, 170, 0, 2);
 		Rect b = buttonRect(EXIT_BTN);
-		fill(b, pressedBtn == EXIT_BTN ? PRESSED : RED);
-		// it's the page's one choice: always the one A takes
-		fill({b.x - 4, b.y - 4, b.w + 8, 2}, YELLOW);
-		fill({b.x - 4, b.y + b.h + 2, b.w + 8, 2}, YELLOW);
-		fill({b.x - 4, b.y - 4, 2, b.h + 8}, YELLOW);
-		fill({b.x + b.w + 2, b.y - 4, 2, b.h + 8}, YELLOW);
+		// it's the page's one choice: always the one A takes (a yellow edge; black on the red, cream reads 2.4:1 there)
+		bool down = pressedBtn == EXIT_BTN;
+		drawBox(b, down ? PRESSED : DANGER, R_BUTTON, true);
+		SDL_Color quitInk = down ? TEXT : ON_ACCENT;
 		int tw = (int)std::lround(textWidth("Quit Banana Player", 1) / sx), gw = glyphW(G_POWER);
 		int x = b.x + b.w / 2 - (tw + gw + 12) / 2;
-		drawGlyphMid(G_POWER, x + gw / 2, b.y + b.h / 2, CREAM);
-		drawTextMid("Quit Banana Player", 1, CREAM, x + gw + 12, b.y + b.h / 2);
+		drawGlyphMid(G_POWER, x + gw / 2, b.y + b.h / 2, quitInk);
+		drawTextMid("Quit Banana Player", 1, quitInk, x + gw + 12, b.y + b.h / 2);
 		drawHints({{"A", "Quit"}, {"B", "Close"}, {"L/R", "Tabs"}});
 	}
 
@@ -3408,8 +3524,8 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 		Rect b = buttonRect(BACK_ICON);
 		// armed (the browser's first page: once more quits) in yellow
 		bool armed = quitArmed && page == Page::Browse && !inMenu;
-		fill(b, pressedBtn == BACK_ICON ? PRESSED : armed ? YELLOW : TEAL);
-		drawGlyphMid(G_BACK, b.x + b.w / 2 - 1, b.y + b.h / 2, armed ? BG : CREAM, 3);
+		drawBox(b, pressedBtn == BACK_ICON ? PRESSED : armed ? ACCENT : BUTTON, R_BUTTON);
+		drawGlyphMid(G_BACK, b.x + b.w / 2 - 1, b.y + b.h / 2, armed ? ON_ACCENT : TEXT, 3);
 	}
 
 	void Ui::drawHeader(const std::string& title, const Player& p, int titleRight)
@@ -3419,14 +3535,14 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 		// the clock's room too (none over a photo: its title as it always was)
 		if (!clockText(p).empty()) room = std::min(room, statusLeft(p) - 12 - 72);
 		if (titleRight) room = std::min(room, titleRight - 12 - 72);
-		drawTextMid(title, 2, CREAM, 72, 32, room);
+		drawTextMid(title, 2, TEXT, 72, 32, room);
 		drawBattery(616, 24, p);
 	}
 
 	void Ui::drawTab(Rect r, const char* name, bool active)
 	{
-		fill(r, active ? YELLOW : TEAL);
-		drawTextMid(name, 1, active ? BG : CREAM, r.x + r.w / 2, r.y + r.h / 2, r.w - 8, 2);
+		drawBox(r, active ? ACCENT : BUTTON, R_BUTTON);
+		drawTextMid(name, 1, active ? ON_ACCENT : TEXT, r.x + r.w / 2, r.y + r.h / 2, r.w - 8, 2);
 	}
 
 	void Ui::drawHints(const std::vector<Hint>& hints)
@@ -3442,7 +3558,7 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 		{
 			if (!h.key.empty())
 			{
-				drawTextMid(h.key, 0, YELLOW, x, FOOT_Y);
+				drawTextMid(h.key, 0, ACCENT, x, FOOT_Y);
 				x += w(h.key) + 7;
 			}
 			drawTextMid(h.verb, 0, DIM, x, FOOT_Y);
@@ -3457,19 +3573,18 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 
 	void Ui::drawFocus(Rect r)
 	{
-		// the cursor: the row lit, a yellow edge on its left
-		fill(r, TEAL);
-		fill({r.x, r.y, 4, r.h}, YELLOW);
+		// the cursor: the row lit as a button, its edge yellow
+		drawBox(r, BUTTON, R_BUTTON, true);
 	}
 
 	void Ui::drawScrollBar(int top, int height, int first, int shown, int total)
 	{
 		// along the right edge: where the window is in the list (nothing when it all shows)
 		if (total <= shown) return;
-		fill({630, top, 4, height}, SURFACE);
+		fillRound({630, top, 4, height}, SURFACE, 2);
 		int h = std::max(16, height * shown / total);
 		int y = top + (height - h) * first / std::max(1, total - shown);
-		fill({630, y, 4, h}, DIM);
+		fillRound({630, y, 4, h}, DIM, 2);
 	}
 
 	void Ui::drawEmpty(const Glyph& g, const std::string& title, const std::string& sub, const char* action, const Glyph* btn)
@@ -3478,7 +3593,7 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 		// in the middle of the page: a big mark, what it is, what to do
 		int cy = action ? 196 : 216;
 		drawGlyphMid(g, W / 2, cy - 36, DIM, 4);
-		drawTextMid(title, 1, CREAM, W / 2, cy + 16, 560, 2);
+		drawTextMid(title, 1, TEXT, W / 2, cy + 16, 560, 2);
 		for (size_t a = 0, k = 0; a <= sub.size() && !sub.empty(); k++)
 		{
 			size_t e = std::min(sub.find('\n', a), sub.size());
@@ -3489,12 +3604,11 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 		{
 			Rect b = buttonRect(EMPTY_BTN);
 			bool at = cursor == 0;
-			fill(b, pressedBtn == EMPTY_BTN ? PRESSED : TEAL);
-			if (at) { fill({b.x, b.y, b.w, 2}, YELLOW); fill({b.x, b.y + b.h - 2, b.w, 2}, YELLOW); fill({b.x, b.y, 2, b.h}, YELLOW); fill({b.x + b.w - 2, b.y, 2, b.h}, YELLOW); }
+			drawBox(b, pressedBtn == EMPTY_BTN ? PRESSED : BUTTON, R_BUTTON, at);
 			int tw = (int)std::lround(textWidth(action, 1) / sx), gw = glyphW(bg);
 			int x = b.x + b.w / 2 - (tw + gw + 10) / 2;
-			drawGlyphMid(bg, x + gw / 2, b.y + b.h / 2, at ? YELLOW : CREAM);
-			drawTextMid(action, 1, at ? YELLOW : CREAM, x + gw + 10, b.y + b.h / 2);
+			drawGlyphMid(bg, x + gw / 2, b.y + b.h / 2, at ? ACCENT : TEXT);
+			drawTextMid(action, 1, at ? ACCENT : TEXT, x + gw + 10, b.y + b.h / 2);
 		}
 	}
 
@@ -3517,18 +3631,17 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 	{
 		// over the page, dimmed: a panel, its title on top; the footer is the dialog's (its hints drawn after)
 		fill({0, 0, W, H}, {0, 0, 0, 170});
-		fill({0, 436, W, 44}, {0x08, 0x07, 0x09, 255});	// the page's hints gone (as dark as the rest): the dialog's go there
-		fill(box, TEAL);
-		fill({box.x + 2, box.y + 2, box.w - 4, box.h - 4}, SURFACE);
-		if (!title.empty()) drawTextMid(title, 1, YELLOW, box.x + box.w / 2, box.y + 30, box.w - 40, 2);
+		fill({0, 436, W, 44}, BG);	// the page's hints gone (as dark as the rest): the dialog's go there
+		drawBox(box, SURFACE, R_DIALOG);
+		if (!title.empty()) drawTextMid(title, 1, ACCENT, box.x + box.w / 2, box.y + 30, box.w - 40, 2);
 	}
 
 	void Ui::drawDialogRow(Rect r, const Glyph* g, const std::string& label, bool at, bool pressed, SDL_Color ink,
 		const std::string& note, SDL_Color noteInk)
 	{
-		if (pressed) fill(r, PRESSED);
+		if (pressed) drawBox(r, PRESSED, R_BUTTON);
 		else if (at) drawFocus(r);
-		SDL_Color c = at && ink.r == CREAM.r && ink.g == CREAM.g ? YELLOW : ink;
+		SDL_Color c = at && ink.r == TEXT.r && ink.g == TEXT.g ? ACCENT : ink;
 		int x = r.x + 20, noteW = 0;
 		if (g)
 		{
@@ -3537,7 +3650,7 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 		}
 		if (!note.empty())
 		{
-			drawTextMid(note, 0, noteInk.a ? noteInk : at ? DIM_TEAL : DIM, r.x + r.w - 14, r.y + r.h / 2, 0, 1);
+			drawTextMid(note, 0, noteInk.a ? noteInk : at ? DIM_ON : DIM, r.x + r.w - 14, r.y + r.h / 2, 0, 1);
 			noteW = (int)std::lround(textWidth(note, 0) / sx) + 20;
 		}
 		drawTextMid(label, 1, c, x, r.y + r.h / 2, r.x + r.w - x - 12 - noteW);
@@ -3546,7 +3659,7 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 	void Ui::drawTabs(const Player& p)
 	{
 		static const char* names[TABS] = {"Settings", "About", "Quit", "Playing"};
-		fill({0, 0, W, 62}, BG);	// over whatever the page drew there
+		fill({0, 0, W, 57}, BG);	// over whatever the page drew there (a settings group's neighbours start at 58)
 		webInd = {0, 0, 0, 0};	// (the battery and its marks gone under it: drawn again)
 		drawBackIcon();
 		auto tabs = menuTabs(p);
@@ -3756,17 +3869,12 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 				bool at = i == cursor;
 				bool style = r[i].id == STYLE_ROW;
 				// the subtitle style: apart from the tracks, a line above it
-				if (style || (form && r[i].id == FORM_TEST)) fill({32, y - 3, 576, 1}, {0x3A, 0x38, 0x44, 255});
-				// selecting: a ticked row on a lighter ground; Move's block lit, yellow either side
+				if (style || (form && r[i].id == FORM_TEST)) fill({32, y - 3, 576, 1}, RULE);
+				// selecting: a ticked row on a lighter ground; Move's block lit as the cursor is
 				bool block = sel && ((moving && plSel.count(i)) || (plDrag.on && dragSel.count(i)));
-				if (block)
-				{
-					fill({16, y, 608, ROW_H - 4}, TEAL);
-					fill({16, y, 4, ROW_H - 4}, YELLOW);
-					fill({620, y, 4, ROW_H - 4}, YELLOW);
-				}
+				if (block) drawFocus({16, y, 608, ROW_H - 4});
 				else if (at && !(sel && plDrag.on)) drawFocus({16, y, 608, ROW_H - 4});
-				else if (sel && selTicked(i)) fill({16, y, 608, ROW_H - 4}, SURFACE);
+				else if (sel && selTicked(i)) drawBox({16, y, 608, ROW_H - 4}, SURFACE, R_BUTTON);
 				if (browse && r[i].id == PL_ITEM)
 				{
 					drawPlRow(i, mid, at || block);
@@ -3777,12 +3885,12 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 				std::string note = browse && r[i].id == 3 ? (clearArmed ? "Press again to clear" : "Press twice") : r[i].note;
 				bool placeholder = !note.empty() && note[0] == DIM_NOTE;
 				if (placeholder) note.erase(0, 1);
-				SDL_Color soft = at ? DIM_TEAL : DIM;
+				SDL_Color soft = at ? DIM_ON : DIM;
 				if (!note.empty())
 				{
 					// a resume time and a size, a count, a root's path: right-aligned and short; a form's value, longer
 					int w = form ? 380 : 260;
-					SDL_Color c = clearArmed && r[i].id == 3 ? YELLOW : form && !placeholder ? (r[i].id == FORM_TEST && note == "It works" ? YELLOW : CREAM) : soft;
+					SDL_Color c = clearArmed && r[i].id == 3 ? ACCENT : form && !placeholder ? (r[i].id == FORM_TEST && note == "It works" ? ACCENT : TEXT) : soft;
 					// a path keeps its end
 					std::string shown = !form && note[0] == '/' ? elideLeft(note, 0, w) : note;
 					drawTextMid(shown, form ? 1 : 0, c, 608, mid, w, 1);
@@ -3792,44 +3900,44 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 				// adding: a file's box (none for a photo: it can't go in, dimmed; nor a folder), the marks after it
 				bool boxes = sel && selMode == SEL_ADD;
 				bool inert = sel && r[i].id == 2 && !selTickable(i);
-				if (boxes && selTickable(i)) drawGlyphMid(selTicked(i) ? G_BOX_ON : G_BOX, 40, mid, selTicked(i) ? YELLOW : DIM);
+				if (boxes && selTickable(i)) drawGlyphMid(selTicked(i) ? G_BOX_ON : G_BOX, 40, mid, selTicked(i) ? ACCENT : DIM);
 				if (browse)
 				{
 					// what the row is, as a mark before its name
 					RowIcon icon = rowIcon(i);
 					if (icon != ICON_NONE)
 					{
-						drawRowIcon(icon, boxes ? 60 : 32, mid - 10, icon == ICON_LIKED ? YELLOW : inert || (icon == ICON_NEW && !at) ? DIM
-							: at ? YELLOW : CREAM);
+						drawRowIcon(icon, boxes ? 60 : 32, mid - 10, icon == ICON_LIKED ? ACCENT : inert || (icon == ICON_NEW && !at) ? DIM
+							: at ? ACCENT : TEXT);
 						textX = boxes ? 94 : 66;
 					}
 					// a liked file: a small heart before its note
 					if (r[i].id == 2 && plStore && i < (int)browsePaths.size() && plStore->isLiked(browsePaths[i]))
 					{
-						drawGlyphMid(G_HEART_S, noteW ? 608 - noteW : 601, mid, YELLOW);
+						drawGlyphMid(G_HEART_S, noteW ? 608 - noteW : 601, mid, ACCENT);
 						noteW += 22;
 					}
 				}
 				else if (style)
 				{
-					drawGlyphMid(G_GEAR, 43, mid, at ? YELLOW : CREAM);
-					drawGlyphMid(G_RIGHT, 604, mid, at ? YELLOW : DIM);
+					drawGlyphMid(G_GEAR, 43, mid, at ? ACCENT : TEXT);
+					drawGlyphMid(G_RIGHT, 604, mid, at ? ACCENT : DIM);
 					textX = 66;
 				}
 				else if (r[i].id >= 0)
 				{
 					// the track in use: a filled ring (the cursor is only where it is)
-					drawGlyphMid(r[i].selected ? G_RADIO_ON : G_RADIO, 41, mid, r[i].selected ? YELLOW : at ? CREAM : DIM);
+					drawGlyphMid(r[i].selected ? G_RADIO_ON : G_RADIO, 41, mid, r[i].selected ? ACCENT : at ? TEXT : DIM);
 					textX = 66;
 				}
-				SDL_Color ink = (r[i].id < 0 && !style) || inert ? soft : at ? YELLOW : r[i].id == PL_NEW ? DIM_TEAL : CREAM;
+				SDL_Color ink = (r[i].id < 0 && !style) || inert ? soft : at ? ACCENT : r[i].id == PL_NEW ? DIM_ON : TEXT;
 				drawTextMid(r[i].label, 1, ink, textX, mid, 600 - textX - noteW);
 			}
 		// a dragged row: where it lands, a line in the gap (none while it would stay where it is)
 		if (sel && plDrag.on && !dragSel.empty() && dragTarget() != *dragSel.begin())
 		{
 			int slot = dragSlot();
-			if (slot >= scroll && slot <= scroll + ROWS_SHOWN) fill({16, ROW_Y + (slot - scroll) * ROW_H - 3, 608, 2}, YELLOW);
+			if (slot >= scroll && slot <= scroll + ROWS_SHOWN) fillRound({16, ROW_Y + (slot - scroll) * ROW_H - 3, 608, 2}, ACCENT, 1);
 		}
 		int n = (int)r.size();
 		drawScrollBar(ROW_Y, ROWS_SHOWN * ROW_H - 4, scroll, ROWS_SHOWN, n);
@@ -3871,26 +3979,26 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 	{
 		const std::string& path = browsePaths[i];
 		int miss = plMissingAt(i);
-		SDL_Color soft = at ? DIM_TEAL : DIM;
+		SDL_Color soft = at ? DIM_ON : DIM;
 		// selecting: its box where its number was, its grip on the right (Move's block: its arrows, yellow)
 		bool edit = selMode == SEL_EDIT && !inMenu;
 		bool block = edit && ((moving && plSel.count(i)) || (plDrag.on && dragSel.count(i)));
 		// (Liked has no numbers: its order is the likes', newest first)
 		bool liked = plIsLiked(plCur.file);
-		if (edit) drawGlyphMid(plSel.count(i) ? G_BOX_ON : G_BOX, 40, mid, plSel.count(i) ? YELLOW : soft);
+		if (edit) drawGlyphMid(plSel.count(i) ? G_BOX_ON : G_BOX, 40, mid, plSel.count(i) ? ACCENT : soft);
 		else if (!liked) drawTextMid(std::to_string(i + 1), 0, soft, 56, mid, 0, 1);
-		if (edit) drawGlyphMid(block ? G_MOVE : G_GRIP, 600, mid, block ? YELLOW : soft);
+		if (edit) drawGlyphMid(block ? G_MOVE : G_GRIP, 600, mid, block ? ACCENT : soft);
 		int right = edit ? 572 : 608;
 		// its number in the playlist, its mark (an alert when it isn't there), its name, where it is
 		const Glyph& g = miss ? G_ALERT : isAudioFile(path) ? G_NOTE : G_FILM;
 		int gx = liked && !edit ? 43 : 64 + 11;
-		drawGlyphMid(g, gx, mid, miss ? DIM : at ? YELLOW : CREAM);
+		drawGlyphMid(g, gx, mid, miss ? DIM : at ? ACCENT : TEXT);
 		// a missing one says so in its name, "[Gone]" (why: its menu's line), not on the right
 		std::string note = miss ? "" : browseRows[i].note;
 		int noteW = 0;
 		if (!note.empty())
 		{
-			drawTextMid(note, 0, miss ? RED : soft, right, mid, 220, 1);
+			drawTextMid(note, 0, miss ? DANGER : soft, right, mid, 220, 1);
 			int w = std::min(220, (int)std::lround(textWidth(note, 0) / sx));
 			noteW = w + 16;
 			// a network item: the server's name, marked as one
@@ -3904,10 +4012,10 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 		if (miss)
 		{
 			static const std::string GONE = "[Gone] ";
-			drawTextMid(GONE, 1, RED, x, mid);
+			drawTextMid(GONE, 1, DANGER, x, mid);
 			x += (int)std::lround(textWidth(GONE, 1) / sx);
 		}
-		drawTextMid(browseRows[i].label, 1, miss ? soft : at ? YELLOW : CREAM, x, mid, std::max(0, right - 8 - x - noteW));
+		drawTextMid(browseRows[i].label, 1, miss ? soft : at ? ACCENT : TEXT, x, mid, std::max(0, right - 8 - x - noteW));
 	}
 
 	void Ui::drawTracksHeader(const Player& p)
@@ -3920,21 +4028,21 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 		{
 			Rect r = tracksTabRect(t);
 			if (t == tracksTab) { drawTab(r, NAMES[t], true); continue; }
-			fill(r, TEAL);
+			drawBox(r, BUTTON, R_BUTTON);
 			const char* key = t == TRACKS_AUDIO ? "Y" : "X";
 			int kw = (int)std::lround(textWidth(key, 0) / sx), mid = r.y + r.h / 2;
 			int left = r.x, right = r.x + r.w;
 			if (t == TRACKS_AUDIO)
 			{
-				drawTextMid(key, 0, YELLOW, r.x + 14, mid);
+				drawTextMid(key, 0, ACCENT, r.x + 14, mid);
 				left = r.x + 14 + kw;
 			}
 			else
 			{
-				drawTextMid(key, 0, YELLOW, r.x + r.w - 14, mid, 0, 1);
+				drawTextMid(key, 0, ACCENT, r.x + r.w - 14, mid, 0, 1);
 				right = r.x + r.w - 14 - kw;
 			}
-			drawTextMid(NAMES[t], 1, CREAM, (left + right) / 2, mid, right - left - 8, 2);
+			drawTextMid(NAMES[t], 1, TEXT, (left + right) / 2, mid, right - left - 8, 2);
 		}
 		drawBattery(616, 24, p);
 	}
@@ -3955,25 +4063,24 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 			int y = ROW_Y + (i - scroll) * ROW_H, mid = y + 22;
 			bool focus = i == at, now = i == cur;
 			if (focus) drawFocus({16, y, 608, ROW_H - 4});
-			SDL_Color soft = focus ? DIM_TEAL : DIM;
+			SDL_Color soft = focus ? DIM_ON : DIM;
 			// the one playing: its mark, as the status line has it
-			if (now) drawGlyphMid(p.paused ? G_PAUSE : G_PLAY, 40, mid, YELLOW);
-			drawTextMid(std::to_string(i + 1), 0, now ? YELLOW : soft, 90, mid, 0, 1);
+			if (now) drawGlyphMid(p.paused ? G_PAUSE : G_PLAY, 40, mid, ACCENT);
+			drawTextMid(std::to_string(i + 1), 0, now ? ACCENT : soft, 90, mid, 0, 1);
 			const Chapter& c = p.chapters[i];
 			std::string start = formatTime(c.time);
 			drawTextMid(start, 0, soft, 608, mid, 0, 1);
 			int timeW = (int)std::lround(textWidth(start, 0) / sx);
 			int maxW = 608 - 16 - timeW - 104;
 			if (chapterUntitled(c.title)) drawTextMid(chapterLabel(c, i + 1), 1, soft, 104, mid, maxW);
-			else drawTextMid(c.title, 1, focus ? YELLOW : CREAM, 104, mid, maxW);
+			else drawTextMid(c.title, 1, focus ? ACCENT : TEXT, 104, mid, maxW);
 			if (now)
 			{
 				// how far into it: up to the next one's start, or the file's end
 				double end = i + 1 < n ? p.chapters[i + 1].time : p.duration;
 				double at = shownPosition(p);
 				double f = end > c.time && at >= 0 ? std::clamp((at - c.time) / (end - c.time), 0.0, 1.0) : 0;
-				fill({104, y + 37, 504, 3}, focus ? BG : SCREEN);
-				fill({104, y + 37, (int)(504 * f), 3}, YELLOW);
+				drawLevel({104, y + 37, 504, 3}, (int)(504 * f), focus ? BG : TRACK);
 			}
 		}
 		drawScrollBar(ROW_Y, ROWS_SHOWN * ROW_H - 4, scroll, ROWS_SHOWN, n);
@@ -4059,11 +4166,11 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 		{
 			int y = INFO_Y + (i - scroll) * INFO_H, mid = y + INFO_H / 2;
 			const InfoLine& l = infoLines[i];
-			if (l.header) drawTextMid(l.label, 1, YELLOW, 24, mid);
+			if (l.header) drawTextMid(l.label, 1, ACCENT, 24, mid);
 			else
 			{
 				drawTextMid(l.label, 0, DIM, 32, mid, INFO_VALUE_X - 40);
-				drawTextMid(l.text, 0, CREAM, INFO_VALUE_X, mid);
+				drawTextMid(l.text, 0, TEXT, INFO_VALUE_X, mid);
 			}
 		}
 		drawScrollBar(INFO_Y, INFO_SHOWN * INFO_H, scroll, INFO_SHOWN, (int)infoLines.size());
@@ -4081,16 +4188,9 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 			{
 				Rect t = groupRect(g);
 				bool at = g == cursor;
-				fill(t, pressedBtn == 400 + g ? PRESSED : at ? TEAL : SURFACE);
-				if (at)
-				{
-					fill({t.x, t.y, t.w, 2}, YELLOW);
-					fill({t.x, t.y + t.h - 2, t.w, 2}, YELLOW);
-					fill({t.x, t.y, 2, t.h}, YELLOW);
-					fill({t.x + t.w - 2, t.y, 2, t.h}, YELLOW);
-				}
-				drawGlyphMid(*MARKS[g], t.x + 34, t.y + t.h / 2, at ? YELLOW : CREAM, 3);
-				drawTextMid(GROUP_NAMES[g].name, 1, at ? YELLOW : CREAM, t.x + 66, t.y + 27, t.w - 76);
+				drawBox(t, pressedBtn == 400 + g ? PRESSED : at ? BUTTON : SURFACE, R_TILE, at);
+				drawGlyphMid(*MARKS[g], t.x + 34, t.y + t.h / 2, at ? ACCENT : TEXT, 3);
+				drawTextMid(GROUP_NAMES[g].name, 1, at ? ACCENT : TEXT, t.x + 66, t.y + 27, t.w - 76);
 				std::string about = GROUP_NAMES[g].about;
 				if (g == GROUP_WEB)
 				{
@@ -4098,32 +4198,32 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 					about = !p.settings.webDashboard ? "Off" : n == 0 ? "On \xC2\xB7 No browser yet"
 						: "On \xC2\xB7 " + std::to_string(n) + (n == 1 ? " browser" : " browsers");
 				}
-				drawTextMid(about, 0, at ? DIM_TEAL : DIM, t.x + 66, t.y + 52, t.w - 76);
+				drawTextMid(about, 0, at ? DIM_ON : DIM, t.x + 66, t.y + 52, t.w - 76);
 			}
 			drawHints({{"D-PAD", "Move"}, {"A", "Open"}, {"B", "Close"}, {"L/R", "Tabs"}});
 			return;
 		}
 		// the group in the middle, the ones before and after it either side: a tap (or X / Y) away
 		static const char* SHORT[GROUPS] = {"Subtitles", "Music", "Photos", "Remember", "Files", "Controls", "Updates", "Web"};
-		drawTextMid(GROUP_NAMES[setGroup].name, 1, YELLOW, W / 2, 73, 248, 2);
+		drawTextMid(GROUP_NAMES[setGroup].name, 1, ACCENT, W / 2, 73, 248, 2);
 		for (int k = 0; k < 2; k++)
 		{
 			Rect c = buttonRect(k ? GROUP_NEXT : GROUP_PREV);
 			int g = (setGroup + (k ? 1 : GROUPS - 1)) % GROUPS;
-			fill(c, pressedBtn == (k ? GROUP_NEXT : GROUP_PREV) ? PRESSED : SURFACE);
+			drawBox(c, pressedBtn == (k ? GROUP_NEXT : GROUP_PREV) ? PRESSED : SURFACE, R_BUTTON);
 			const char* key = k ? "X" : "Y";	// Y is on the left of the buttons, as its chip is
 			int kw = (int)std::lround(textWidth(key, 0) / sx);
 			if (k)
 			{
-				drawTextMid(key, 0, YELLOW, c.x + c.w - 10 - kw, c.y + c.h / 2);
-				drawGlyphMid(G_RIGHT, c.x + c.w - 24 - kw, c.y + c.h / 2, CREAM);
-				drawTextMid(SHORT[g], 0, CREAM, c.x + 12, c.y + c.h / 2, c.w - 44 - kw);
+				drawTextMid(key, 0, ACCENT, c.x + c.w - 10 - kw, c.y + c.h / 2);
+				drawGlyphMid(G_RIGHT, c.x + c.w - 24 - kw, c.y + c.h / 2, TEXT);
+				drawTextMid(SHORT[g], 0, TEXT, c.x + 12, c.y + c.h / 2, c.w - 44 - kw);
 			}
 			else
 			{
-				drawTextMid(key, 0, YELLOW, c.x + 10, c.y + c.h / 2);
-				drawGlyphMid(G_LEFT, c.x + 24 + kw, c.y + c.h / 2, CREAM);
-				drawTextMid(SHORT[g], 0, CREAM, c.x + c.w - 12, c.y + c.h / 2, c.w - 44 - kw, 1);
+				drawTextMid(key, 0, ACCENT, c.x + 10, c.y + c.h / 2);
+				drawGlyphMid(G_LEFT, c.x + 24 + kw, c.y + c.h / 2, TEXT);
+				drawTextMid(SHORT[g], 0, TEXT, c.x + c.w - 12, c.y + c.h / 2, c.w - 44 - kw, 1);
 			}
 		}
 		auto rows = settingRows();
@@ -4148,26 +4248,26 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 						: updater->state() == Updater::State::Downloading ? (pct >= 0 ? std::to_string(pct) + "%" : "Downloading")
 						: updater->state() == Updater::State::Failed ? "Try again" : "Download";
 				}
-				drawTextMid(label, 1, at ? YELLOW : CREAM, 32, mid, 320);
-				drawTextMid(value, 1, at ? YELLOW : DIM_TEAL, 608, mid, 260, 1);
+				drawTextMid(label, 1, at ? ACCENT : TEXT, 32, mid, 320);
+				drawTextMid(value, 1, at ? ACCENT : DIM_ON, 608, mid, 260, 1);
 				continue;
 			}
 			if (row == SOUND_ROW)
 			{
 				// a page of its own: what it's set to, and a chevron (no arrows: nothing to step)
-				drawTextMid("Sound", 1, at ? YELLOW : CREAM, 32, mid, 320);
-				drawTextMid(soundSummary(p.settings), 1, at ? YELLOW : p.settings.eqOn || p.settings.soundFx != SoundFx::None ? CREAM : DIM,
+				drawTextMid("Sound", 1, at ? ACCENT : TEXT, 32, mid, 320);
+				drawTextMid(soundSummary(p.settings), 1, at ? ACCENT : p.settings.eqOn || p.settings.soundFx != SoundFx::None ? TEXT : DIM,
 					584, mid, 240, 1);
-				drawGlyphMid(G_RIGHT, 604, mid, at ? YELLOW : DIM);
+				drawGlyphMid(G_RIGHT, 604, mid, at ? ACCENT : DIM);
 				continue;
 			}
 			if (row == CLEAR_ROW)
 			{
 				// an action, not a value: no arrows
 				size_t n = p.history().items().size();
-				drawTextMid("Clear play history", 1, at ? YELLOW : CREAM, 32, mid, 320);
+				drawTextMid("Clear play history", 1, at ? ACCENT : TEXT, 32, mid, 320);
 				drawTextMid(clearArmed ? "Press again to clear" : n ? std::to_string(n) + (n == 1 ? " file" : " files") : "Empty", 1,
-					clearArmed ? YELLOW : at ? DIM_TEAL : DIM, 608, mid, 0, 1);
+					clearArmed ? ACCENT : at ? DIM_ON : DIM, 608, mid, 0, 1);
 				continue;
 			}
 			if (k >= 0 && k < STYLE_KEYS)
@@ -4216,11 +4316,11 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 				label = REMEMBER_LABELS[row - TOGGLE_ROW];
 				value = p.settings.*REMEMBER[row - TOGGLE_ROW] ? "On" : "Off";
 			}
-			drawTextMid(label, 1, at ? YELLOW : CREAM, 32, mid, 330);
+			drawTextMid(label, 1, at ? ACCENT : TEXT, 32, mid, 330);
 			// arrows on every row: they are where a finger steps back and on
-			drawTextMid("<", 1, at ? YELLOW : DIM, SET_ARROW_X, mid);
-			drawTextMid(value, 1, at ? YELLOW : CREAM, 490, mid, 196, 2);
-			drawTextMid(">", 1, at ? YELLOW : DIM, 608, mid, 0, 1);
+			drawTextMid("<", 1, at ? ACCENT : DIM, SET_ARROW_X, mid);
+			drawTextMid(value, 1, at ? ACCENT : TEXT, 490, mid, 196, 2);
+			drawTextMid(">", 1, at ? ACCENT : DIM, 608, mid, 0, 1);
 		}
 		// what the row under the cursor does, in a line or two above the footer
 		std::string help = cursor >= 0 && cursor < (int)rows.size() ? settingHelp(rows[cursor]) : "";
@@ -4233,7 +4333,7 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 			if (s && (s->codec == "ass" || s->codec == "ssa"))
 			{
 				help = "This video's subtitles are styled (ASS): they keep their own look";
-				helpInk = YELLOW;
+				helpInk = ACCENT;
 			}
 		}
 		if (setGroup == GROUP_UPDATES && updater && cursor < (int)rows.size() && (rows[cursor] == CHECK_ROW || rows[cursor] == INSTALL_ROW))
@@ -4243,7 +4343,7 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 				: updater->state() == Updater::State::Failed ? updater->message()
 				: updater->state() == Updater::State::Ready ? "Restart now, or it's put in place at the next start"
 				: "Downloads from GitHub, checked before anything changes";
-			helpInk = updater->state() == Updater::State::Failed ? YELLOW : DIM;
+			helpInk = updater->state() == Updater::State::Failed ? ACCENT : DIM;
 		}
 		auto lines = wrapText(help, 0, 592, 2);
 		for (size_t i = 0; i < lines.size(); i++) drawTextMid(lines[i], 0, helpInk, 24, HELP_Y + (int)i * 22, 592);
@@ -4259,7 +4359,7 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 	// panel (mpv's sizes are in pixels of a 720-line picture)
 	void Ui::drawPreview(const SubStyle& st, Rect box)
 	{
-		fill(box, SCREEN);
+		fillRound(box, SCREEN, R_BUTTON);
 		SubStyleLook look = subStyleLook(st);
 		double toPanel = H / 720.0 * sy;
 		std::string path = fontsDir + "/" + look.fontFile;
@@ -4302,8 +4402,8 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 		const Player::PhotoView& v = p.photo();
 		if (!p.error.empty())
 		{
-			drawText("This photo can't be shown:", 0, RED, pan.x + 12, pan.y + 12, pan.w - 24);
-			drawText(p.error, 0, RED, pan.x + 12, pan.y + 40, pan.w - 24);
+			drawText("This photo can't be shown:", 0, DANGER, pan.x + 12, pan.y + 12, pan.w - 24);
+			drawText(p.error, 0, DANGER, pan.x + 12, pan.y + 40, pan.w - 24);
 		}
 		else if (p.thumbW > 0)
 		{
@@ -4328,10 +4428,10 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 				double hx = std::min(0.5, 0.5 / sc.x), hy = std::min(0.5, 0.5 / sc.y);
 				int bx = tr.x + (int)std::lround(tr.w * (0.5 - v.panX - hx)), by = tr.y + (int)std::lround(tr.h * (0.5 - v.panY - hy));
 				int bw = std::max(4, (int)std::lround(tr.w * 2 * hx)), bh = std::max(4, (int)std::lround(tr.h * 2 * hy));
-				fill({bx, by, bw, 2}, YELLOW);
-				fill({bx, by + bh - 2, bw, 2}, YELLOW);
-				fill({bx, by, 2, bh}, YELLOW);
-				fill({bx + bw - 2, by, 2, bh}, YELLOW);
+				fill({bx, by, bw, 2}, ACCENT);
+				fill({bx, by + bh - 2, bw, 2}, ACCENT);
+				fill({bx, by, 2, bh}, ACCENT);
+				fill({bx + bw - 2, by, 2, bh}, ACCENT);
 			}
 		}
 		else if (p.thumbPending()) drawText("Loading" + std::string(SDL_GetTicks() / 400 % 4, '.'), 1, DIM, pan.x + pan.w / 2, pan.y + pan.h / 2 - 12, 0, 2);
@@ -4340,7 +4440,7 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 		// under the pan area: the zoom and the size; how to use it
 		std::string zoom = "Zoom " + std::to_string((int)std::lround(v.zoom * 100)) + "%";
 		if (p.photoWidth() > 0) zoom += "   " + std::to_string(p.photoWidth()) + " x " + std::to_string(p.photoHeight());
-		drawText(zoom, 0, CREAM, pan.x, pan.y + pan.h + 10, pan.w);
+		drawText(zoom, 0, TEXT, pan.x, pan.y + pan.h + 10, pan.w);
 		drawText(maxPan(sc.x) > 0 || maxPan(sc.y) > 0 ? (p.settings.dragBox ? "Drag the box · double-tap: zoom out" : "Drag to move · double-tap: zoom out")
 			: "Double-tap: zoom in",
 			0, DIM, pan.x, pan.y + pan.h + 36, pan.w);
@@ -4359,10 +4459,10 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 		for (int i = 0; i < PHOTO_BTNS; i++)
 		{
 			Rect b = photoBtn(i, p);
-			fill(b, pressedBtn == PHOTO_BTN + i ? PRESSED : TEAL);
+			drawBox(b, pressedBtn == PHOTO_BTN + i ? PRESSED : BUTTON, R_BUTTON);
 			bool hint = hints && *btns[i].hint;
-			drawText(btns[i].label, 1, btns[i].off ? DIM : CREAM, b.x + b.w / 2, b.y + (hint ? 5 : 15), b.w - 6, 2);
-			if (hint) drawText(btns[i].hint, 0, btns[i].off ? DIM : YELLOW, b.x + b.w / 2, b.y + 33, b.w - 6, 2);
+			drawText(btns[i].label, 1, btns[i].off ? DIM : TEXT, b.x + b.w / 2, b.y + (hint ? 5 : 15), b.w - 6, 2);
+			if (hint) drawText(btns[i].hint, 0, btns[i].off ? DIM : ACCENT, b.x + b.w / 2, b.y + 33, b.w - 6, 2);
 		}
 		if (p.count() > 1)
 		{
@@ -4373,8 +4473,8 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 		drawLeave(p);
 		// along the bottom, beside it: what A does here, or what a second B would do
 		const char* leave = browserMode ? "close" : "quit";
-		if (quitArmed) drawTextMid(std::string(hints ? "Press B again to " : "Tap again to ") + leave, 0, YELLOW, 24, 450, 430);
-		else if (hints) drawTextMid("A", 0, YELLOW, 24, 450), drawTextMid("Zoom to 2x, or the whole photo", 0, DIM, 24 + (int)std::lround(textWidth("A", 0) / sx) + 7, 450, 400);
+		if (quitArmed) drawTextMid(std::string(hints ? "Press B again to " : "Tap again to ") + leave, 0, ACCENT, 24, 450, 430);
+		else if (hints) drawTextMid("A", 0, ACCENT, 24, 450), drawTextMid("Zoom to 2x, or the whole photo", 0, DIM, 24 + (int)std::lround(textWidth("A", 0) / sx) + 7, 450, 400);
 	}
 
 	std::vector<std::string> Ui::wrapText(const std::string& text, int size, int maxW, int maxLines) const
@@ -4409,13 +4509,13 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 		// a label (a glyph before it), the button that does the same under it in yellow (Button hotkeys on)
 		bool hint = key && *key;
 		int mid = hint ? b.y + b.h * 2 / 5 : b.y + b.h / 2;
-		SDL_Color ink = off ? DIM : lit ? YELLOW : CREAM;
+		SDL_Color ink = off ? DIM : lit ? ACCENT : TEXT;
 		int tw = label.empty() ? 0 : std::min(b.w - 12, (int)std::lround(textWidth(label, size) / sx));
 		int gw = g ? glyphW(*g) : 0, gap = g && tw ? 8 : 0;
 		int x = b.x + b.w / 2 - (gw + gap + tw) / 2;
 		if (g) drawGlyphMid(*g, x + gw / 2, mid, ink);
 		if (tw) drawTextMid(label, size, ink, x + gw + gap, mid, b.w - 12 - gw - gap);
-		if (hint) drawTextMid(key, 0, off ? DIM : YELLOW, b.x + b.w / 2, b.y + b.h * 4 / 5 - 2, b.w - 6, 2);
+		if (hint) drawTextMid(key, 0, off ? DIM : ACCENT, b.x + b.w / 2, b.y + b.h * 4 / 5 - 2, b.w - 6, 2);
 	}
 
 	bool Ui::chapterLineShown(const Player& p) const
@@ -4439,14 +4539,14 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 		// the status line: how it plays (or what went wrong), and on its right the count or what a press does now
 		std::string right = p.count() > 1 ? std::to_string(p.index() + 1) + " / " + std::to_string(p.count()) : "";
 		SDL_Color rightInk = DIM;
-		if (quitArmed) { right = std::string(hotkeys ? "Press B again to " : "Tap again to ") + leave; rightInk = YELLOW; }
-		else if (touchLocked) { right = "Hold the lock 1 s to unlock"; rightInk = YELLOW; }
+		if (quitArmed) { right = std::string(hotkeys ? "Press B again to " : "Tap again to ") + leave; rightInk = ACCENT; }
+		else if (touchLocked) { right = "Hold the lock 1 s to unlock"; rightInk = ACCENT; }
 		if (err)
 		{
-			drawGlyphMid(G_ALERT, 35, STATUS_Y, RED);
-			drawTextMid("Can't play this file", 1, RED, 56, STATUS_Y, 300);
+			drawGlyphMid(G_ALERT, 35, STATUS_Y, DANGER);
+			drawTextMid("Can't play this file", 1, DANGER, 56, STATUS_Y, 300);
 			auto lines = wrapText(p.error, 0, 592, 2);
-			for (size_t i = 0; i < lines.size(); i++) drawTextMid(lines[i], 0, CREAM, 24, STATUS_Y + 32 + (int)i * 24, 592);
+			for (size_t i = 0; i < lines.size(); i++) drawTextMid(lines[i], 0, TEXT, 24, STATUS_Y + 32 + (int)i * 24, 592);
 		}
 		else
 		{
@@ -4458,28 +4558,27 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 			int x = 24;
 			if (!p.loading())
 			{
-				drawGlyphMid(p.paused && !(predicting(p) && browserPos.playing) ? G_PAUSE : G_PLAY, 32, STATUS_Y, YELLOW);
+				drawGlyphMid(p.paused && !(predicting(p) && browserPos.playing) ? G_PAUSE : G_PLAY, 32, STATUS_Y, ACCENT);
 				x = 52;
 			}
-			drawTextMid(status, 1, YELLOW, x, STATUS_Y, 330);
+			drawTextMid(status, 1, ACCENT, x, STATUS_Y, 330);
 
 			// the chapter playing, between the status line and the bar: its title (the Y button has its number), or
 			// "Chapter 3 of 12" dim when it has none. A tap opens the list
 			if (chapterLineShown(p))
 			{
 				int c = shownChapter(p), n = (int)p.chapters.size();
-				if (pressedBtn == CHAPTER_BTN) fill(buttonRect(CHAPTER_BTN), PRESSED);
+				if (pressedBtn == CHAPTER_BTN) drawBox(buttonRect(CHAPTER_BTN), PRESSED, R_BUTTON);
 				drawGlyphMid(G_CHAPTERS, 35, CHAPTER_Y, DIM);
 				if (chapterUntitled(p.chapters[c].title))
 					drawTextMid("Chapter " + std::to_string(c + 1) + " of " + std::to_string(n), 0, DIM, 52, CHAPTER_Y, 540);
-				else drawTextMid(p.chapters[c].title, 0, CREAM, 52, CHAPTER_Y, 540);
+				else drawTextMid(p.chapters[c].title, 0, TEXT, 52, CHAPTER_Y, 540);
 				drawGlyphMid(G_RIGHT, 604, CHAPTER_Y, DIM);
 			}
 
 			double pos = shownPosition(p);
 			double frac = dragging ? dragFraction : p.duration > 0 && pos >= 0 ? std::clamp(pos / p.duration, 0.0, 1.0) : 0;
-			fill(BAR, TEAL);
-			fill({BAR.x, BAR.y, (int)(BAR.w * frac), BAR.h}, YELLOW);
+			drawLevel(BAR, (int)(BAR.w * frac), TRACK);
 			// where each chapter starts: a notch through the bar (none too close to the last, none at all past 100:
 			// they'd be a comb)
 			if (p.duration > 0 && p.chapters.size() <= 100)
@@ -4494,8 +4593,8 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 					last = x;
 				}
 			}
-			fill({BAR.x + (int)(BAR.w * frac) - 4, BAR.y - 6, 8, BAR.h + 12}, CREAM);
-			drawText(formatTime(dragging ? dragFraction * p.duration : pos), 1, CREAM, BAR.x, BAR.y + 32);
+			fillRound({BAR.x + (int)(BAR.w * frac) - 4, BAR.y - 6, 8, BAR.h + 12}, KNOB, R_KNOB);
+			drawText(formatTime(dragging ? dragFraction * p.duration : pos), 1, TEXT, BAR.x, BAR.y + 32);
 			drawText(formatTime(p.duration), 1, DIM, BAR.x + BAR.w, BAR.y + 32, 0, 1);
 			// how long is left, at the speed it plays (half at 2x)
 			double left = timeLeft(dragging ? dragFraction * p.duration : pos, p.duration, p.speed);
@@ -4505,7 +4604,7 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 				for (int i = 0; i < (int)p.chapters.size(); i++)
 					if (p.chapters[i].time <= dragFraction * p.duration) under = i;
 			if (under >= 0)
-				drawText(std::to_string(under + 1) + " \xC2\xB7 " + chapterLabel(p.chapters[under], under + 1), 0, CREAM,
+				drawText(std::to_string(under + 1) + " \xC2\xB7 " + chapterLabel(p.chapters[under], under + 1), 0, TEXT,
 					BAR.x + BAR.w / 2, BAR.y + 36, 300, 2);
 			else if (left >= 0) drawText(formatTime(left) + " left", 0, DIM, BAR.x + BAR.w / 2, BAR.y + 36, 0, 2);
 		}
@@ -4522,7 +4621,7 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 			}
 			int vw = (int)std::lround(textWidth(" Chapters", 0) / sx);
 			drawTextMid(" Chapters", 0, DIM, x, STATUS_Y, 0, 1);
-			drawTextMid("L2/R2", 0, YELLOW, x - vw, STATUS_Y, 0, 1);
+			drawTextMid("L2/R2", 0, ACCENT, x - vw, STATUS_Y, 0, 1);
 		}
 
 		for (int r = 0; r < 2; r++)
@@ -4555,15 +4654,15 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 				}
 				// a file that didn't open: only what leads elsewhere (the next file, the menu), and Like / Add
 				if (err && which != Button::L && which != Button::R && which != Button::Start && which != Button::L3 && which != Button::None) off = true;
-				fill(b, pressedBtn == r * 5 + c && !off ? PRESSED : TEAL);
+				drawBox(b, pressedBtn == r * 5 + c && !off ? PRESSED : BUTTON, R_BUTTON);
 				const char* key = hotkeys ? GRID[r][c].hint : nullptr;
 				if (which == Button::X && !p.playingAudio())
 				{
 					// a video's Audio & Subtitles: their two marks, no words
-					SDL_Color ink = off ? DIM : CREAM;
+					SDL_Color ink = off ? DIM : TEXT;
 					drawGlyphMid(G_SPEAKER, b.x + 40, b.y + 24, ink);
 					drawGlyphMid(G_CC, b.x + 66, b.y + 24, ink);
-					if (key) drawTextMid(key, 0, off ? DIM : YELLOW, b.x + b.w / 2, b.y + b.h * 4 / 5 - 2, b.w - 6, 2);
+					if (key) drawTextMid(key, 0, off ? DIM : ACCENT, b.x + b.w / 2, b.y + b.h * 4 / 5 - 2, b.w - 6, 2);
 				}
 				else if (which == Button::Y && (!p.playingAudio() || !p.chapters.empty()))
 				{
@@ -4584,7 +4683,7 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 					// the equalizer and effect are on or off (dim read as a button that can't be pressed); what's set
 					// is on the line under the buttons
 					drawButton({b.x, b.y, b.w, b.h * 4 / 5}, &G_EQ, "FX", nullptr, off, 1);
-					drawTextMid("Sound", 0, off ? DIM : DIM_TEAL, b.x + b.w / 2, b.y + b.h * 4 / 5 - 2, b.w - 6, 2);
+					drawTextMid("Sound", 0, off ? DIM : DIM_ON, b.x + b.w / 2, b.y + b.h * 4 / 5 - 2, b.w - 6, 2);
 				}
 				else if (which == Button::L3)
 				{
@@ -4596,7 +4695,7 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 				{
 					// Add to playlist: no key of its own, so what it adds to under it, as Sound's button says Sound
 					drawButton({b.x, b.y, b.w, b.h * 4 / 5}, g, label, nullptr, off, 1, g == &G_CHECK);
-					drawTextMid("Playlist", 0, off ? DIM : DIM_TEAL, b.x + b.w / 2, b.y + b.h * 4 / 5 - 2, b.w - 6, 2);
+					drawTextMid("Playlist", 0, off ? DIM : DIM_ON, b.x + b.w / 2, b.y + b.h * 4 / 5 - 2, b.w - 6, 2);
 				}
 				// the button it stands for, while the buttons work here (Button hotkeys); else the name alone, centred
 				else drawButton(b, g, label, key, off, 1);
@@ -4616,7 +4715,7 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 		// a video's lines open their tab of Audio & Subtitles: a chevron says so
 		bool video = !p.playingAudio();
 		auto lineEnd = [&](int id, int y) {
-			if (pressedBtn == id) fill(buttonRect(id), PRESSED);
+			if (pressedBtn == id) drawBox(buttonRect(id), PRESSED, R_BUTTON);
 			drawGlyphMid(G_RIGHT, 604, y, DIM);
 		};
 		if (!err)
@@ -4641,7 +4740,7 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 					if (fx)
 					{
 						std::string tail = std::string(st.eqOn ? " \xC2\xB7 " : "") + FX_SHORT[(int)st.soundFx];
-						drawTextMid(tail, 0, CREAM, x, LINE1_Y, 0, 1);
+						drawTextMid(tail, 0, TEXT, x, LINE1_Y, 0, 1);
 						x -= w(tail, 180);
 					}
 					if (!st.eqOn)
@@ -4653,7 +4752,7 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 					{
 						std::string preset = st.eqPreset.empty() ? CUSTOM_NAME : st.eqPreset;
 						int room = std::max(40, 180 - (592 - x));
-						drawTextMid(preset, 0, CREAM, x, LINE1_Y, room, 1);
+						drawTextMid(preset, 0, TEXT, x, LINE1_Y, room, 1);
 						x -= w(preset, room);
 					}
 				}
@@ -4661,7 +4760,7 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 				trackW = x - 8 - glyphW(G_EQ) - 12 - 52;
 			}
 			drawGlyphMid(G_SPEAKER, 33, LINE1_Y, DIM);
-			drawTextMid(label(a, TrackType::Audio), 0, CREAM, 52, LINE1_Y, trackW);
+			drawTextMid(label(a, TrackType::Audio), 0, TEXT, 52, LINE1_Y, trackW);
 		}
 		if (err) {}
 		else if (p.playingAudio())
@@ -4671,42 +4770,42 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 			if (!by.empty())
 			{
 				drawGlyphMid(G_NOTE, 33, LINE2_Y, DIM);
-				drawTextMid(by, 0, CREAM, 52, LINE2_Y, 564);
+				drawTextMid(by, 0, TEXT, 52, LINE2_Y, 564);
 			}
 		}
 		else
 		{
 			lineEnd(LINE2_BTN, LINE2_Y);
 			drawGlyphMid(G_CC, 33, LINE2_Y, DIM);
-			drawTextMid(label(s, TrackType::Sub), 0, CREAM, 52, LINE2_Y, 540);
+			drawTextMid(label(s, TrackType::Sub), 0, TEXT, 52, LINE2_Y, 540);
 		}
 
 		// the row along the bottom: Lock, Info, Screen off, and leaving
 		Rect lk = buttonRect(LOCK_BTN), inf = buttonRect(INFO_BTN), so = buttonRect(SCREEN_BTN), q = buttonRect(QUIT_BTN);
 		bool holding = touchLocked && lockHoldAt;
-		fill(lk, holding ? PRESSED : touchLocked ? YELLOW : pressedBtn == LOCK_BTN ? PRESSED : TEAL);
+		drawBox(lk, holding ? PRESSED : touchLocked ? ACCENT : pressedBtn == LOCK_BTN ? PRESSED : BUTTON, R_BUTTON);
 		if (holding)
 		{
-			// the hold, filling as it goes
+			// the hold, filling as it goes (inside the edge, over the lip)
 			double f = std::min(1.0, (SDL_GetTicks() - lockHoldAt) / (double)UNLOCK_HOLD_MS);
-			fill({lk.x, lk.y + lk.h - 4, (int)(lk.w * f), 4}, YELLOW);
+			fillRound({lk.x + 6, lk.y + lk.h - 7, (int)((lk.w - 12) * f), 4}, ACCENT, 2);
 		}
-		SDL_Color lkInk = touchLocked && !holding ? BG : CREAM;
+		SDL_Color lkInk = touchLocked && !holding ? ON_ACCENT : TEXT;
 		{
 			const char* t = touchLocked ? (holding ? "Hold..." : "Locked") : "Lock";
 			int tw = (int)std::lround(textWidth(t, 0) / sx), gw = glyphW(G_LOCK), x = lk.x + lk.w / 2 - (gw + 8 + tw) / 2;
 			drawGlyphMid(G_LOCK, x + gw / 2, lk.y + lk.h / 2, lkInk);
 			drawTextMid(t, 0, lkInk, x + gw + 8, lk.y + lk.h / 2);
 		}
-		fill(inf, pressedBtn == INFO_BTN ? PRESSED : TEAL);
+		drawBox(inf, pressedBtn == INFO_BTN ? PRESSED : BUTTON, R_BUTTON);
 		drawButton(inf, &G_INFO, "Info", nullptr, false, 0);
-		fill(so, pressedBtn == SCREEN_BTN ? PRESSED : TEAL);
+		drawBox(so, pressedBtn == SCREEN_BTN ? PRESSED : BUTTON, R_BUTTON);
 		drawButton(so, &G_MOON, "Screen off", nullptr, false, 0);
 		drawLeave(p);
 		if (touchLocked)
 		{
 			// locked: everything but the lock and Screen off dimmed (they're all that a finger does now)
-			SDL_Color veil{0x17, 0x16, 0x1C, 170};
+			SDL_Color veil = sdl(theme::BG, 170);
 			fill({0, 64, W, lk.y - 64}, veil);
 			fill(inf, veil);
 			fill(q, veil);
@@ -4717,7 +4816,7 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 	{
 		Rect q = buttonRect(QUIT_BTN);
 		bool hotkeys = p.settings.buttonHotkeys;
-		fill(q, pressedBtn == QUIT_BTN ? PRESSED : TEAL);
+		drawBox(q, pressedBtn == QUIT_BTN ? PRESSED : BUTTON, R_BUTTON);
 		{
 			// leaving: B twice (a press in a pocket isn't one), or this twice
 			std::string t = quitArmed ? "Again?" : browserMode ? "Close" : "Quit";
@@ -4725,10 +4824,10 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 			std::string key = hotkeys && !quitArmed ? "B\xC3\x97" "2" : "";
 			int tw = (int)std::lround(textWidth(t, 0) / sx), gw = glyphW(g), kw = key.empty() ? 0 : (int)std::lround(textWidth(key, 0) / sx) + 10;
 			int x = q.x + q.w / 2 - (gw + 8 + tw + kw) / 2;
-			SDL_Color ink = quitArmed ? YELLOW : CREAM;
+			SDL_Color ink = quitArmed ? ACCENT : TEXT;
 			drawGlyphMid(g, x + gw / 2, q.y + q.h / 2, ink);
 			drawTextMid(t, 0, ink, x + gw + 8, q.y + q.h / 2);
-			if (!key.empty()) drawTextMid(key, 0, YELLOW, x + gw + 8 + tw + 10, q.y + q.h / 2);
+			if (!key.empty()) drawTextMid(key, 0, ACCENT, x + gw + 8 + tw + 10, q.y + q.h / 2);
 		}
 	}
 
@@ -5089,12 +5188,12 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 	{
 		fill({0, 0, W, H}, BG);
 		Rect back = buttonRect(BACK_ICON);
-		fill(back, kbPressed == -2 ? PRESSED : TEAL);
-		drawGlyphMid(G_BACK, back.x + back.w / 2 - 1, back.y + back.h / 2, CREAM, 3);
-		drawTextMid(fieldName(kbField), 2, CREAM, 72, 32, 540);
+		drawBox(back, kbPressed == -2 ? PRESSED : BUTTON, R_BUTTON);
+		drawGlyphMid(G_BACK, back.x + back.w / 2 - 1, back.y + back.h / 2, TEXT, 3);
+		drawTextMid(fieldName(kbField), 2, TEXT, 72, 32, 540);
 		// the field: the text and its caret, its end in view when it's longer than the box
-		fill({16, 92, 608, 64}, YELLOW);
-		fill({18, 94, 604, 60}, SURFACE);
+		fillRound({16, 92, 608, 64}, ACCENT, R_FIELD);
+		fillRound({18, 94, 604, 60}, SURFACE, R_FIELD - 2);
 		// the caret is a bar of its own between the two halves (a '|' in the text would move it as it blinks), with
 		// room kept for it whether it shows or not
 		std::string before = kbEdit.text.substr(0, kbEdit.caret), after = kbEdit.text.substr(kbEdit.caret);
@@ -5106,11 +5205,11 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 			before.erase(0, n);
 		}
 		int caretX = 32 + logical(before) + 1;
-		if (!before.empty()) drawTextMid(before, 1, CREAM, 32, 124, 580);
-		if (kbCaretShown()) fill({caretX, 108, 3, 32}, YELLOW);
-		if (!after.empty()) drawTextMid(after, 1, CREAM, caretX + 5, 124, std::max(0, 580 - (caretX + 5 - 32)));
-		if (kbField == EQ_NAME && !eqNameNote.empty()) drawTextMid(eqNameNote, 0, YELLOW, 24, 176, 592);
-		if (kbField == PL_NAME && !plNameNote.empty()) drawTextMid(plNameNote, 0, YELLOW, 24, 176, 592);
+		if (!before.empty()) drawTextMid(before, 1, TEXT, 32, 124, 580);
+		if (kbCaretShown()) fill({caretX, 108, 3, 32}, ACCENT);
+		if (!after.empty()) drawTextMid(after, 1, TEXT, caretX + 5, 124, std::max(0, 580 - (caretX + 5 - 32)));
+		if (kbField == EQ_NAME && !eqNameNote.empty()) drawTextMid(eqNameNote, 0, ACCENT, 24, 176, 592);
+		if (kbField == PL_NAME && !plNameNote.empty()) drawTextMid(plNameNote, 0, ACCENT, 24, 176, 592);
 		drawHints({{"A", "Type"}, {"B", "Delete"}, {"X", "Space"}, {"Y", "Shift"}, {"L/R", "Move"}, {"START", "Done"}});
 		auto keys = kbKeys();
 		for (int i = 0; i < (int)keys.size(); i++)
@@ -5119,8 +5218,8 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 			Rect r{k.x + 3, k.y + 3, k.w - 6, k.h - 6};
 			bool at = i == kbCursor, on = k.action == KeyAction::Shift && kbShift != ShiftState::Off;
 			bool special = k.action != KeyAction::Text;
-			fill(r, kbPressed == i ? PRESSED : at ? YELLOW : special ? SDL_Color{0x1E, 0x33, 0x37, 255} : TEAL);
-			drawTextMid(k.label, 1, at ? BG : on ? YELLOW : CREAM, r.x + r.w / 2, r.y + r.h / 2, r.w - 4, 2);
+			fillRound(r, kbPressed == i ? PRESSED : at ? ACCENT : special ? TRACK : BUTTON, R_FIELD);
+			drawTextMid(k.label, 1, at ? ON_ACCENT : on ? ACCENT : TEXT, r.x + r.w / 2, r.y + r.h / 2, r.w - 4, 2);
 		}
 	}
 
@@ -5980,7 +6079,7 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 		if (!pickerOne.empty())
 		{
 			// one file: the card over the top panel, the Add square's check
-			p.showNoteCard(G_PLAYLIST_ROWS, G_PLAYLIST.h, "&HE2EDF1&", (again ? "Added again to " : "Added to ") + pl.name,
+			p.showNoteCard(G_PLAYLIST_ROWS, G_PLAYLIST.h, theme::ass(theme::TEXT).c_str(), (again ? "Added again to " : "Added to ") + pl.name,
 				pickerNewOne ? "New playlist \xC2\xB7 " + pickerOneTitle : pickerOneTitle);
 			addFlashUntil = SDL_GetTicks() + 1200;
 		}
@@ -6044,12 +6143,12 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 	{
 		std::string where = elideLeft(browseWhere(), 0, maxW);
 		size_t cut = where.rfind(" / ");
-		if (cut == std::string::npos) drawTextMid(where, 0, CREAM, x, SUB_Y);
+		if (cut == std::string::npos) drawTextMid(where, 0, TEXT, x, SUB_Y);
 		else
 		{
 			std::string head = where.substr(0, cut + 3);
 			drawTextMid(head, 0, DIM, x, SUB_Y);
-			drawTextMid(where.substr(cut + 3), 0, CREAM, x + (int)std::lround(textWidth(head, 0) / sx), SUB_Y);
+			drawTextMid(where.substr(cut + 3), 0, TEXT, x + (int)std::lround(textWidth(head, 0) / sx), SUB_Y);
 		}
 	}
 
@@ -6078,13 +6177,13 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 			if (selMode != SEL_PICK)
 			{
 				count = n ? std::to_string(n) + " selected" : "None yet";
-				countInk = n ? YELLOW : DIM;
+				countInk = n ? ACCENT : DIM;
 			}
 		}
 		int cw = count.empty() ? 0 : (int)std::lround(textWidth(count, 1) / sx);
 		int end = std::min(496, statusLeft(p) - 12);	// (left of the clock)
 		if (!count.empty()) drawTextMid(count, 1, countInk, end, 32, 0, 1);
-		drawTextMid(title, 2, CREAM, 72, 32, std::max(40, end - (cw ? cw + 16 : 0) - 72));
+		drawTextMid(title, 2, TEXT, 72, 32, std::max(40, end - (cw ? cw + 16 : 0) - 72));
 		// the line under it: Move's keys; adding, where it is (a card or the network); a playlist's, as ever
 		if (moving)
 		{
@@ -6093,7 +6192,7 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 					 {" \xC2\xB7 ", ""}, {"B", " cancel"}})
 			{
 				bool sep = part.second.empty();
-				drawTextMid(part.first, 0, sep ? DIM : YELLOW, x, SUB_Y);
+				drawTextMid(part.first, 0, sep ? DIM : ACCENT, x, SUB_Y);
 				x += (int)std::lround(textWidth(part.first, 0) / sx);
 				if (!sep)
 				{
@@ -6120,9 +6219,9 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 		Rect r = buttonRect(id);
 		bool down = pressedBtn == id && !off;
 		bool lit = filled && !off;
-		fill(r, down ? PRESSED : lit ? YELLOW : TEAL);
-		SDL_Color c = off ? DIM : lit && !down ? BG : ink;
-		SDL_Color k = off ? DIM : lit && !down ? BG : YELLOW;
+		drawBox(r, down ? PRESSED : lit ? ACCENT : BUTTON, R_BUTTON);
+		SDL_Color c = off ? DIM : lit && !down ? ON_ACCENT : ink;
+		SDL_Color k = off ? DIM : lit && !down ? ON_ACCENT : ACCENT;
 		// the key at the right; the glyph and the label in the middle of what's left
 		int kw = key ? (int)std::lround(textWidth(key, 0) / sx) : 0;
 		if (key) drawTextMid(key, 0, k, r.x + r.w - 12, r.y + r.h / 2, 0, 1);
@@ -6144,35 +6243,35 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 		int n = selCount();
 		if (moving)
 		{
-			drawBarButton(MOVE_CANCEL, &G_CROSS, "Cancel", "B", CREAM, false, false);
-			drawBarButton(MOVE_DONE, &G_CHECK, "Done", "A", CREAM, true, false);
+			drawBarButton(MOVE_CANCEL, &G_CROSS, "Cancel", "B", TEXT, false, false);
+			drawBarButton(MOVE_DONE, &G_CHECK, "Done", "A", TEXT, true, false);
 			return;
 		}
 		if (selMode == SEL_EDIT)
 		{
 			bool all = !plCur.entries.empty() && (int)plSel.size() == (int)plCur.entries.size();
-			drawBarButton(SEL_ALL, &G_BOX_ON, all ? "None" : "All", "SELECT", CREAM, false, plCur.entries.empty());
+			drawBarButton(SEL_ALL, &G_BOX_ON, all ? "None" : "All", "SELECT", TEXT, false, plCur.entries.empty());
 			// (Liked: no order of its own to move, and Remove is Unlike)
 			bool liked = plIsLiked(plCur.file);
-			if (!liked) drawBarButton(SEL_MOVE, &G_MOVE, "Move", "Y", CREAM, false, n == 0);
+			if (!liked) drawBarButton(SEL_MOVE, &G_MOVE, "Move", "Y", TEXT, false, n == 0);
 			// (armed: the words alone, room for them)
 			drawBarButton(SEL_ACT, removeArmed ? nullptr : liked ? &G_HEART_O : &G_MINUS,
 				removeArmed ? (liked ? "Again: unlike " : "Again: remove ") + many(n) : std::string(liked ? "Unlike" : "Remove"), "X",
-				removeArmed ? YELLOW : RED, false, n == 0);
+				removeArmed ? ACCENT : DANGER, false, n == 0);
 			return;
 		}
 		bool dropping = dropArmed && SDL_GetTicks() - dropArmed < QUIT_WINDOW_MS;
 		if (selMode == SEL_ADD)
 		{
 			int ticked = 0, files = selFolderFiles(ticked);
-			drawBarButton(SEL_ALL, &G_BOX_ON, files && ticked == files ? "None" : "All", "SELECT", CREAM, false, files == 0);
+			drawBarButton(SEL_ALL, &G_BOX_ON, files && ticked == files ? "None" : "All", "SELECT", TEXT, false, files == 0);
 			drawBarButton(SEL_CANCEL, dropping ? nullptr : &G_CROSS, dropping ? "Again: drop " + many(n) : std::string("Cancel"), "B",
-				dropping ? YELLOW : CREAM, false, false);
-			drawBarButton(SEL_ACT, &G_PLUS, selDest.empty() ? std::string("Add to\xE2\x80\xA6") : "Add " + many(n), "X", CREAM, n > 0, n == 0);
+				dropping ? ACCENT : TEXT, false, false);
+			drawBarButton(SEL_ACT, &G_PLUS, selDest.empty() ? std::string("Add to\xE2\x80\xA6") : "Add " + many(n), "X", TEXT, n > 0, n == 0);
 			return;
 		}
-		drawBarButton(SEL_CANCEL, &G_CROSS, "Cancel", "B", CREAM, false, false);
-		drawBarButton(SEL_ACT, &G_FOLDER, "Add this folder", "X", CREAM, true, !pickable());
+		drawBarButton(SEL_CANCEL, &G_CROSS, "Cancel", "B", TEXT, false, false);
+		drawBarButton(SEL_ACT, &G_FOLDER, "Add this folder", "X", TEXT, true, !pickable());
 	}
 
 	void Ui::drawPicker()
@@ -6186,9 +6285,9 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 		{
 			Rect r = pickerRow(i);
 			bool at = i == pickerCursor, down = pressedBtn == PICK_ROW + i;
-			if (down) fill(r, PRESSED);
+			if (down) drawBox(r, PRESSED, R_BUTTON);
 			else if (at) drawFocus(r);
-			SDL_Color ink = at ? YELLOW : CREAM;
+			SDL_Color ink = at ? ACCENT : TEXT;
 			int mid = r.y + r.h / 2;
 			if (i == 0)
 			{
@@ -6201,10 +6300,10 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 			bool has = i - 1 < (int)pickerHas.size() && pickerHas[i - 1], armed = pickerArmed == i;
 			std::string count = armed ? "Add again?" : has ? "Added" : std::to_string(pl.count) + (pl.count == 1 ? " item" : " items");
 			int cw = (int)std::lround(textWidth(count, 0) / sx);
-			drawTextMid(count, 0, armed ? YELLOW : at ? DIM_TEAL : DIM, 512, mid, 0, 1);
+			drawTextMid(count, 0, armed ? ACCENT : at ? DIM_ON : DIM, 512, mid, 0, 1);
 			if (has && !armed)
 			{
-				drawGlyphMid(G_CHECK, 512 - cw - 14, mid, YELLOW);
+				drawGlyphMid(G_CHECK, 512 - cw - 14, mid, ACCENT);
 				cw += 24;
 			}
 			drawGlyphMid(G_PLAYLIST, r.x + 31, mid, ink);
@@ -6214,9 +6313,9 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 		if (n > PICKER_SHOWN)
 		{
 			int top = pickerRow(pickerScroll).y, height = PICKER_SHOWN * 46 - 4;
-			fill({532, top, 4, height}, SCREEN);
+			fillRound({532, top, 4, height}, SCREEN, 2);
 			int h = std::max(16, height * PICKER_SHOWN / n);
-			fill({532, top + (height - h) * pickerScroll / std::max(1, n - PICKER_SHOWN), 4, h}, DIM);
+			fillRound({532, top + (height - h) * pickerScroll / std::max(1, n - PICKER_SHOWN), 4, h}, DIM, 2);
 		}
 		drawHints({{"A", pickerArmed > 0 ? "Add again" : "Add"}, {"B", "Cancel"}});
 	}
@@ -6227,7 +6326,7 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 		drawDialog(box, "Reading folder\xE2\x80\xA6");
 		drawTextMid(folderName(addPending.dir), 0, DIM, W / 2, box.y + 64, 328, 2);
 		Rect c = buttonRect(BUSY_CANCEL);
-		drawDialogRow(c, &G_CROSS, "Cancel", true, pressedBtn == BUSY_CANCEL, CREAM);
+		drawDialogRow(c, &G_CROSS, "Cancel", true, pressedBtn == BUSY_CANCEL, TEXT);
 		drawHints({{"B", "Cancel"}});
 	}
 
@@ -6258,20 +6357,20 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 		if (pl)
 		{
 			// the playlist's name, cut at its end (Liked: its heart)
-			drawGlyphMid(plIsLiked(src.id) ? G_HEART : G_PLAYLIST, 35, SOURCE_Y, YELLOW);
-			drawTextMid(src.title, 0, CREAM, 52, SOURCE_Y, maxW);
+			drawGlyphMid(plIsLiked(src.id) ? G_HEART : G_PLAYLIST, 35, SOURCE_Y, ACCENT);
+			drawTextMid(src.title, 0, TEXT, 52, SOURCE_Y, maxW);
 			return;
 		}
 		// the folder, as the browser says it, its end kept
 		drawGlyphMid(src.kind == SourceKind::NetFolder ? G_NETWORK : G_CARD, 35, SOURCE_Y, DIM);
 		std::string where = elideLeft(whereOf(src.id), 0, maxW);
 		size_t cut = where.rfind(" / ");
-		if (cut == std::string::npos) drawTextMid(where, 0, CREAM, 52, SOURCE_Y);
+		if (cut == std::string::npos) drawTextMid(where, 0, TEXT, 52, SOURCE_Y);
 		else
 		{
 			std::string head = where.substr(0, cut + 3);
 			drawTextMid(head, 0, DIM, 52, SOURCE_Y);
-			drawTextMid(where.substr(cut + 3), 0, CREAM, 52 + (int)std::lround(textWidth(head, 0) / sx), SOURCE_Y);
+			drawTextMid(where.substr(cut + 3), 0, TEXT, 52 + (int)std::lround(textWidth(head, 0) / sx), SOURCE_Y);
 		}
 	}
 
@@ -6341,15 +6440,15 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 		{
 			int rowY = displayChip(r, 0).y;
 			bool focus = r == displayRow;
-			drawTextMid(r ? "Style" : "Show", 0, focus ? YELLOW : CREAM, 52, rowY - 14, 200);
-			if (focus) fill({36, rowY, 4, 64}, YELLOW);
+			drawTextMid(r ? "Style" : "Show", 0, focus ? ACCENT : TEXT, 52, rowY - 14, 200);
+			if (focus) fillRound({36, rowY, 4, 64}, ACCENT, 2);
 			for (int i = 0; i < 4; i++)
 			{
 				Rect c = displayChip(r, i);
 				bool sel = i == (r ? vis : show), dim = r && muted;
-				SDL_Color bg = pressedBtn == CHIP_BTN + r * 4 + i ? PRESSED : sel ? (dim ? DIM : YELLOW) : dim ? SDL_Color{0x2A, 0x29, 0x33, 255} : TEAL;
-				SDL_Color ink = sel ? BG : dim ? DIM : CREAM;
-				fill(c, bg);
+				SDL_Color bg = pressedBtn == CHIP_BTN + r * 4 + i ? PRESSED : sel ? (dim ? DIM : ACCENT) : dim ? TRACK : BUTTON;
+				SDL_Color ink = sel ? ON_ACCENT : dim ? DIM : TEXT;
+				drawBox(c, bg, R_BUTTON);
 				const Glyph* g = r ? VIS_GLYPHS[i] : i == SHOW_BOTH ? &G_ARTVIZ : showGlyph(i, vis);
 				drawGlyphMid(*g, c.x + c.w / 2, c.y + 20, ink);
 				drawTextMid(r ? STYLE_NAMES[i] : SHOW_NAMES[i], 0, ink, c.x + c.w / 2, c.y + 46, 122, 2);
@@ -6953,21 +7052,21 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 		{
 			Rect r = soundTabRect(t);
 			if (t == soundTab) { drawTab(r, NAMES[t], true); continue; }
-			fill(r, pressedBtn == SOUND_TAB0 + t ? PRESSED : TEAL);
+			drawBox(r, pressedBtn == SOUND_TAB0 + t ? PRESSED : BUTTON, R_BUTTON);
 			const char* key = t == SOUND_EQ ? "L" : "R";
 			int kw = (int)std::lround(textWidth(key, 0) / sx), mid = r.y + r.h / 2;
 			int left = r.x, right = r.x + r.w;
 			if (t == SOUND_EQ)
 			{
-				drawTextMid(key, 0, YELLOW, r.x + 14, mid);
+				drawTextMid(key, 0, ACCENT, r.x + 14, mid);
 				left = r.x + 14 + kw;
 			}
 			else
 			{
-				drawTextMid(key, 0, YELLOW, r.x + r.w - 14, mid, 0, 1);
+				drawTextMid(key, 0, ACCENT, r.x + r.w - 14, mid, 0, 1);
 				right = r.x + r.w - 14 - kw;
 			}
-			drawTextMid(NAMES[t], 1, CREAM, (left + right) / 2, mid, right - left - 8, 2);
+			drawTextMid(NAMES[t], 1, TEXT, (left + right) / 2, mid, right - left - 8, 2);
 		}
 		drawBattery(616, 24, p);
 	}
@@ -6990,33 +7089,33 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 		bool on = st.eqOn, custom = eqCustom(p);
 		// the switch: a dark track, the knob lit yellow on the right when on, grey on the left when off (the colour
 		// sits where the switch points, as a phone's does)
-		fill(buttonRect(EQ_SWITCH), pressedBtn == EQ_SWITCH ? PRESSED : TEAL);
-		fill({30, 84, 48, 24}, SCREEN);
-		fill({on ? 54 : 32, 86, 22, 20}, on ? YELLOW : DIM);
-		drawTextMid(on ? "On" : "Off", 1, on ? CREAM : DIM, 92, 96);
+		drawBox(buttonRect(EQ_SWITCH), pressedBtn == EQ_SWITCH ? PRESSED : BUTTON, R_BUTTON);
+		fillRound({30, 84, 48, 24}, BG, R_CHIP);
+		fillRound({on ? 54 : 32, 86, 22, 20}, on ? ACCENT : DIM, R_CHIP - 2);
+		drawTextMid(on ? "On" : "Off", 1, on ? TEXT : DIM, 92, 96);
 		// the preset: Y and X either side of its name, what it is under it
-		fill({160, 70, 464, 52}, TEAL);
+		drawBox({160, 70, 464, 52}, BUTTON, R_BUTTON);
 		for (int id : {EQ_PREV, EQ_NEXT, EQ_NAME_ZONE})
-			if (pressedBtn == id) fill(buttonRect(id), PRESSED);
-		drawTextMid("Y", 0, YELLOW, 174, 96);
-		drawGlyphMid(G_LEFT, 196, 96, CREAM);
-		drawGlyphMid(G_RIGHT, 588, 96, CREAM);
-		drawTextMid("X", 0, YELLOW, 610, 96);
-		drawTextMid(custom ? CUSTOM_NAME : st.eqPreset, 1, on ? CREAM : DIM, 392, 88, 340, 2);
+			if (pressedBtn == id) drawBox(buttonRect(id), PRESSED, R_BUTTON);
+		drawTextMid("Y", 0, ACCENT, 174, 96);
+		drawGlyphMid(G_LEFT, 196, 96, TEXT);
+		drawGlyphMid(G_RIGHT, 588, 96, TEXT);
+		drawTextMid("X", 0, ACCENT, 610, 96);
+		drawTextMid(custom ? CUSTOM_NAME : st.eqPreset, 1, on ? TEXT : DIM, 392, 88, 340, 2);
 		if (custom)
-			drawTextMid(st.eqOrigin.empty() ? std::string("Unsaved") : "Unsaved \xC2\xB7 from " + st.eqOrigin, 0, YELLOW, 392, 110, 340, 2);
-		else drawTextMid(eqIsUser(p, st.eqPreset) ? "Yours" : "Built-in", 0, DIM_TEAL, 392, 110, 340, 2);
+			drawTextMid(st.eqOrigin.empty() ? std::string("Unsaved") : "Unsaved \xC2\xB7 from " + st.eqOrigin, 0, ACCENT, 392, 110, 340, 2);
+		else drawTextMid(eqIsUser(p, st.eqPreset) ? "Yours" : "Built-in", 0, DIM_ON, 392, 110, 340, 2);
 		// the scale, and the band the cursor is on lit behind it
 		int fx = 88 + 56 * eqBand;
-		fill({fx - 27, 134, 54, 262}, SURFACE);
-		fill({fx - 27, 394, 54, 3}, YELLOW);
+		fillRound({fx - 27, 134, 54, 263}, SURFACE, R_BUTTON);
+		fillRoundBand({fx - 27, 134, 54, 263}, R_BUTTON, 394, 397, ACCENT);
 		drawTextMid("dB", 0, DIM, 54, 148, 0, 1);
 		drawTextMid("Hz", 0, DIM, 54, 382, 0, 1);
 		static const struct { const char* label; int y; } SCALE[] = {{"+12", 168}, {"+6", 216}, {"0", 264}, {"-6", 312}, {"-12", 360}};
 		for (auto& m : SCALE)
 		{
 			drawTextMid(m.label, 0, DIM, 54, m.y, 0, 1);
-			if (m.y != 264) fill({60, m.y, 560, 1}, {0x2A, 0x28, 0x33, 255});
+			if (m.y != 264) fill({60, m.y, 560, 1}, RULE);
 		}
 		fill({60, 263, 560, 2}, SCREEN);
 		for (int i = 0; i < EQ_BANDS; i++)
@@ -7025,25 +7124,25 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 			double g = st.eqGains[i];
 			int ky = 264 - (int)std::lround(g * 8);
 			bool focus = i == eqBand;
-			fill({cx - 2, 168, 4, 192}, SCREEN);
+			fillRound({cx - 2, 168, 4, 192}, SCREEN, 2);
 			// from 0 dB to the gain
-			SDL_Color bar = !on ? DIM : focus ? YELLOW : PRESSED;
+			SDL_Color bar = !on ? DIM : focus ? ACCENT : PRESSED;
 			if (ky < 264) fill({cx - 4, ky, 8, 264 - ky}, bar);
 			else if (ky > 264) fill({cx - 4, 264, 8, ky - 264}, bar);
-			fill({cx - 16, ky - 6, 32, 12}, !on ? DIM : focus ? YELLOW : CREAM);
+			fillRound({cx - 16, ky - 6, 32, 12}, !on ? DIM : focus ? ACCENT : KNOB, R_KNOB);
 			fill({cx - 10, ky - 1, 20, 2}, BG);
-			drawTextMid(gainText(g), 0, focus ? YELLOW : std::fabs(g) >= 0.05 ? CREAM : DIM, cx, 148, 0, 2);
-			drawTextMid(FREQS[i], 0, focus ? YELLOW : DIM, cx, 382, 0, 2);
+			drawTextMid(gainText(g), 0, focus ? ACCENT : std::fabs(g) >= 0.05 ? TEXT : DIM, cx, 148, 0, 2);
+			drawTextMid(FREQS[i], 0, focus ? ACCENT : DIM, cx, 382, 0, 2);
 		}
 		// Reset (touch, or Options), Save, Options: each its key on its right
 		auto action = [&](int id, const Glyph& g, const std::string& label, const char* key, bool dim) {
 			Rect r = buttonRect(id);
-			fill(r, pressedBtn == id && !dim ? PRESSED : TEAL);
-			SDL_Color ink = dim ? DIM : CREAM;
+			drawBox(r, pressedBtn == id && !dim ? PRESSED : BUTTON, R_BUTTON);
+			SDL_Color ink = dim ? DIM : TEXT;
 			int gw = glyphW(g), kw = key ? (int)std::lround(textWidth(key, 0) / sx) : 0, mid = r.y + r.h / 2;
 			drawGlyphMid(g, r.x + 14 + gw / 2, mid, ink);
 			drawTextMid(label, 0, ink, r.x + 14 + gw + 8, mid, r.w - 14 - gw - 8 - (key ? kw + 20 : 10));
-			if (key) drawTextMid(key, 0, dim ? DIM : YELLOW, r.x + r.w - 12, mid, 0, 1);
+			if (key) drawTextMid(key, 0, dim ? DIM : ACCENT, r.x + r.w - 12, mid, 0, 1);
 		};
 		action(EQ_RESET, G_REFRESH, "Reset", nullptr, !eqCanReset(p));
 		action(EQ_SAVE, G_CHECK, !custom ? "Saved" : eqOriginIsUser(p) ? "Save" : "Save as...", "A", !custom);
@@ -7059,12 +7158,12 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 			Rect r = buttonRect(FX_ROW + i);
 			int mid = r.y + r.h / 2;
 			bool at = i == fxCursor;
-			if (pressedBtn == FX_ROW + i) fill(r, PRESSED);
+			if (pressedBtn == FX_ROW + i) drawBox(r, PRESSED, R_BUTTON);
 			else if (at) drawFocus(r);
 			// the one in use: a filled ring (the cursor is only where it is)
-			drawGlyphMid(i == inUse ? G_RADIO_ON : G_RADIO, 41, mid, i == inUse ? YELLOW : at ? CREAM : DIM);
-			drawTextMid(soundFxName((SoundFx)i), 1, at ? YELLOW : CREAM, 66, mid, 270);
-			drawTextMid(FX_ABOUT[i], 0, at ? DIM_TEAL : DIM, 608, mid, 260, 1);
+			drawGlyphMid(i == inUse ? G_RADIO_ON : G_RADIO, 41, mid, i == inUse ? ACCENT : at ? TEXT : DIM);
+			drawTextMid(soundFxName((SoundFx)i), 1, at ? ACCENT : TEXT, 66, mid, 270);
+			drawTextMid(FX_ABOUT[i], 0, at ? DIM_ON : DIM, 608, mid, 260, 1);
 		}
 		if (!p.playingAudio()) drawTextMid("Plays on music, not videos", 0, DIM, W / 2, 436, 0, 2);
 		drawHints({{"A", "Choose"}, {"L", "Equalizer"}, {"B", "Back"}});
@@ -7091,7 +7190,7 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 				const Glyph* g = it == EQO_LIST ? &G_NOTE : it == EQO_SAVE_TO ? &G_CHECK : it == EQO_SAVE_AS ? &G_PLUS
 					: it == EQO_RENAME ? &G_PENCIL : it == EQO_DELETE ? &G_TRASH : it == EQO_RESET ? &G_REFRESH : &G_CROSS;
 				drawDialogRow(eqOptRow(i, p), g, label, i == eqDlgCursor, pressedBtn == DLG_ROW + i,
-					it == EQO_DELETE ? RED : it == EQO_CANCEL ? DIM : CREAM);
+					it == EQO_DELETE ? DANGER : it == EQO_CANCEL ? DIM : TEXT);
 			}
 			drawHints({{"A", "Choose"}, {"B", "Close"}});
 		}
@@ -7099,7 +7198,7 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 		{
 			drawDialog({112, 116, 416, 204}, "Delete " + quoted(name) + "?");
 			drawTextMid("Your preset goes for good", 0, DIM, W / 2, 176, 380, 2);
-			drawDialogRow({128, 196, 384, 46}, &G_TRASH, "Delete", eqDlgCursor == 0, pressedBtn == DLG_ROW, RED);
+			drawDialogRow({128, 196, 384, 46}, &G_TRASH, "Delete", eqDlgCursor == 0, pressedBtn == DLG_ROW, DANGER);
 			drawDialogRow({128, 248, 384, 46}, &G_CROSS, "Cancel", eqDlgCursor == 1, pressedBtn == DLG_ROW + 1, DIM);
 			drawHints({{"A", "Choose"}, {"B", "Cancel"}});
 		}
@@ -7120,10 +7219,10 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 				Rect r{112, y, 416, 38};
 				bool at = i == eqDlgCursor;
 				bool active = e[i].kind == 2 ? eqCustom(p) : !eqCustom(p) && e[i].name == st.eqPreset;
-				if (pressedBtn == DLG_ROW + i) fill(r, PRESSED);
+				if (pressedBtn == DLG_ROW + i) drawBox(r, PRESSED, R_BUTTON);
 				else if (at) drawFocus(r);
-				drawGlyphMid(active ? G_RADIO_ON : G_RADIO, 132, r.y + r.h / 2, active ? YELLOW : at ? CREAM : DIM);
-				drawTextMid(e[i].name, 1, at ? YELLOW : CREAM, 156, r.y + r.h / 2, 356);
+				drawGlyphMid(active ? G_RADIO_ON : G_RADIO, 132, r.y + r.h / 2, active ? ACCENT : at ? TEXT : DIM);
+				drawTextMid(e[i].name, 1, at ? ACCENT : TEXT, 156, r.y + r.h / 2, 356);
 				y += 38;
 			}
 			// a long list: where its window is
@@ -7131,9 +7230,9 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 			while (maxScroll < n && eqListBottom(e, maxScroll) < n) maxScroll++;
 			if (maxScroll > 0)
 			{
-				fill({532, EQ_LIST_TOP, 4, EQ_LIST_END - EQ_LIST_TOP}, SCREEN);
+				fillRound({532, EQ_LIST_TOP, 4, EQ_LIST_END - EQ_LIST_TOP}, SCREEN, 2);
 				int shown = end - eqListScroll, h = std::max(16, (EQ_LIST_END - EQ_LIST_TOP) * shown / n);
-				fill({532, EQ_LIST_TOP + (EQ_LIST_END - EQ_LIST_TOP - h) * eqListScroll / maxScroll, 4, h}, DIM);
+				fillRound({532, EQ_LIST_TOP + (EQ_LIST_END - EQ_LIST_TOP - h) * eqListScroll / maxScroll, 4, h}, DIM, 2);
 			}
 			drawHints({{"A", "Choose"}, {"B", "Close"}});
 		}
@@ -7203,7 +7302,7 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 	{
 		if (!webIndicatorShown(p)) return;
 		// dim while no browser watches, yellow with one; never blinking (it's a state, not news)
-		drawGlyphMid(G_WEB, right - 9, cy, webClients() > 0 ? YELLOW : DIM, 2);
+		drawGlyphMid(G_WEB, right - 9, cy, webClients() > 0 ? ACCENT : DIM, 2);
 		webInd = {right - 31, cy - 24, 44, 48};
 	}
 
@@ -7384,7 +7483,7 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 		// the card: cream, dark modules (never the other way round: phones' readers want dark on light), each module a
 		// whole number of the panel's pixels, the quiet zone (3 modules at least) the card's own margin
 		Rect card{24, 72, 248, 248};
-		fill(card, CREAM);
+		fillRound(card, TEXT, R_TILE);
 		if (qrSize > 0)
 		{
 			int x0 = (int)std::lround(card.x * sx), y0 = (int)std::lround(card.y * sy);
@@ -7404,23 +7503,23 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 					xx = e;
 				}
 		}
-		drawTextMid("Scan with your phone", 0, CREAM, 148, 340, 248, 2);
+		drawTextMid("Scan with your phone", 0, TEXT, 148, 340, 248, 2);
 		drawTextMid("It signs you in too", 0, DIM, 148, 362, 248, 2);
 
 		drawTextMid("Or type this address", 0, DIM, 296, 84, 320);
 		bool fits = textWidth(addr, 2) / sx <= 320;
-		drawTextMid(addr, fits ? 2 : 1, YELLOW, 296, 116, 320);
+		drawTextMid(addr, fits ? 2 : 1, ACCENT, 296, 116, 320);
 		drawTextMid("PIN", 0, DIM, 296, 160);
 		for (int i = 0; i < 4; i++)
 		{
 			Rect bx{296 + i * 84, 176, 68, 80};
-			fill(bx, TEAL);
+			fillRound(bx, BUTTON, R_BUTTON);
 			if (i >= (int)pin.size() || !pinFont) continue;
 			std::string key = "pin|" + pin.substr(i, 1);
 			SDL_Texture* t = nullptr;
 			auto it = cache.find(key);
 			if (it != cache.end()) t = it->second;
-			else if (SDL_Surface* sf = TTF_RenderUTF8_Blended(pinFont, pin.substr(i, 1).c_str(), CREAM))
+			else if (SDL_Surface* sf = TTF_RenderUTF8_Blended(pinFont, pin.substr(i, 1).c_str(), TEXT))
 			{
 				t = SDL_CreateTextureFromSurface(ren, sf);
 				SDL_FreeSurface(sf);
@@ -7437,18 +7536,25 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 			SDL_RenderCopy(ren, t, nullptr, &d);
 		}
 		int n = webClients();
-		drawGlyphMid(G_WEB, 305, 292, n ? YELLOW : DIM);
-		if (n) drawTextMid(std::to_string(n) + (n == 1 ? " browser connected" : " browsers connected"), 1, CREAM, 324, 292, 300);
+		drawGlyphMid(G_WEB, 305, 292, n ? ACCENT : DIM);
+		if (n) drawTextMid(std::to_string(n) + (n == 1 ? " browser connected" : " browsers connected"), 1, TEXT, 324, 292, 300);
 		else drawTextMid("No browser connected yet", 0, DIM, 324, 292, 300);
 
 		// New PIN pressed once: what the second press does, where the note is
 		auto note = wrapText(pinArmed ? "A new PIN signs out every browser" : "Your phone needs the same Wi-Fi", 0, 248, 2);
 		for (size_t i = 0; i < note.size(); i++)
-			drawTextMid(note[i], 0, pinArmed ? YELLOW : DIM, 148, 410 - (int)(note.size() - 1) * 11 + (int)i * 22, 248, 2);
+			drawTextMid(note[i], 0, pinArmed ? ACCENT : DIM, 148, 410 - (int)(note.size() - 1) * 11 + (int)i * 22, 248, 2);
 		Rect np = buttonRect(WEB_NEWPIN), off = buttonRect(WEB_OFF);
-		fill(np, pressedBtn == WEB_NEWPIN ? PRESSED : pinArmed ? RED : TEAL);
-		drawButton(np, pinArmed ? nullptr : &G_REFRESH, pinArmed ? "Press again" : "New PIN", "Y", false, 1);
-		fill(off, pressedBtn == WEB_OFF ? PRESSED : TEAL);
+		bool npDown = pressedBtn == WEB_NEWPIN;
+		drawBox(np, npDown ? PRESSED : pinArmed ? DANGER : BUTTON, R_BUTTON);
+		if (pinArmed && !npDown)
+		{
+			// black on the red (cream reads 2.4:1 there), its key too
+			drawTextMid("Press again", 1, ON_ACCENT, np.x + np.w / 2, np.y + np.h * 2 / 5, np.w - 12, 2);
+			drawTextMid("Y", 0, ON_ACCENT, np.x + np.w / 2, np.y + np.h * 4 / 5 - 2, np.w - 6, 2);
+		}
+		else drawButton(np, pinArmed ? nullptr : &G_REFRESH, pinArmed ? "Press again" : "New PIN", "Y", false, 1);
+		drawBox(off, pressedBtn == WEB_OFF ? PRESSED : BUTTON, R_BUTTON);
 		drawButton(off, &G_POWER, "Turn off", "X", false, 1);
 		drawHints({{"Y", "New PIN"}, {"X", "Turn off"}, {"B", "Back"}});
 	}
@@ -7495,8 +7601,8 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 	void Ui::likeCard(Player& p, bool liked, const std::string& title)
 	{
 		// in the volume card's place: which file it was (a Like pressed as the song changes still says)
-		if (liked) p.showNoteCard(G_HEART_ROWS, G_HEART.h, "&H29B4F0&", "Added to Liked", title);
-		else p.showNoteCard(G_HEART_O_ROWS, G_HEART_O.h, "&H7C868A&", "Removed from Liked", title);
+		if (liked) p.showNoteCard(G_HEART_ROWS, G_HEART.h, theme::ass(theme::ACCENT).c_str(), "Added to Liked", title);
+		else p.showNoteCard(G_HEART_O_ROWS, G_HEART_O.h, theme::ass(theme::DIM).c_str(), "Removed from Liked", title);
 	}
 
 	void Ui::likeNow(Player& p)
@@ -7570,9 +7676,9 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 		bool audio = p.playingAudio();
 		// what plays: its kind, its title, the artist and album (a video: where it is)
 		Rect card{16, 68, 608, 62};
-		fill(card, SURFACE);
+		drawBox(card, SURFACE, R_TILE);
 		drawGlyphMid(audio ? G_NOTE : G_FILM, 46, card.y + 31, DIM, 3);
-		drawTextMid(!p.title.empty() ? p.title : entryTitle(path), 1, CREAM, 80, card.y + 20, 520);
+		drawTextMid(!p.title.empty() ? p.title : entryTitle(path), 1, TEXT, 80, card.y + 20, 520);
 		std::string sub = audio && !p.artist().empty() ? p.artist() + (p.album().empty() ? "" : " \xC2\xB7 " + p.album())
 			: whereOf(isNetPath(path) ? netParent(path) : parentFolder(path));
 		drawTextMid(sub, 0, DIM, 80, card.y + 45, 520);
@@ -7592,18 +7698,18 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 		{
 			Rect r = playingRowRect(i);
 			bool at = i == cursor;
-			if (pressedBtn == PLAY_ROW + i) fill(r, PRESSED);
+			if (pressedBtn == PLAY_ROW + i) drawBox(r, PRESSED, R_BUTTON);
 			else if (at) drawFocus(r);
 			const Glyph* g = &G_INFO;
 			std::string label = "Info", note = "Size, codecs, tags";
-			SDL_Color ink = at ? YELLOW : CREAM;
+			SDL_Color ink = at ? ACCENT : TEXT;
 			switch (rows[i])
 			{
 			case PR_LIKE:
 				g = liked ? &G_HEART : &G_HEART_O;
 				label = liked ? "Liked" : "Like";
 				note = liked ? "In Liked" : "Adds it to Liked";
-				if (liked) ink = YELLOW;
+				if (liked) ink = ACCENT;
 				break;
 			case PR_ADD: g = &G_PL_ADD; label = "Add to playlist\xE2\x80\xA6"; note = plStore ? playingIn : ""; break;
 			case PR_SHOW:
@@ -7618,10 +7724,10 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 			int nw = 0;
 			if (!note.empty())
 			{
-				drawTextMid(note, 0, at ? DIM_TEAL : DIM, r.x + r.w - 14, mid, 240, 1);
+				drawTextMid(note, 0, at ? DIM_ON : DIM, r.x + r.w - 14, mid, 240, 1);
 				nw = std::min(240, (int)std::lround(textWidth(note, 0) / sx)) + 24;
 			}
-			drawTextMid(label, 1, at ? YELLOW : CREAM, r.x + 56, mid, r.w - 70 - nw);
+			drawTextMid(label, 1, at ? ACCENT : TEXT, r.x + 56, mid, r.w - 70 - nw);
 		}
 		drawHints({{"UP/DOWN", "Move"}, {"A", "Choose"}, {"B", "Close"}, {"L/R", "Tabs"}});
 	}
@@ -7650,7 +7756,7 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 			if (!plStore->setLiked(path, title, duration, on, at, dropped))
 			{
 				if (plStore->likable(path))
-					p.showNoteCard(G_ALERT_ROWS, G_ALERT.h, "&H4F5AE0&", "Couldn't save Liked", "The card may be full or locked");
+					p.showNoteCard(G_ALERT_ROWS, G_ALERT.h, theme::ass(theme::DANGER).c_str(), "Couldn't save Liked", "The card may be full or locked");
 				return plStore->isLiked(path);
 			}
 			// Liked is what plays: its order moved (a new one goes first), the player told as an edit
@@ -7905,6 +8011,11 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 			homeZone = HOME_GRID;
 			homeGrid = zone == HOME_GRID ? std::clamp(idx, 0, BROWSE_TABS - 1) : 0;
 			homeCol = homeGrid % 2;
+			// back on Home from a section: the Recent strip from its start, newest first (left where it was scrolled
+			// to, it showed old cards first and read as a different list). A refresh while on Home keeps its place
+			homeStrip = 0;
+			stripOff = stripTarget(0);
+			stripT0 = 0;
 			return;
 		}
 		homeZone = HOME_STRIP;
@@ -8115,14 +8226,6 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 		quitArmed = 0;
 	}
 
-	void Ui::drawBorder(Rect r, SDL_Color c)
-	{
-		fill({r.x, r.y, r.w, 2}, c);
-		fill({r.x, r.y + r.h - 2, r.w, 2}, c);
-		fill({r.x, r.y, 2, r.h}, c);
-		fill({r.x + r.w - 2, r.y, 2, r.h}, c);
-	}
-
 	void Ui::drawHome(const Player& p)
 	{
 		drawHeader("Banana Player", p);
@@ -8142,8 +8245,8 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 				if (x + CARD_W < 0 || x > W) continue;
 				Rect r{x, CARD_Y, CARD_W, CARD_H};
 				bool at = lit && homeZone == HOME_STRIP && homeStrip == i;
-				fill(r, homePress == i ? PRESSED : at ? TEAL : SURFACE);
-				SDL_Color ink = at ? YELLOW : CREAM, soft = at ? DIM_TEAL : DIM;
+				drawBox(r, homePress == i ? PRESSED : at ? BUTTON : SURFACE, R_TILE, at);
+				SDL_Color ink = at ? ACCENT : TEXT, soft = at ? DIM_ON : DIM;
 				if (i < (int)recent.size())
 				{
 					// the name on up to two lines; under it, what kind, how far, and a network mark; a bar along the foot
@@ -8157,20 +8260,20 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 					drawTextMid(it.sub, 0, soft, x + 44, CARD_Y + 78, CARD_W - 58 - (it.net ? 30 : 0) - (liked ? 22 : 0));
 					int mx = x + CARD_W - 22;
 					if (it.net) { drawGlyphMid(G_NETWORK, mx - 3, CARD_Y + 78, soft); mx -= 30; }
-					if (liked) drawGlyphMid(G_HEART_S, mx, CARD_Y + 78, YELLOW);
-					Rect bar{x + 2, CARD_Y + CARD_H - 6, CARD_W - 4, 4};
-					fill(bar, at ? SDL_Color{0x1A, 0x31, 0x34, 255} : SCREEN);
-					int w = (int)std::lround(bar.w * it.frac);
-					if (w > 0) fill({bar.x, bar.y, w, bar.h}, it.at.empty() ? DIM : YELLOW);
+					if (liked) drawGlyphMid(G_HEART_S, mx, CARD_Y + 78, ACCENT);
+					// along the card's foot, in its corners: over its edge, or inside the cursor's yellow one
+					int w = (int)std::lround(CARD_W * it.frac);
+					Rect in = at ? Rect{x + theme::EDGE, CARD_Y + theme::EDGE, CARD_W - 2 * theme::EDGE, CARD_H - 2 * theme::EDGE} : r;
+					if (w > 0)
+						fillRoundBand(in, at ? R_TILE - theme::EDGE : R_TILE, CARD_Y + CARD_H - 4, in.y + in.h, it.at.empty() ? DIM : ACCENT, x + w);
 				}
 				else
 				{
 					// the last: the whole list
-					drawGlyphMid(G_CLOCK, x + CARD_W / 2, CARD_Y + 30, at ? YELLOW : DIM, 3);
+					drawGlyphMid(G_CLOCK, x + CARD_W / 2, CARD_Y + 30, at ? ACCENT : DIM, 3);
 					drawTextMid("All recent", 1, ink, x + CARD_W / 2, CARD_Y + 66, CARD_W - 20, 2);
 					drawTextMid(std::to_string(recent.size()) + " played", 0, soft, x + CARD_W / 2, CARD_Y + 88, CARD_W - 20, 2);
 				}
-				if (at) drawBorder(r, YELLOW);
 			}
 			SDL_RenderSetClipRect(ren, nullptr);
 		}
@@ -8185,9 +8288,8 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 		{
 			Rect t = tileRect(g);
 			bool at = lit && homeZone == HOME_GRID && homeGrid == g, soon = g == TAB_EXT;
-			fill(t, homePress == HOME_TILE + g ? PRESSED : at ? TEAL : SURFACE);
-			if (at) drawBorder(t, YELLOW);
-			SDL_Color ink = at ? YELLOW : CREAM, soft = at ? DIM_TEAL : DIM, mark = at ? YELLOW : soon ? DIM : CREAM;
+			drawBox(t, homePress == HOME_TILE + g ? PRESSED : at ? BUTTON : SURFACE, R_TILE, at);
+			SDL_Color ink = at ? ACCENT : TEXT, soft = at ? DIM_ON : DIM, mark = at ? ACCENT : soon ? DIM : TEXT;
 			const Glyph& gl = *SECTION_GLYPHS[g];
 			if (has)
 			{
@@ -8204,7 +8306,7 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 				drawTextMid(tileSub(g), 0, soft, t.x + t.w / 2, t.y + 138, t.w - 20, 2);
 			}
 		}
-		if (quitArmed) { drawFooterText("Press B again to quit", YELLOW); return; }
+		if (quitArmed) { drawFooterText("Press B again to quit", ACCENT); return; }
 		if (homeZone == HOME_STRIP && has && homeStrip < (int)recent.size())
 			drawHints({{"A", "Play"}, {"Y", "Menu"}, {"X", "Options"}, {"B", "Quit"}, {"START", "Menu"}});
 		else if (homeZone == HOME_STRIP && has) drawHints({{"A", "Open"}, {"X", "Options"}, {"B", "Quit"}, {"START", "Menu"}});
@@ -8228,16 +8330,16 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 		Rect first = pipRect(0, p);
 		// (inside Liked: its name, as its line has no place to say it)
 		bool liked = isPlDir(browseDir) && plIsLiked(plFileOf(browseDir));
-		drawTextMid(liked ? PlaylistStore::LIKED_NAME : SECTION_NAMES[browseTab], 2, CREAM, 72, 32, std::max(40, first.x - 22 - 72));
-		drawTextMid("L", 0, YELLOW, first.x - 10, 32, 0, 1);
+		drawTextMid(liked ? PlaylistStore::LIKED_NAME : SECTION_NAMES[browseTab], 2, TEXT, 72, 32, std::max(40, first.x - 22 - 72));
+		drawTextMid("L", 0, ACCENT, first.x - 10, 32, 0, 1);
 		for (int k = 0; k < BROWSE_TABS; k++)
 		{
 			Rect r = pipRect(k, p);
 			bool on = k == browseTab;
-			fill(r, on ? YELLOW : SURFACE);
-			drawGlyphMid(*SECTION_GLYPHS[k], r.x + r.w / 2, r.y + r.h / 2, on ? BG : DIM);
+			drawBox(r, on ? ACCENT : SURFACE, R_BUTTON);
+			drawGlyphMid(*SECTION_GLYPHS[k], r.x + r.w / 2, r.y + r.h / 2, on ? ON_ACCENT : DIM);
 		}
-		drawTextMid("R", 0, YELLOW, first.x + 164, 32);
+		drawTextMid("R", 0, ACCENT, first.x + 164, 32);
 		drawBattery(616, 24, p);
 	}
 }

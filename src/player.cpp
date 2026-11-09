@@ -7,6 +7,7 @@
 #include "sidecar.h"
 #include "soundfx.h"
 #include "playlist.h"
+#include "theme.h"
 #include <algorithm>
 #include <chrono>
 #include <cmath>
@@ -33,6 +34,26 @@ namespace bp
 	static const double PANEL_ASPECT = 4.0 / 3;
 	// the thumbnail's largest size: the pan area's on the Plus's 1024x768 panel
 	static const int THUMB_MAX_W = 560, THUMB_MAX_H = 420;
+
+	using namespace theme;
+
+	// an ASS drawing of a w x h box from 0 0, its corners quarter circles of radius r (cubic beziers)
+	static std::string roundBox(int w, int h, int r)
+	{
+		r = std::max(0, std::min({r, w / 2, h / 2}));
+		char d[256];
+		if (!r)
+		{
+			snprintf(d, sizeof d, "m 0 0 l %d 0 %d %d 0 %d", w, w, h, h);
+			return d;
+		}
+		int c = (int)std::lround(r * 0.4477);	// the control points' distance from the corner (1 - 0.5523 of r)
+		snprintf(d, sizeof d,
+			"m %d 0 l %d 0 b %d 0 %d %d %d %d l %d %d b %d %d %d %d %d %d l %d %d b %d %d %d %d %d %d l %d %d b %d %d %d %d %d %d",
+			r, w - r, w - c, w, c, w, r, w, h - r, w, h - c, w - c, h, w - r, h, r, h, c, h, 0, h - c, 0, h - r, 0, r,
+			0, c, c, 0, r, 0);
+		return d;
+	}
 
 	static std::string baseName(const std::string& p)
 	{
@@ -923,7 +944,7 @@ namespace bp
 		spinnerStep = step;
 		// eight dots round the middle of a 960x720 canvas, one lit going round, the word under them, on a dark card
 		// (the last file's picture can still be up)
-		std::string ev = "{\\an7\\pos(390,262)\\bord0\\shad0\\1c&H1C1617&\\1a&H08&\\p1}m 0 0 l 180 0 180 180 0 180{\\p0}\n";
+		std::string ev = "{\\an7\\pos(390,262)\\bord0\\shad0\\1c" + ass(TOP_CARD) + "\\1a&H08&\\p1}" + roundBox(180, 180, R_TOP_CARD) + "{\\p0}\n";
 		for (int i = 0; i < 8; i++)
 		{
 			double a = i * M_PI / 4;
@@ -931,10 +952,11 @@ namespace bp
 			int age = (step % 8 - i + 8) % 8;	// the lit one, then fading behind it
 			const char* alpha = age == 0 ? "00" : age == 1 ? "40" : age == 2 ? "80" : "B0";
 			char d[160];
-			snprintf(d, sizeof d, "{\\an7\\pos(%d,%d)\\bord0\\shad0\\1c&H29B4F0&\\1a&H%s&\\p1}m 0 0 l 12 0 12 12 0 12{\\p0}\n", x - 6, y - 6, alpha);
+			snprintf(d, sizeof d, "{\\an7\\pos(%d,%d)\\bord0\\shad0\\1c%s\\1a&H%s&\\p1}m 0 0 l 12 0 12 12 0 12{\\p0}\n", x - 6, y - 6,
+				ass(TOP_TITLE).c_str(), alpha);
 			ev += d;
 		}
-		ev += "{\\an8\\pos(480,390)\\bord2\\shad0\\fnInter\\fs30\\1c&HE2EDF1&}";
+		ev += "{\\an8\\pos(480,390)\\bord2\\shad0\\fnInter\\fs30\\1c" + ass(TEXT) + "}";
 		ev += loading() ? "Loading" : "Buffering";
 		const char* cmd[] = {"osd-overlay", "4", "ass-events", ev.c_str(), "960", "720", "20", "no", "no", nullptr};
 		mpv_command_async(mpv, 0, cmd);
@@ -1395,13 +1417,15 @@ namespace bp
 		int fill = 260 * percent / 100;
 		// with nothing playing, under the icon and the name rather than over them
 		int dy = playing() ? 0 : 250;
-		char ev[1024];
+		char ev[2048];
 		snprintf(ev, sizeof ev,
-			"{\\an7\\pos(330,%d)\\bord0\\shad0\\1c&H1C1617&\\1a&H20&\\p1}m 0 0 l 300 0 300 84 0 84{\\p0}\n"
-			"{\\an7\\pos(350,%d)\\bord0\\shad0\\fs30\\1c&HE2EDF1&}%s  %d%%\n"
-			"{\\an7\\pos(350,%d)\\bord0\\shad0\\1c&H464323&\\p1}m 0 0 l 260 0 260 12 0 12{\\p0}\n"
-			"{\\an7\\pos(350,%d)\\bord0\\shad0\\1c&H29B4F0&\\p1}m 0 0 l %d 0 %d 12 0 12{\\p0}",
-			318 + dy, 328 + dy, label.c_str(), percent, 372 + dy, 372 + dy, std::max(fill, 1), std::max(fill, 1));
+			"{\\an7\\pos(330,%d)\\bord0\\shad0\\1c%s\\1a&H20&\\p1}%s{\\p0}\n"
+			"{\\an7\\pos(350,%d)\\bord0\\shad0\\fs30\\1c%s}%s  %d%%\n"
+			"{\\an7\\pos(350,%d)\\bord0\\shad0\\1c%s\\p1}%s{\\p0}\n"
+			"{\\an7\\pos(350,%d)\\bord0\\shad0\\1c%s\\p1}%s{\\p0}",
+			318 + dy, ass(TOP_CARD).c_str(), roundBox(300, 84, R_TOP_CARD).c_str(), 328 + dy, ass(TEXT).c_str(), label.c_str(), percent,
+			372 + dy, ass(TOP_TRACK).c_str(), roundBox(260, 12, R_TOP_BAR).c_str(), 372 + dy, ass(TOP_TITLE).c_str(),
+			roundBox(std::max(fill, 1), 12, R_TOP_BAR).c_str());
 		const char* cmd[] = {"osd-overlay", "2", "ass-events", ev, "960", "720", "10", "no", "no", nullptr};
 		mpv_command_async(mpv, 0, cmd);
 	}
@@ -1417,7 +1441,7 @@ namespace bp
 		// the icon as ASS drawings, a run of pixels a rectangle, one event a colour; on a 960x720 canvas
 		const int px = 6, x0 = 480 - 16 * px, y0 = 110;
 		std::string ev;
-		const struct { char c; const char* colour; } inks[] = {{'.', "&H181314&"}, {'Y', "&H1CC2F8&"}, {'W', "&HEAF4F7&"}};
+		const struct { char c; std::string colour; } inks[] = {{'.', ass(TOP_SQUARE)}, {'Y', ass(TOP_TITLE)}, {'W', ass(TEXT)}};
 		for (auto& ink : inks)
 		{
 			std::string path;
@@ -1433,11 +1457,11 @@ namespace bp
 					x = e;
 				}
 			char head[128];
-			snprintf(head, sizeof head, "{\\an7\\pos(%d,%d)\\bord0\\shad0\\1c%s\\p1}", x0, y0, ink.colour);
+			snprintf(head, sizeof head, "{\\an7\\pos(%d,%d)\\bord0\\shad0\\1c%s\\p1}", x0, y0, ink.colour.c_str());
 			ev += head + path + "{\\p0}\n";
 		}
-		ev += "{\\an8\\pos(480,330)\\bord0\\shad0\\fnPixelify Sans\\fs72\\1c&H29B4F0&}Banana Player\n";
-		ev += "{\\an8\\pos(480,420)\\bord0\\shad0\\fnInter\\fs30\\1c&H7C868A&}Pick a video or a song on the bottom screen";
+		ev += "{\\an8\\pos(480,330)\\bord0\\shad0\\fnPixelify Sans\\fs72\\1c" + ass(TOP_TITLE) + "}Banana Player\n";
+		ev += "{\\an8\\pos(480,420)\\bord0\\shad0\\fnInter\\fs30\\1c" + ass(TOP_SUB) + "}Pick a video or a song on the bottom screen";
 		const char* cmd[] = {"osd-overlay", "3", "ass-events", ev.c_str(), "960", "720", "0", "no", "no", nullptr};
 		mpv_command_async(mpv, 0, cmd);
 	}
@@ -1450,9 +1474,9 @@ namespace bp
 			mpv_command_async(mpv, 0, cmd);
 			return;
 		}
-		std::string ev = "{\\an7\\pos(0,0)\\bord0\\shad0\\1c&H1C1617&\\1a&H00&\\p1}m 0 0 l 960 0 960 720 0 720{\\p0}\n";
-		ev += "{\\an5\\pos(480,320)\\bord0\\shad0\\fnPixelify Sans\\fs56\\1c&H29B4F0&}Playing in your browser\n";
-		ev += "{\\an5\\pos(480,400)\\bord0\\shad0\\fnInter\\fs30\\1c&H7C868A&}Press A to play here instead";
+		std::string ev = "{\\an7\\pos(0,0)\\bord0\\shad0\\1c" + ass(TOP_CARD) + "\\1a&H00&\\p1}m 0 0 l 960 0 960 720 0 720{\\p0}\n";
+		ev += "{\\an5\\pos(480,320)\\bord0\\shad0\\fnPixelify Sans\\fs56\\1c" + ass(TOP_TITLE) + "}Playing in your browser\n";
+		ev += "{\\an5\\pos(480,400)\\bord0\\shad0\\fnInter\\fs30\\1c" + ass(TOP_SUB) + "}Press A to play here instead";
 		const char* cmd[] = {"osd-overlay", "6", "ass-events", ev.c_str(), "960", "720", "5", "no", "no", nullptr};
 		mpv_command_async(mpv, 0, cmd);
 	}
@@ -1547,26 +1571,26 @@ namespace bp
 		std::string of = "Chapter " + std::to_string(index + 1) + " of " + std::to_string(n);
 		bool untitled = chapterUntitled(chapters[index].title);
 		std::string ev =
-			"{\\an7\\pos(180,296)\\bord0\\shad0\\1c&H1C1617&\\1a&H20&\\p1}m 0 0 l 600 0 600 128 0 128{\\p0}\n";
+			"{\\an7\\pos(180,296)\\bord0\\shad0\\1c" + ass(TOP_CARD) + "\\1a&H20&\\p1}" + roundBox(600, 128, R_TOP_CARD) + "{\\p0}\n";
 		// the line 1 note over the first or last chapter, in yellow after the count
 		std::string note = edge < 0 ? "  \xc2\xb7  This is the first chapter" : edge > 0 ? "  \xc2\xb7  This is the last chapter" : "";
 		auto line1 = [&](const std::string& text) {
-			ev += "{\\an7\\pos(208,310)\\bord0\\shad0\\fnInter\\fs24\\1c&H7C868A&}" + text;
-			if (!note.empty()) ev += "{\\1c&H29B4F0&}" + note;
+			ev += "{\\an7\\pos(208,310)\\bord0\\shad0\\fnInter\\fs24\\1c" + ass(TOP_SUB) + "}" + text;
+			if (!note.empty()) ev += "{\\1c" + ass(TOP_TITLE) + "}" + note;
 			ev += "\n";
 		};
 		if (untitled)
 		{
 			// the count is the title line; a note has line 1 to itself (no empty title line under it)
 			if (!note.empty())
-				ev += "{\\an7\\pos(208,310)\\bord0\\shad0\\fnInter\\fs24\\1c&H29B4F0&}" + note.substr(6) + "\n";
-			ev += "{\\an7\\pos(208,340)\\bord0\\shad0\\fnInter\\fs32\\1c&HE2EDF1&}" + of + "\n";
+				ev += "{\\an7\\pos(208,310)\\bord0\\shad0\\fnInter\\fs24\\1c" + ass(TOP_TITLE) + "}" + note.substr(6) + "\n";
+			ev += "{\\an7\\pos(208,340)\\bord0\\shad0\\fnInter\\fs32\\1c" + ass(TEXT) + "}" + of + "\n";
 		}
 		else
 		{
 			line1(of);
 			if (!untitled)
-				ev += "{\\an7\\pos(208,340)\\bord0\\shad0\\fnInter\\fs32\\q2\\clip(180,296,780,424)\\1c&HE2EDF1&}" +
+				ev += "{\\an7\\pos(208,340)\\bord0\\shad0\\fnInter\\fs32\\q2\\clip(180,296,780,424)\\1c" + ass(TEXT) + "}" +
 					cardText(chapters[index].title, 32) + "\n";
 		}
 		// the bar: a segment a chapter by its start, a gap at each boundary (none in a segment under 6 units)
@@ -1583,8 +1607,8 @@ namespace bp
 				snprintf(r, sizeof r, "m %d 0 l %d 0 %d 10 %d 10 ", x0, x1, x1, x0);
 				(i == index ? yellow : teal) += r;
 			}
-			ev += "{\\an7\\pos(208,398)\\bord0\\shad0\\1c&H464323&\\p1}" + teal + "{\\p0}\n";
-			ev += "{\\an7\\pos(208,398)\\bord0\\shad0\\1c&H29B4F0&\\p1}" + yellow + "{\\p0}";
+			ev += "{\\an7\\pos(208,398)\\bord0\\shad0\\1c" + ass(TOP_TRACK) + "\\p1}" + teal + "{\\p0}\n";
+			ev += "{\\an7\\pos(208,398)\\bord0\\shad0\\1c" + ass(TOP_TITLE) + "\\p1}" + yellow + "{\\p0}";
 		}
 		const char* cmd[] = {"osd-overlay", "2", "ass-events", ev.c_str(), "960", "720", "10", "no", "no", nullptr};
 		mpv_command_async(mpv, 0, cmd);
@@ -1602,13 +1626,14 @@ namespace bp
 		// "Equalizer off"
 		std::string text = !fx ? (on ? "Equalizer \xc2\xb7 " + cardText(preset, 24) : "Equalizer off")
 							   : (on ? cardText(preset, 16) : "EQ off") + " \xc2\xb7 " + effect;
-		char e[512];
+		char e[1024];
 		snprintf(e, sizeof e,
-			"{\\an7\\pos(280,%d)\\bord0\\shad0\\1c&H1C1617&\\1a&H20&\\p1}m 0 0 l 400 0 400 124 0 124{\\p0}\n"
+			"{\\an7\\pos(280,%d)\\bord0\\shad0\\1c%s\\1a&H20&\\p1}%s{\\p0}\n"
 			"{\\an7\\pos(304,%d)\\bord0\\shad0\\fnInter\\fs28\\q2\\clip(280,%d,680,%d)\\1c%s}",
-			300 + dy, 312 + dy, 300 + dy, 424 + dy, on || fx ? "&HE2EDF1&" : "&H7C868A&");
+			300 + dy, ass(TOP_CARD).c_str(), roundBox(400, 124, R_TOP_CARD).c_str(), 312 + dy, 300 + dy, 424 + dy,
+			ass(on || fx ? TEXT : TOP_SUB).c_str());
 		std::string ev = e + text + "\n";
-		snprintf(e, sizeof e, "{\\an7\\pos(334,%d)\\bord0\\shad0\\1c&H464323&\\p1}m 0 0 l 292 0 292 2 0 2{\\p0}", 392 + dy);
+		snprintf(e, sizeof e, "{\\an7\\pos(334,%d)\\bord0\\shad0\\1c%s\\p1}m 0 0 l 292 0 292 2 0 2{\\p0}", 392 + dy, ass(TOP_TRACK).c_str());
 		ev += e;
 		// the curve: a bar a band, up or down from the teal line by its gain. One event each, its drawing from 0 0:
 		// libass places a drawing by its own box, so a shared one would move with its highest bar
@@ -1618,7 +1643,7 @@ namespace bp
 			int h = (int)std::lround(std::fabs(g) * 2.5);
 			if (!h) continue;
 			snprintf(e, sizeof e, "\n{\\an7\\pos(%d,%d)\\bord0\\shad0\\1c%s\\p1}m 0 0 l 22 0 22 %d 0 %d{\\p0}",
-				334 + 30 * i, g > 0 ? 392 + dy - h : 394 + dy, on ? "&H29B4F0&" : "&H7C868A&", h, h);
+				334 + 30 * i, g > 0 ? 392 + dy - h : 394 + dy, ass(on ? TOP_TITLE : TOP_SUB).c_str(), h, h);
 			ev += e;
 		}
 		const char* cmd[] = {"osd-overlay", "2", "ass-events", ev.c_str(), "960", "720", "10", "no", "no", nullptr};
@@ -1644,15 +1669,15 @@ namespace bp
 				path += r;
 				x = e;
 			}
-		char e[512];
+		char e[1024];
 		snprintf(e, sizeof e,
-			"{\\an7\\pos(280,%d)\\bord0\\shad0\\1c&H1C1617&\\1a&H20&\\p1}m 0 0 l 400 0 400 124 0 124{\\p0}\n"
+			"{\\an7\\pos(280,%d)\\bord0\\shad0\\1c%s\\1a&H20&\\p1}%s{\\p0}\n"
 			"{\\an7\\pos(%d,%d)\\bord0\\shad0\\1c%s\\p2}",
-			300 + dy, (int)std::lround(332 - w * 2.25), (int)std::lround(362 + dy - h * 2.25), ink);
+			300 + dy, ass(TOP_CARD).c_str(), roundBox(400, 124, R_TOP_CARD).c_str(), (int)std::lround(332 - w * 2.25), (int)std::lround(362 + dy - h * 2.25), ink);
 		std::string ev = e + path + "{\\p0}\n";
-		snprintf(e, sizeof e, "{\\an4\\pos(382,%d)\\bord0\\shad0\\fnInter\\fs28\\q2\\clip(280,%d,668,%d)\\1c&HE2EDF1&}", 345 + dy, 300 + dy, 424 + dy);
+		snprintf(e, sizeof e, "{\\an4\\pos(382,%d)\\bord0\\shad0\\fnInter\\fs28\\q2\\clip(280,%d,668,%d)\\1c%s}", 345 + dy, 300 + dy, 424 + dy, ass(TEXT).c_str());
 		ev += e + cardText(line1, 30) + "\n";
-		snprintf(e, sizeof e, "{\\an4\\pos(382,%d)\\bord0\\shad0\\fnInter\\fs22\\q2\\clip(280,%d,668,%d)\\1c&H7C868A&}", 384 + dy, 300 + dy, 424 + dy);
+		snprintf(e, sizeof e, "{\\an4\\pos(382,%d)\\bord0\\shad0\\fnInter\\fs22\\q2\\clip(280,%d,668,%d)\\1c%s}", 384 + dy, 300 + dy, 424 + dy, ass(TOP_SUB).c_str());
 		ev += e + cardText(line2, 30);
 		const char* cmd[] = {"osd-overlay", "2", "ass-events", ev.c_str(), "960", "720", "10", "no", "no", nullptr};
 		mpv_command_async(mpv, 0, cmd);
@@ -1837,7 +1862,7 @@ namespace bp
 				? "Chapter " + std::to_string(c + 1) + " of " + std::to_string(chapters.size()) : cardText(chapters[c].title, 36);
 			// (no \q2: libass takes an event's last wrap style for all of it, and the title would stop wrapping; the
 			// label's cut keeps it to one line)
-			text += "\\N{\\b0}{\\fs" + std::to_string(big * 3 / 4) + "}{\\c&H29B4F0&}" + assText(label) + "{\\c&HFFFFFF&}";
+			text += "\\N{\\b0}{\\fs" + std::to_string(big * 3 / 4) + "}{\\c" + ass(TOP_TITLE) + "}" + assText(label) + "{\\c&HFFFFFF&}";
 		}
 		if (!artist.empty()) text += "\\N{\\fs" + std::to_string(big * 3 / 4) + "}" + assText(artist);
 		if (!album.empty()) text += "\\N{\\fs" + std::to_string(big * 2 / 3) + "}{\\c&HB4B4B4&}" + assText(album);

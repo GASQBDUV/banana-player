@@ -1,0 +1,357 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Banana Player Themes</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=Pixelify+Sans:wght@400&display=swap" rel="stylesheet">
+<style>
+:root { --page: #0e0d11; --ink: #ece8de; --mute: #9a958a; --line: #2a2830; }
+* { box-sizing: border-box; margin: 0; }
+body { background: var(--page); color: var(--ink); font: 400 15px/1.45 Inter, system-ui, sans-serif; padding: 20px 16px 60px; }
+*, *::before, *::after { font-variant-ligatures: none; font-feature-settings: "liga" 0, "clig" 0; }
+h1 { font: 400 28px/1.1 "Pixelify Sans", monospace; letter-spacing: .02px; }
+.wrap { max-width: 1320px; margin: 0 auto; }
+.sub { color: var(--mute); margin: 6px 0 16px; max-width: 900px; }
+.switch { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; position: sticky; top: 0; padding: 10px 0; background: var(--page); z-index: 5; }
+.switch button { font: 400 18px/1 "Pixelify Sans", monospace; letter-spacing: .02px; padding: 10px 14px; border: 2px solid var(--line); background: #1a1920; color: var(--ink); cursor: pointer; display: flex; gap: 8px; align-items: center; }
+.switch button .dot { width: 14px; height: 14px; display: inline-block; }
+.switch button[aria-pressed="true"] { border-color: var(--ink); background: #26242c; }
+.switch .k { color: var(--mute); font-size: 13px; }
+.why { border-left: 3px solid; padding: 6px 12px; margin-bottom: 16px; max-width: 980px; }
+.why b { font-weight: 600; }
+.why .from { color: var(--mute); display: block; margin-top: 2px; }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 520px), 1fr)); gap: 18px; }
+.cap { font: 600 13px/1 Inter, sans-serif; color: var(--mute); text-transform: uppercase; letter-spacing: .06em; margin-bottom: 6px; }
+.frame { width: 100%; aspect-ratio: 4 / 3; position: relative; overflow: hidden; outline: 1px solid #000; }
+.panel { position: absolute; left: 0; top: 0; width: 640px; height: 480px; transform-origin: 0 0; overflow: hidden; font-family: "Pixelify Sans", monospace; letter-spacing: .02px; }
+.panel .a { position: absolute; white-space: nowrap; }
+.panel .btn { cursor: pointer; overflow: hidden; }
+body { --ro: 0; --eo: 0; }
+body.corners-round { --ro: 1; }
+body.corners-edge { --ro: 1; --eo: 1; }
+.switch .sep { width: 1px; background: var(--line); margin: 0 6px; }
+.switch button.mode { font-size: 15px; padding: 10px 12px; }
+.panel .t { position: absolute; white-space: nowrap; overflow: hidden; text-overflow: clip; }
+.panel svg { display: block; shape-rendering: crispEdges; }
+.lower { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr); gap: 18px; margin-top: 22px; }
+@media (max-width: 900px) { .lower { grid-template-columns: 1fr; } }
+table { border-collapse: collapse; width: 100%; font-size: 13.5px; }
+th, td { text-align: left; padding: 5px 8px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+th { color: var(--mute); font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: .05em; }
+td code { font: 12.5px ui-monospace, Menlo, monospace; }
+.sw { display: inline-block; width: 22px; height: 16px; vertical-align: middle; margin-right: 6px; outline: 1px solid #ffffff22; }
+.pair { display: inline-block; padding: 2px 8px; font: 400 14px/1.3 "Pixelify Sans", monospace; }
+.ok { color: #7fd18b; } .meh { color: #e6c25a; } .bad { color: #ff7b72; }
+.tablewrap { overflow-x: auto; }
+.note { color: var(--mute); font-size: 13px; margin-top: 8px; }
+.compare { margin-top: 28px; }
+.strip { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 230px), 1fr)); gap: 12px; }
+.strip .frame { cursor: pointer; }
+</style>
+</head>
+<body>
+<div class="wrap">
+	<h1>Banana Player themes</h1>
+	<p class="sub">Four dark themes next to today's Classic, drawn on the bottom panel's 640×480 layout from <code>ui.cpp</code>'s coordinates. Press and hold a button to see its pressed colour. Keys 1–5 switch themes; Square / Rounded / Rounded + edge compares corners (radii from BananaOS's menu: 10 on buttons, tabs and rows, 14 on tiles and cards, 12 on overlay cards).</p>
+	<div class="switch" id="switch"></div>
+	<div class="why" id="why"></div>
+	<div class="grid" id="screens"></div>
+	<div class="lower">
+		<div>
+			<div class="cap">Palette and contrast (WCAG ratio; text needs 4.5, controls against the page 3)</div>
+			<div class="tablewrap"><table id="swatches"></table></div>
+			<p class="note" id="notes"></p>
+		</div>
+		<div>
+			<div class="cap">Web dashboard (same tokens, web/style.css)</div>
+			<div class="frame" style="aspect-ratio:auto;height:auto;outline:none" id="web"></div>
+		</div>
+	</div>
+	<div class="compare">
+		<div class="cap">All five, playing screen (tap one to switch)</div>
+		<div class="strip" id="strip"></div>
+	</div>
+</div>
+<script>
+const G = {"G_BACK": ["....##", "...##.", "..##..", ".##...", "##....", ".##...", "..##..", "...##.", "....##"], "G_PREV": ["##.....##", "##....###", "##..#####", "#########", "#########", "##..#####", "##....###", "##.....##"], "G_NEXT": ["##.....##", "###....##", "#####..##", "#########", "#########", "#####..##", "###....##", "##.....##"], "G_HEART_O": [".###...###.", "#...#.#...#", "#....#....#", "#.........#", "#.........#", ".#.......#.", "..#.....#..", "...#...#...", "....#.#....", ".....#....."], "G_PAUSE": ["###..###", "###..###", "###..###", "###..###", "###..###", "###..###", "###..###", "###..###"], "G_PL_ADD": ["#######....", "...........", "#######....", "...........", "####....#..", "........#..", "......#####", "........#..", "........#.."], "G_LOOP": [".......#...", ".########..", "#......#...", "#.........#", "#.........#", "...#......#", "..########.", "...#......."], "G_EQ": [".#...#...#.", ".#..###..#.", ".#..###..#.", "###..#...#.", "###..#...#.", ".#...#..###", ".#...#..###", ".#...#...#.", ".#...#...#."], "G_PICTURE": ["###########", "#.........#", "#......##.#", "#......##.#", "#....#....#", "#...###...#", "#..#####..#", "#.#######.#", "#.........#", "###########"], "G_LOCK": ["..#####..", ".##...##.", ".#.....#.", ".#.....#.", "#########", "#########", "####.####", "####.####", "#########", "#########"], "G_INFO": ["..#####..", ".###.###.", "#########", "###..####", "####.####", "####.####", "####.####", ".##...##.", "..#####.."], "G_MOON": ["...####..", ".####....", ".###.....", "###......", "###......", "###......", ".###....#", ".#######.", "...####.."], "G_POWER": ["....#....", ".#..#..#.", "#...#...#", "#...#...#", "#.......#", "#.......#", ".#.....#.", "..#####.."], "G_SPEAKER": ["....#....", "...##..#.", "####.#..#", "####..#.#", "####..#.#", "####.#..#", "...##..#.", "....#...."], "G_NOTE": ["......####", "......####", "......#..#", "......#...", "......#...", "......#...", "...####...", "..#####...", "..#####...", "...###...."], "G_CARD": ["...#######", "..##.#.#.#", ".###.#.#.#", ".#########", ".#########", ".#########", ".#########", ".#########", ".#########", ".#########"], "G_PLAYLIST": ["#######....", "...........", "#######.###", "........###", "#######.#..", "........#..", "####....#..", ".....####..", "....#####..", ".....###..."], "G_NETWORK": ["...#####...", "...#####...", "...#####...", ".....#.....", ".#########.", ".#.......#.", "###.....###", "###.....###", "###.....###"], "G_BLOCKS": ["#####.#####", "#####.#####", "#####.#####", "#####.#####", "#####.#####", "...........", "#####...#..", "#####...#..", "#####.#####", "#####...#..", "#####...#.."], "G_FILM": ["###########", "#.#.#.#.#.#", "###########", "###########", "###########", "###########", "###########", "#.#.#.#.#.#", "###########"], "G_PLAY": ["##......", "####....", "######..", "########", "########", "######..", "####....", "##......"], "G_CC": ["###########", "###########", "#.......###", "###########", "###########", "##.....##.#", "###########", "###########"], "G_BOOKMARK": ["#######", "#######", "#######", "#######", "#######", "#######", "#######", "###.###", "##...##", "#.....#"], "G_FOLDER": ["#####......", "###########", "###########", "###########", "###########", "###########", "###########", "###########", "###########"], "G_SUN": ["....#....", ".#.....#.", "...###...", "..#####..", "#.#####.#", "..#####..", "...###...", ".#.....#.", "....#...."], "G_DOWNLOAD": ["...###...", "...###...", "...###...", "#########", ".#######.", "..#####..", "...###...", "....#....", ".........", "#########"], "G_WEB": ["..#####..", ".#..#..#.", "#..#.#..#", "#########", "#..#.#..#", "#########", "#..#.#..#", ".#..#..#.", "..#####.."], "G_RIGHT": ["##...", ".##..", "..##.", "...##", "..##.", ".##..", "##..."], "G_TITLE_ONLY": ["#########", "#########", ".........", ".#######.", ".........", "..#####.."]};
+const LOGO = ["    ........................    ", "  ............................  ", " .............YYYY............. ", " .........YYYYYYYYYYY.......... ", ".........YYYYYY......YYY........", ".......YYYYYY.....YY...YY.......", "......YYYYY.......YYYYY..Y......", ".....YYYYY........YYYYYY........", ".....YYYY...........YYYYY.......", "....YYYY..............YYYY......", "....YYYY...............YYYY.....", "....YYY.....WWW.........YYYY....", "...YYYY.....WWWW........YYYY....", "...YYYY.....WWWWWW.......YYY....", "...YYYY.....WWWWWWWW.....YYYY...", "...YYYY.....WWWWWWWWWW...YYYY...", "...YYYY.....WWWWWWWWWW...YYYY...", "...YYYY.....WWWWWWWW.....YYYY...", "....YYY.....WWWWWW.......YYYY...", "....YYYY....WWWW.........YYYY...", "....YYYY....WWW..........YYY....", ".....YYYY...............YYYY....", "......YYYY..............YYYY....", ".......YYYYY...........YYYY.....", "........YYYYYY........YYYYY.....", "......Y..YYYYY.......YYYYY......", ".......YY...YY.....YYYYYY.......", "........YYY......YYYYYY.........", " ..........YYYYYYYYYYY......... ", " .............YYYY............. ", "  ............................  ", "    ........................    "];
+
+// Roles: bg (the panel), surface (tiles, cards, dialogs), button, pressed, focus/focusEdge/focusInk/focusSub (the cursor's
+// row or card), accent (key hints, Playing, the bar's fill, the selected tab), onAccent (ink on the accent), text, dim,
+// dimOn (secondary text on a button), danger, track (the bar's empty part), knob, top* (the top panel's idle screen and
+// overlay cards), and the web dashboard's own extras.
+const THEMES = [
+	{ id: "classic", name: "Classic", tag: "today",
+		why: "<b>Today's look.</b> BananaOS's ink, background and banana yellow, with the player's own teal for buttons and the cursor.",
+		from: "Baseline for comparison.",
+		c: { bg: "#17161C", surface: "#211F28", button: "#234346", pressed: "#3A6E72", focus: "#234346", focusEdge: "#F0B429", focusInk: "#F0B429",
+			focusSub: "#B4AFA3", accent: "#F0B429", onAccent: "#17161C", text: "#F1EDE2", dim: "#8A867C", dimOn: "#B4AFA3", danger: "#E05A4F",
+			track: "#234346", knob: "#F1EDE2", screen: "#3A3A44", topBg: "#000000", topTitle: "#F0B429", topSub: "#8A867C", topSquare: "#17161C",
+			osdCard: "#17161C", osdTrack: "#234346", webPrimaryHover: "#FFC94A" } },
+	{ id: "bananaos", name: "Banana OS", tag: "native",
+		why: "<b>Feels like the system menu.</b> The teal gives way to BananaOS's plum-grey panels; the cursor becomes a solid yellow block with dark ink and a white edge, as BananaOS picks a row; a faint dot pattern on the background like its screens.",
+		from: "From BananaOS: <code>settings_pal.cpp</code> Dark (panelBand #3A3540, screenBand #2E2B33, muted #A39D8E), the yellow accent set (#F0B429 / band #FFCF5C / dark #8A5A00), <code>pickEdge</code> white, the ditherA/B dots.",
+		dither: true,
+		c: { bg: "#17161C", surface: "#232129", button: "#423C49", pressed: "#5A5266", focus: "#F0B429", focusEdge: "#FFFFFF", focusInk: "#17161C",
+			focusSub: "#5C3C00", accent: "#F0B429", onAccent: "#17161C", text: "#F1EDE2", dim: "#A39D8E", dimOn: "#CFC9BB", danger: "#E8574D",
+			track: "#2E2B33", knob: "#FFFFFF", screen: "#38333B", topBg: "#000000", topTitle: "#F0B429", topSub: "#A39D8E", topSquare: "#17161C",
+			osdCard: "#191820", osdTrack: "#3A3540", webPrimaryHover: "#FFCF5C" } },
+	{ id: "midnight", name: "Midnight", tag: "picked",
+		why: "<b>Lights out.</b> True black, so the bottom panel matches the black around a video on the top one and the two screens read as one device in a dark room. A brighter yellow and a softer cream keep text crisp without glowing.",
+		from: "From BananaOS: the boot splash's black, <code>screenFrame</code> #0B0A0D, the brighter yellow it uses for values being changed (#FFD23F), and <code>edge</code> #E8E2D3 for text.",
+		c: { bg: "#000000", surface: "#121116", button: "#26242E", pressed: "#3E3B4A", focus: "#26242E", focusEdge: "#FFD23F", focusInk: "#FFD23F",
+			focusSub: "#ABA597", accent: "#FFD23F", onAccent: "#000000", text: "#E8E2D3", dim: "#8F8A80", dimOn: "#ABA597", danger: "#F0645A",
+			track: "#1E1D24", knob: "#E8E2D3", screen: "#26242E", topBg: "#000000", topTitle: "#FFD23F", topSub: "#8F8A80", topSquare: "#121116",
+			osdCard: "#0B0A0D", osdTrack: "#26242E", webPrimaryHover: "#FFE68A" } },
+	{ id: "sunset", name: "Sunset", tag: "warm",
+		why: "<b>Warm and evening-ish, for music.</b> Deep plum with a ripe orange accent and peach text; the cursor's text goes peach so the outline stays the strongest orange.",
+		from: "From BananaOS: its Sunset theme (screenBg #1A0C2E, band #3A1650, accent #FF8C42 / band #FFB070, ink #FFEEDD, muted #D9A3C2).",
+		c: { bg: "#1A0C2E", surface: "#28133F", button: "#4A1F63", pressed: "#6A2C85", focus: "#4A1F63", focusEdge: "#FF8C42", focusInk: "#FFB070",
+			focusSub: "#D9A3C2", accent: "#FF8C42", onAccent: "#1A0C2E", text: "#FFEEDD", dim: "#B88BAE", dimOn: "#D9A3C2", danger: "#FF5C77",
+			track: "#3A1650", knob: "#FFEEDD", screen: "#3A1650", topBg: "#000000", topTitle: "#FF8C42", topSub: "#B88BAE", topSquare: "#1A0C2E",
+			osdCard: "#1A0C2E", osdTrack: "#4A1F63", webPrimaryHover: "#FFB070" } },
+	{ id: "ocean", name: "Ocean", tag: "cool",
+		why: "<b>Today's teal taken all the way.</b> Navy panels, blue-teal buttons and a cyan accent: calm for long videos, and the closest cousin of Classic.",
+		from: "From BananaOS: its Ocean theme (screenBg #0B1D2A, panelBody #0E2638, chipBand #173A52, accent #3CC6E8, ink #E4F6FF, muted #8FB6C9).",
+		c: { bg: "#0B1D2A", surface: "#102A3D", button: "#1F4B68", pressed: "#2E6688", focus: "#1F4B68", focusEdge: "#3CC6E8", focusInk: "#7FDCF2",
+			focusSub: "#A9CCDC", accent: "#3CC6E8", onAccent: "#06121B", text: "#E4F6FF", dim: "#8FB6C9", dimOn: "#A9CCDC", danger: "#FF6B5E",
+			track: "#173A52", knob: "#E4F6FF", screen: "#173A52", topBg: "#000000", topTitle: "#3CC6E8", topSub: "#8FB6C9", topSquare: "#0B1D2A",
+			osdCard: "#06121B", osdTrack: "#1D4560", webPrimaryHover: "#7FDCF2" } },
+];
+
+// ---- contrast ----
+function lum(h) { const c = [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16) / 255).map(x => x <= 0.03928 ? x / 12.92 : ((x + 0.055) / 1.055) ** 2.4); return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]; }
+function cr(a, b) { const x = lum(a), y = lum(b); return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05); }
+
+// ---- drawing: everything in 640x480 units ----
+let C;	// the theme's colours while drawing
+function box(x, y, w, h, fill, extra = "") { return `<div class="a" style="left:${x}px;top:${y}px;width:${w}px;height:${h}px;background:${fill};${extra}"></div>`; }
+function glyph(name, x, y, color, cell = 2) {
+	const rows = G[name], w = Math.max(...rows.map(r => r.length)), h = rows.length;
+	let r = "";
+	rows.forEach((row, j) => { let i = 0; while (i < row.length) { if (row[i] === "#") { let k = i; while (k < row.length && row[k] === "#") k++; r += `<rect x="${i}" y="${j}" width="${k - i}" height="1"/>`; i = k; } else i++; } });
+	return `<svg class="a" style="left:${x}px;top:${y}px" width="${w * cell}" height="${h * cell}" viewBox="0 0 ${w} ${h}" fill="${color}">${r}</svg>`;
+}
+function gw(name, cell = 2) { return Math.max(...G[name].map(r => r.length)) * cell; }
+function gh(name, cell = 2) { return G[name].length * cell; }
+function glyphMid(name, cx, cy, color, cell = 2) { return glyph(name, Math.round(cx - gw(name, cell) / 2), Math.round(cy - gh(name, cell) / 2), color, cell); }
+// text with its middle at cy; align l / c / r against x (and w for c)
+function text(s, x, cy, size, color, align = "l", w = 0, font = "") {
+	const lh = Math.round(size * 1.25), top = Math.round(cy - lh / 2);
+	const ff = font ? `font-family:${font};` : "";
+	if (align === "l") return `<div class="t" style="left:${x}px;top:${top}px;line-height:${lh}px;font-size:${size}px;color:${color};${ff}${w ? `width:${w}px;` : ""}">${s}</div>`;
+	if (align === "r") return `<div class="t" style="right:${640 - x}px;top:${top}px;line-height:${lh}px;font-size:${size}px;color:${color};${ff}text-align:right">${s}</div>`;
+	return `<div class="t" style="left:${x}px;width:${w}px;top:${top}px;line-height:${lh}px;font-size:${size}px;color:${color};${ff}text-align:center">${s}</div>`;
+}
+// a button that shows its pressed colour while held
+// corners from BananaOS's menu look (rnds BoxCss / the companion's box kinds): r is the radius in 640x480 units, scaled
+// by --ro (0 square, 1 rounded); --eo adds BananaOS's 2 px edge and its darker bottom lip
+function mix(a, b, t) { const p = s => [1, 3, 5].map(i => parseInt(s.slice(i, i + 2), 16)); const x = p(a), y = p(b); return "#" + x.map((v, i) => Math.round(v + (y[i] - v) * t).toString(16).padStart(2, "0")).join(""); }
+function rad(r) { return `border-radius:calc(var(--ro) * ${r}px);`; }
+function edge(fill) { return `box-shadow:inset 0 0 0 calc(var(--eo) * 2px) ${mix(fill, C.text, 0.3)}, inset 0 calc(var(--eo) * -5px) 0 rgba(0,0,0,.3);`; }
+function btn(x, y, w, h, inner, fill = C.button, extra = "", r = 10) {
+	return `<div class="a btn" data-fill="${fill}" style="left:${x}px;top:${y}px;width:${w}px;height:${h}px;background:${fill};${rad(r)}${edge(fill)}${extra}">${inner}</div>`;
+}
+function panelBg(t) {
+	const dots = t.dither ? "background-image:repeating-conic-gradient(rgba(255,255,255,.045) 0 25%, transparent 0 50%);background-size:2px 2px;" : "";
+	return `background-color:${C.bg};${dots}`;
+}
+function header(title) {
+	return btn(8, 8, 48, 48, glyphMid("G_BACK", 24, 24, C.text, 3)) + text(title, 73, 33, 30, C.text) + text("21:47", 616, 32, 16, C.text, "r");
+}
+function hints(list) {
+	// centred row of "KEY Label" pairs
+	const inner = list.map(([k, l]) => `<span style="color:${C.accent}">${k}</span>&nbsp;<span style="color:${C.dim}">${l}</span>`).join("<span style='display:inline-block;width:22px'></span>");
+	return text(inner, 0, 458, 15, C.dim, "c", 640);
+}
+
+// a grid button: glyph + label on top, key or note under it
+function gridBtn(x, y, glyphName, label, key, kind) {
+	const off = kind === "off", ink = off ? C.dim : C.text, keyInk = off ? C.dim : kind === "note" ? C.dimOn : C.accent;
+	const size = 22, gwid = glyphName ? gw(glyphName) + 7 : 0;
+	// rough width of the label to centre glyph + label together
+	const lw = label.length * size * 0.52, start = Math.round(54 - (gwid + lw) / 2);
+	let inner = "";
+	if (glyphName) inner += glyphMid(glyphName, start + gw(glyphName) / 2, 24, ink);
+	inner += text(label, start + gwid, 24, size, ink);
+	inner += text(key, 0, 46, 13, keyInk, "c", 108);
+	return btn(x, y, 108, 60, inner);
+}
+function playing(t) {
+	const xs = [24, 145, 266, 387, 508];
+	let h = header("Sunny Peel");
+	h += glyph("G_CARD", 27, 61, C.dim) + text(`wlib / Music / <span style="color:${C.text}">Yellow Album</span>`, 53, 70, 15, C.dim) + text("Local", 616, 70, 15, C.dim, "r");
+	h += glyph("G_PLAY", 24, 90, C.accent) + text("Playing", 53, 101, 22, C.accent) + text("1 / 3", 616, 100, 15, C.dim, "r");
+	const fx = 24 + Math.round(592 * 0.38);
+	h += box(24, 150, 592, 24, C.track, rad(6) + "overflow:hidden") + box(24, 150, fx - 24, 24, C.accent, rad(6) + "border-top-right-radius:0;border-bottom-right-radius:0") + box(fx - 3, 144, 7, 36, C.knob, rad(2));
+	h += text("0:23", 24, 197, 22, C.text) + text("0:37 left", 0, 197, 14, C.dim, "c", 640) + text("1:00", 616, 197, 22, C.dim, "r");
+	const r1 = [["G_PREV", "Prev", "L", "off"], ["G_HEART_O", "Like", "L3"], ["G_PAUSE", "Pause", "A"], ["G_PL_ADD", "Add", "Playlist", "note"], ["G_NEXT", "Next", "R"]];
+	const r2 = [["G_LOOP", "Off", "X"], ["G_EQ", "FX", "Sound", "note"], ["G_PICTURE", "Art", "SELECT"], [null, "1x", "UP/DOWN"], [null, "Menu", "START"]];
+	r1.forEach((b, i) => h += gridBtn(xs[i], 228, ...b));
+	r2.forEach((b, i) => h += gridBtn(xs[i], 300, ...b));
+	h += glyph("G_SPEAKER", 24, 369, C.dim) + text("Track 1 · MP3 Stereo", 53, 378, 15, C.text);
+	h += glyph("G_EQ", 510, 369, C.dim) + text("EQ off", 537, 378, 15, C.dim) + glyph("G_RIGHT", 600, 369, C.dim);
+	h += glyph("G_NOTE", 26, 393, C.dim) + text("Banana Band · Yellow Album", 53, 403, 15, C.text);
+	const bb = [[24, "G_LOCK", "Lock"], [172, "G_INFO", "Info"], [320, "G_MOON", "Screen off"], [468, "G_POWER", "Quit", "B×2"]];
+	bb.forEach(([x, g, l, k]) => {
+		const w = x === 468 ? 148 : 140, lw = l.length * 8.4 + (k ? 40 : 0), s = Math.round(w / 2 - (gw(g) + 9 + lw) / 2);
+		let inner = glyphMid(g, s + gw(g) / 2, 22, C.text) + text(l, s + gw(g) + 9, 22, 16, C.text);
+		if (k) inner += text(k, s + gw(g) + 9 + l.length * 8.4 + 12, 22, 16, C.accent);
+		h += btn(x, 428, w, 44, inner);
+	});
+	return h;
+}
+function home(t) {
+	let h = header("Banana Player");
+	h += text("Recent", 16, 70, 14, C.dim);
+	const cards = [["Sintel (trailer)", "G_FILM", "0:06 / 0:53", 0.12], ["01 Sunny Peel", "G_NOTE", "Played · 1:00", 1], ["02 Split Decision", "G_NOTE", "Played · 1:12", 1]];
+	cards.forEach(([title, g, sub, p], i) => {
+		const x = 16 + 250 * i, at = i === 0;
+		const fill = at ? C.focus : C.surface, ink = at ? C.focusInk : C.text, subInk = at ? C.focusSub : C.dim;
+		let inner = text(title, 14, 34, 21, ink, "l", 220);
+		inner += glyph(g, 14, 70, subInk) + text(sub, 44, 78, 15, subInk);
+		const barInk = at ? (t.c.focus === t.c.accent ? C.onAccent : C.accent) : C.dim;
+		inner += box(0, 99, Math.round(240 * p), 4, barInk);
+		h += btn(x, 84, 240, 103, inner, fill, at ? `outline:2px solid ${C.focusEdge};outline-offset:-2px;` : "", 14);
+	});
+	const tiles = [[16, 200, "G_CARD", "Files", "wlib"], [328, 200, "G_PLAYLIST", "Playlists", "Liked · 3 playlists"], [16, 318, "G_NETWORK", "Network", "No connections yet"], [328, 318, "G_BLOCKS", "Extensions", "Coming soon", true]];
+	tiles.forEach(([x, y, g, title, sub, ph]) => {
+		let inner = glyphMid(g, 56, 55, ph ? C.dim : C.text, 4) + text(title, 105, 43, 28, C.text) + text(sub, 105, 76, 15, C.dim);
+		h += btn(x, y, 296, 110, inner, C.surface, "", 14);
+	});
+	h += hints([["A", "Play"], ["Y", "Menu"], ["X", "Options"], ["B", "Quit"], ["START", "Menu"]]);
+	return h;
+}
+function settings(t) {
+	let h = btn(8, 8, 48, 48, glyphMid("G_BACK", 24, 24, C.text, 3));
+	h += btn(72, 10, 128, 44, text("Settings", 0, 22, 22, C.onAccent, "c", 128), C.accent);
+	h += btn(208, 10, 128, 44, text("About", 0, 22, 22, C.text, "c", 128));
+	h += btn(344, 10, 128, 44, text("Quit", 0, 22, 22, C.text, "c", 128));
+	h += text("21:47", 616, 32, 16, C.text, "r");
+	const items = [["G_CC", "Subtitles", "Font, size, colour"], ["G_NOTE", "Music", "Display, visualizer, sound"], ["G_PICTURE", "Photos", "Zoom, pan area, drag"],
+		["G_BOOKMARK", "Remember", "Position, tracks"], ["G_FOLDER", "Files", "Folders, play history"], ["G_SUN", "Controls & screen", "Brightness, buttons, <b style='font-weight:400;color:inherit'>theme</b>"],
+		["G_DOWNLOAD", "Updates", "New versions"], ["G_WEB", "Web dashboard", "Off"]];
+	items.forEach(([g, title, sub], i) => {
+		const x = i % 2 ? 328 : 16, y = 70 + Math.floor(i / 2) * 86, at = i === 0;
+		const fill = at ? C.focus : C.surface, ink = at ? C.focusInk : C.text, subInk = at ? C.focusSub : C.dim;
+		let inner = glyphMid(g, 34, 39, at ? C.focusInk : C.text, 3) + text(title, 66, 28, 21, ink) + text(sub, 66, 53, 15, subInk);
+		h += btn(x, y, 296, 78, inner, fill, at ? `outline:2px solid ${C.focusEdge};outline-offset:-2px;` : "", 14);
+	});
+	h += hints([["D-PAD", "Move"], ["A", "Open"], ["B", "Close"], ["L/R", "Tabs"]]);
+	return h;
+}
+function topPanel(t) {
+	const cell = 3, size = 32 * cell, x0 = 320 - size / 2, y0 = 70;
+	let r = "";
+	LOGO.forEach((row, j) => { for (let i = 0; i < row.length; i++) { const ch = row[i]; if (ch === " ") continue; const col = ch === "Y" ? C.topTitle : ch === "W" ? C.text : C.topSquare; r += `<rect x="${i}" y="${j}" width="1.02" height="1.02" fill="${col}"/>`; } });
+	let h = `<svg class="a" style="left:${x0}px;top:${y0}px" width="${size}" height="${size}" viewBox="0 0 32 32">${r}</svg>`;
+	h += text("Banana Player", 0, 220, 48, C.topTitle, "c", 640);
+	h += text("Pick a video or a song on the bottom screen", 0, 270, 20, C.topSub, "c", 640, "Inter, sans-serif");
+	// the volume card (osd-overlay 2): 300x84 at (330, y) of 960x720
+	const cx = 220, cy = 350;
+	h += box(cx, cy, 200, 56, C.osdCard, "opacity:.9;" + rad(12));
+	h += text("Volume&nbsp;&nbsp;60%", cx + 14, cy + 18, 20, C.text, "l", 0, "Inter, sans-serif");
+	h += box(cx + 14, cy + 38, 173, 8, C.osdTrack, rad(3)) + box(cx + 14, cy + 38, 104, 8, C.accent, rad(3));
+	return h;
+}
+
+const SCREENS = [["Playing (a song)", playing], ["Home", home], ["Settings › groups", settings], ["Top panel: idle + volume card", topPanel]];
+
+function panelHTML(t, fn) {
+	C = t.c;
+	const bg = fn === topPanel ? `background:${C.topBg}` : panelBg(t);
+	return `<div class="panel" style="${bg}">${fn(t)}</div>`;
+}
+function fit() {
+	document.querySelectorAll(".frame").forEach(f => { const p = f.querySelector(".panel"); if (p) p.style.transform = `scale(${f.clientWidth / 640})`; });
+}
+new ResizeObserver(fit).observe(document.body);
+
+function swatches(t) {
+	const c = t.c;
+	const rows = [
+		["Background", "bg", [["text", "bg", "text", 4.5], ["dim", "bg", "dim", 4.5], ["accent", "bg", "key hint", 4.5], ["danger", "bg", "danger", 4.5]]],
+		["Surface (tiles, cards)", "surface", [["text", "surface", "text", 4.5], ["dim", "surface", "dim", 4.5]]],
+		["Button", "button", [["text", "button", "label", 4.5], ["accent", "button", "key", 4.5], ["dimOn", "button", "note", 4.5], ["dim", "button", "off", 0]]],
+		["Pressed", "pressed", [["text", "pressed", "label", 4.5]]],
+		["Focus fill", "focus", [["focusInk", "focus", "title", 4.5], ["focusSub", "focus", "second line", 4.5]]],
+		["Focus edge", "focusEdge", [["focusEdge", "bg", "edge vs page", 3]]],
+		["Accent", "accent", [["onAccent", "accent", "tab text", 4.5], ["accent", "track", "fill vs track", 3]]],
+		["Text", "text", []], ["Dim text", "dim", []], ["Dim on button", "dimOn", []],
+		["Danger", "danger", [["text", "danger", "label on it", 3]]],
+		["Bar track", "track", [["knob", "track", "knob", 3]]],
+		["Top: title, logo", "topTitle", [["topTitle", "topBg", "on black", 4.5]]],
+		["Top: subtitle", "topSub", [["topSub", "topBg", "on black", 4.5]]],
+		["Top: OSD card", "osdCard", [["text", "osdCard", "text", 4.5], ["accent", "osdTrack", "level", 3]]],
+	];
+	let h = "<tr><th>Role</th><th>Hex</th><th>Pairs (ratio)</th></tr>";
+	rows.forEach(([label, key, pairs]) => {
+		const pr = pairs.map(([f, b, what, need]) => {
+			const r = cr(c[f], c[b]), cls = !need ? "" : r >= need ? "ok" : r >= need * 0.8 ? "meh" : "bad";
+			return `<span class="pair" style="background:${c[b]};color:${c[f]}">${what}</span> <span class="${cls}">${r.toFixed(1)}</span>`;
+		}).join(" &nbsp; ");
+		h += `<tr><td>${label}</td><td><span class="sw" style="background:${c[key]}"></span><code>${c[key]}</code></td><td>${pr}</td></tr>`;
+	});
+	return h;
+}
+function web(t) {
+	const c = t.c, P = "font-family:'Pixelify Sans',monospace;letter-spacing:.02px";
+	const b = (label, bg, fg, bd) => `<span style="display:inline-flex;align-items:center;min-height:40px;padding:0 14px;background:${bg};color:${fg};border:2px solid ${bd};border-radius:calc(var(--ro) * 8px);font:400 17px/1 'Pixelify Sans',monospace">${label}</span>`;
+	return `<div style="background:${c.bg};padding:14px;border:1px solid #000;font-family:Inter,sans-serif;color:${c.text}">
+		<div style="display:flex;align-items:center;gap:10px;margin-bottom:12px"><span style="${P};font-size:22px;color:${c.accent}">Banana Player</span><span style="flex:1"></span><span style="font-size:13px;color:${c.dim}">Connected · 21:47</span></div>
+		<div style="background:${c.surface};border:2px solid ${c.button};padding:12px;margin-bottom:12px;border-radius:calc(var(--ro) * 12px)">
+			<div style="${P};font-size:20px">Sunny Peel</div><div style="font-size:13px;color:${c.dim};margin:2px 0 10px">Banana Band · Yellow Album</div>
+			<div style="height:10px;background:${c.track};position:relative;margin-bottom:12px;border-radius:calc(var(--ro) * 5px);overflow:hidden"><div style="position:absolute;left:0;top:0;bottom:0;width:38%;background:${c.accent}"></div></div>
+			<div style="display:flex;gap:8px;flex-wrap:wrap">${b("Play here", c.accent, c.onAccent, c.accent)}${b("Pause", c.button, c.text, c.button)}${b("Queue", "transparent", c.text, c.button)}${b("Delete", c.danger, "#FFFFFF", c.danger)}</div>
+		</div>
+		<div style="background:${c.surface};border:2px solid ${c.button};border-radius:calc(var(--ro) * 12px);overflow:hidden">
+			${["Movies", "Music", "Photos"].map((n, i) => `<div style="display:flex;justify-content:space-between;padding:10px 12px;${i ? `border-top:1px solid ${c.button};` : `background:${c.focus};box-shadow:inset 3px 0 ${c.focusEdge};`}"><span style="${P};font-size:17px;color:${i ? c.text : c.focusInk}">${n}</span><span style="font-size:13px;color:${i ? c.dim : c.focusSub}">${[12, 48, 230][i]} items</span></div>`).join("")}
+		</div>
+		<div style="font:12px ui-monospace,Menlo,monospace;color:${c.dim};margin-top:10px;line-height:1.5">--bg ${c.bg} · --surface ${c.surface} · --teal ${c.button} · --pressed ${c.pressed} · --yellow ${c.accent} · --cream ${c.text} · --dim ${c.dim} · --dim-teal ${c.dimOn} · --red ${c.danger} · primary:hover ${c.webPrimaryHover}</div>
+	</div>`;
+}
+
+let cur = 0;
+function show(i) {
+	cur = i; const t = THEMES[i];
+	document.querySelectorAll("#switch button[data-i]").forEach((b, j) => b.setAttribute("aria-pressed", j === i));
+	const why = document.getElementById("why");
+	why.style.borderColor = t.c.accent;
+	why.innerHTML = `${t.why}<span class="from">${t.from}</span>`;
+	document.getElementById("screens").innerHTML = SCREENS.map(([cap, fn]) => `<div><div class="cap">${cap}</div><div class="frame">${panelHTML(t, fn)}</div></div>`).join("");
+	document.getElementById("swatches").innerHTML = swatches(t);
+	document.getElementById("web").innerHTML = web(t);
+	document.getElementById("notes").innerHTML = t.id === "bananaos"
+		? "Banana OS's cursor is a filled yellow block: its text is dark (focusInk) and its second line brown (BananaOS's onPickAccent idea). Buttons sit only 1.7:1 off the page, as Classic's do; they read by their size and gaps."
+		: "Buttons sit 1.4–1.9:1 off the page in every theme (Classic 1.7): they read by their size and the gaps between them, as today.";
+	try { localStorage.setItem("bp-theme", i); } catch (e) {}
+	requestAnimationFrame(fit);
+}
+document.getElementById("switch").innerHTML = THEMES.map((t, i) => `<button type="button" data-i="${i}"><span class="dot" style="background:${t.c.accent};outline:3px solid ${t.c.button}"></span>${t.name}<span class="k">${t.tag}</span></button>`).join("");
+document.getElementById("switch").insertAdjacentHTML("beforeend", `<span class="sep"></span>` + [["square", "Square"], ["round", "Rounded"], ["edge", "Rounded + edge"]].map(([m, l]) => `<button type="button" class="mode" data-mode="${m}">${l}</button>`).join(""));
+function corners(m) {
+	document.body.classList.remove("corners-round", "corners-edge");
+	if (m !== "square") document.body.classList.add("corners-" + m);
+	document.querySelectorAll("#switch .mode").forEach(b => b.setAttribute("aria-pressed", b.dataset.mode === m));
+	try { localStorage.setItem("bp-corners", m); } catch (e) {}
+}
+document.getElementById("switch").addEventListener("click", e => { const b = e.target.closest("button"); if (!b) return; if (b.dataset.mode) corners(b.dataset.mode); else show(+b.dataset.i); });
+document.getElementById("strip").innerHTML = THEMES.map((t, i) => `<div data-i="${i}"><div class="cap">${t.name}</div><div class="frame">${panelHTML(t, playing)}</div></div>`).join("");
+document.getElementById("strip").addEventListener("click", e => { const d = e.target.closest("[data-i]"); if (d) { show(+d.dataset.i); window.scrollTo({ top: 0, behavior: "smooth" }); } });
+document.addEventListener("keydown", e => { const n = +e.key; if (n >= 1 && n <= THEMES.length) show(n - 1); });
+// pressed colour while held
+function pressedOf(el) { const panel = el.closest(".panel"); const host = el.closest("[data-i]"); const t = host ? THEMES[+host.dataset.i] : THEMES[cur]; return t.c.pressed; }
+document.addEventListener("pointerdown", e => { const b = e.target.closest(".btn"); if (b) { b.style.background = pressedOf(b); const up = () => { b.style.background = b.dataset.fill; removeEventListener("pointerup", up); removeEventListener("pointercancel", up); }; addEventListener("pointerup", up); addEventListener("pointercancel", up); } });
+let cm = "edge"; try { cm = localStorage.getItem("bp-corners") || "edge"; } catch (e) {}
+const qc = new URLSearchParams(location.search).get("c"); if (qc) cm = qc;
+corners(cm);
+let start = 2; try { start = +(localStorage.getItem("bp-theme") || 0); } catch (e) {}
+const q = new URLSearchParams(location.search).get("t"); if (q !== null) start = +q;
+show(Math.min(start, THEMES.length - 1));
+document.fonts && document.fonts.ready.then(fit);
+</script>
+</body>
+</html>

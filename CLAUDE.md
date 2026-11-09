@@ -38,7 +38,13 @@ tools/make-sprite.py                                 # regenerates web/sprite.sv
   `log.txt`, add logging that would pin it next time.
 - **Test variables** that stand in for the handheld: `BP_POWER_SUPPLY` (a fake `/sys/class/power_supply`),
   `BP_OSD_FILE` (bananad's level file), `BP_FONT_PROVIDER=none` (libass with no system fonts, as on BananaOS),
-  `BP_SCREENSHOTS`, `BP_AO_PCM=FILE` (the sound out recorded as raw 44.1 kHz s16 stereo, untimed: silence is checkable).
+  `BP_SCREENSHOTS`, `BP_AO_PCM=FILE` (the sound out recorded as raw 44.1 kHz s16 stereo, untimed: silence is checkable),
+  `BP_CRASH_TEST=segv|abort|throw|overflow` (crashes 1.5 s after the start).
+- **Crash log** (`crashlog.*`, in bpcore): SIGSEGV/BUS/ILL/FPE/ABRT and uncaught exceptions append a record (time,
+  version and commit, signal, address, what was playing, up to 64 frames) to `<state>/crash.log` and a `crash:` line to
+  log.txt, then die as before. The handler is async-signal-safe only (no malloc, no stdio). The file never passes 64 KB:
+  each start trims it to its newest 32 KB once it's over 48 KB, and a record is at most 16 KB. Symbolize with
+  `dist/symbols/banana-player-<version>` (DEVELOPMENT.md, "Crash log").
 - **Linux-only code** (evdev touch, lid switch, inotify, backlight) only compiles on Linux. Check it with the arm64 Docker
   command in DEVELOPMENT.md ("Linux check") after touching `touch.*`, `sleepwatch.*`, `levelwatch.*` or `panel.*`.
 - `build-bundle.sh` caches FFmpeg/libplacebo/libass/mpv source builds in `.cache/bundle`; reruns rebuild only the
@@ -137,7 +143,13 @@ tools/make-sprite.py                                 # regenerates web/sprite.sv
   -1, tiles at `groupRect`); `settingRows()` lists a group's row ids, `settingHelp()` their help lines. Pages are
   built from shared pieces (`drawHeader`, `drawTab`, `drawHints` for the footer, `drawFocus` for the cursor's row,
   `drawEmpty`, `drawDialog`, `drawButton`); icons are `G_*` glyphs (rows of `#` cells) drawn by `drawGlyph`, snapped
-  to the panel's pixels. `BP_BOTTOM_SIZE=1024x768` draws the bottom window at the RG DS Plus's size for screenshots. Layout is in fixed 640×480 logical units, scaled by `sx`/`sy`; text
+  to the panel's pixels. The look (Midnight, `docs/design/midnight.md`) is in one place: colours by role and radii
+  in `src/theme.h` (`ui.cpp` aliases them as `BG`, `TEXT`, `ACCENT`, `BUTTON`…; `player.cpp`'s ASS cards use
+  `theme::ass()` and `roundBox()`; `web/style.css` copies the values by hand). Boxes are rounded: `fillRound` (a
+  middle and sides as rects, corners one cached anti-aliased quarter-circle texture per pixel radius, tinted and
+  flipped), `drawBox` for buttons, tabs, tiles, cards and dialogs (an edge 30% towards TEXT, or ACCENT when focused,
+  and a darker lip), `drawLevel` for bars, `fillRoundBand` for a line along a rounded edge. A new box goes
+  through these, not `fill`. `BP_BOTTOM_SIZE=1024x768` draws the bottom window at the RG DS Plus's size for screenshots. Layout is in fixed 640×480 logical units, scaled by `sx`/`sy`; text
   is rendered at the real panel size. It redraws only when
   `signature()` changes (or when forced), so any new state that affects drawing must be added to `signature()`.
   `press(Button)` and `pointer(Pointer)` return true for "leave", which `main` turns into closing the video (browser

@@ -284,7 +284,6 @@ namespace bp
 		static constexpr int HOME_TILE = 1000;
 		bool homePointer(const Pointer& pt, int x, int y, Player& p);
 		void drawHome(const Player& p);
-		void drawBorder(Rect r, SDL_Color c);
 		bool showHidden = false;	// the setting, kept here for drawBrowseMenu (no Player there)
 		// a recent file played (as All recent's rows play one), from its start, shown in its folder (Files or Network)
 		void openFile(const std::string& path, Player& p);
@@ -749,6 +748,24 @@ namespace bp
 		void drawTextAt(const std::string& s, int size, SDL_Color c, int x, int y, int maxW, int align, bool middle);
 		int capHeight[3] = {};	// in pixels
 		void fill(Rect r, SDL_Color c);
+		// rounded corners (theme.h's radii, in 640x480 units): corners a mask of ROUND_TL, _TR, _BL, _BR. SDL_Renderer
+		// has none: a box is its middle and sides as rects, its corners copies of one anti-aliased quarter circle
+		// (white, made once per radius in the panel's pixels, tinted and flipped)
+		enum { ROUND_TL = 1, ROUND_TR = 2, ROUND_BL = 4, ROUND_BR = 8, ROUND_ALL = 15 };
+		void fillRound(Rect r, SDL_Color c, int rad, int corners = ROUND_ALL);
+		// the part of a rounded box between y0 and y1 (left of x1, when given): a line along its edge, its corners kept
+		void fillRoundBand(Rect box, int rad, int y0, int y1, SDL_Color c, int x1 = -1);
+		// a level bar: the track, the first w units filled (the accent when none given)
+		void drawLevel(Rect track, int w, SDL_Color trackInk, SDL_Color fillInk = {0, 0, 0, 0});
+		// a button, tab, tile, card or dialog: rounded, an edge inside its outline (the fill 30% towards the text, the
+		// accent when focused) and a darker lip along its bottom
+		void drawBox(Rect r, SDL_Color c, int rad, bool focus = false);
+		void drawBox(Rect r, SDL_Color c, int rad, SDL_Color edge);
+		void roundDev(SDL_Rect d, SDL_Color c, int R, int corners);	// in the panel's pixels
+		SDL_Rect devRect(Rect r) const;
+		int devRadius(int rad) const;
+		SDL_Texture* corner(int R);
+		std::vector<SDL_Texture*> corners;	// by radius in pixels
 		// a glyph at (x, y), its cells cell units square, snapped to the panel's pixels; Mid: centred on (cx, cy)
 		void drawGlyph(const Glyph& g, int x, int y, SDL_Color c, int cell = 2);
 		void drawGlyphMid(const Glyph& g, int cx, int cy, SDL_Color c, int cell = 2);
