@@ -12,7 +12,8 @@ namespace bp
 	// None: neither, the title alone on black (the lightest)
 	enum MusicShow { SHOW_ART, SHOW_BOTH, SHOW_VIS, SHOW_NONE, SHOWS };
 	// Circle: the bars round a ring (cyan to purple to pink), drawn by looking each pixel up in two tables (remap)
-	enum Visualizer { VIS_BARS, VIS_WAVES, VIS_SPECTRUM, VIS_CIRCLE, VISUALIZERS };
+	// Timeline: the last moments as bars scrolling left, the bass coral under the rest green
+	enum Visualizer { VIS_BARS, VIS_WAVES, VIS_SPECTRUM, VIS_CIRCLE, VIS_TIMELINE, VISUALIZERS };
 	// music only (a video never loops): all = back to the folder's first file after its last
 	enum Loop { LOOP_OFF, LOOP_ALL, LOOP_ONE, LOOPS };
 	// the clock in the bottom panel's header
@@ -34,6 +35,9 @@ namespace bp
 	bool lavfiSafePath(const std::string& dir);
 	// Circle's picture, the panel's shape: the circle a little low, under the song's title
 	constexpr int CIRCLE_W = 640, CIRCLE_H = 480;
+	// the tables cover only the circle's square (its bars' reach, 200 out from 320,274; black round it is pad's): the
+	// lookup is most of a frame's cost, and the square is half the picture
+	constexpr int CIRCLE_BOX = 400, CIRCLE_X = 120, CIRCLE_Y = 74;
 	// None's picture: black, a tiny one at 5 frames a second drawn from the sound (so it ends with it): the last
 	// visualizer's frame would stay otherwise
 	std::string blankGraph();

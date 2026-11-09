@@ -48,7 +48,8 @@ Move with the D-pad: **UP/DOWN** between the strip and the tiles (back to the ca
 twice quits, **START** opens the menu.
 
 Inside a section the header reads its name with four markers beside it, the open one lit: **L/R** go to the section
-before or after (at its top), or tap a marker. **B** goes up a folder, and from the section's top back to Home, on its
+before or after, or tap a marker. Each section opens where you left it (its top if that folder or playlist is gone),
+from L/R, a marker or its tile on Home. **B** goes up a folder, and from the section's top back to Home, on its
 tile.
 
 Folders come first, then files in natural order (episode 2 before episode 10). Each row has an icon (folder, video,
@@ -86,7 +87,7 @@ folders. Playlists have a section of their own, between Files and Network.
 
 - In **Files** or **Network**, **X** → **Select files**, tick the files you want (**A**, or a tap), then **X** →
   **Add to…** and pick a playlist (or **New playlist…**). On the touch screen, a hold on a file starts this with that
-  file ticked.
+  file ticked. **B** (or **Cancel**) leaves select mode; with files ticked, press it twice.
 - Inside a playlist, **X** → **Add files…** opens the file list, and the files you tick are added to that playlist.
   **Add folder…** adds a whole folder instead.
 - On any folder, **Y** (or a hold) → **Add to playlist…** comes first, and adds that folder's files.
@@ -276,8 +277,10 @@ Songs show their title, artist and album on the top screen. While a song plays:
 
 - **SELECT: Display.** A popup on the bottom screen with two rows. **Show** is **Album art** (default),
   **Art + visualizer** (the visualizer over the bottom of the art), **Visualizer**, or **None** (just the title: the
-  lightest on the battery). **Style** is the visualizer's look: **Bars**, **Waves**, **Spectrum** or **Circle** (bars
-  round a glowing ring, cyan to pink; with Art + visualizer, the album art sits inside the ring). The top screen
+  lightest on the battery). **Style** is the visualizer's look: **Bars**, **Waves**, **Spectrum**, **Circle** (bars
+  round a glowing ring, cyan to pink; with Art + visualizer, the album art sits inside the ring) or **Timeline** (the
+  last few seconds as a row of bars scrolling left, the newest on the right: each bar's height is how loud that moment
+  was, its coral foot the bass, its green top the rest, over a faint grid). The top screen
   changes as you choose. In the popup, the **D-pad** changes a setting, **SELECT** goes to the next Show mode, and
   **B** closes it. The Style row is greyed out for Album art and None, which don't show a visualizer, but it can still
   be changed. A song without art shows its title alone on Album art, and the visualizer on Art + visualizer. Album art

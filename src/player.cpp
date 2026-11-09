@@ -1974,7 +1974,8 @@ namespace bp
 			std::string graph = get("lavfi-complex");
 			std::string vis = graph.find("showwaves") != std::string::npos ? "Waves"
 							  : graph.find("showspectrum") != std::string::npos ? "Spectrum"
-							  : graph.find("] remap [") != std::string::npos ? "Circle" : "Bars";
+							  : graph.find("] remap [") != std::string::npos ? "Circle"
+							  : graph.find("showvolume") != std::string::npos ? "Timeline" : "Bars";
 			row("Top screen", graph == blankGraph() ? "Title only"
 				: graph.find("[vid1]") != std::string::npos ? "Album art + " + vis
 				: !graph.empty() ? "Visualizer: " + vis

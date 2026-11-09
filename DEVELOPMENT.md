@@ -191,6 +191,10 @@ build/bp-net loop ftp://... tony banana /f.mkv 65536 0     # sequential; `docker
 build/bp-net cancel-ls|cancel-cat ...                      # with the server `docker pause`d: Cancelled in ~0.4 s
 ```
 
+## Notes
+
+Dated write-ups of investigations (cause, numbers, what was ruled out, how to verify) are in `docs/notes/`.
+
 ## Roadmap
 
 - [x] Video on the top panel, controls on the bottom, by buttons and touch

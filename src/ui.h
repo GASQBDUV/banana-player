@@ -184,6 +184,9 @@ namespace bp
 		// the paused copy moved to follow the page (till then: not a seek made here), and where it was last seen
 		Uint32 browserSyncUntil = 0;
 		double browserSeenPos = -1;
+		// Prev (-1) / Next (+1) pressed here while a page plays the file: main passes it to the page (handheld-skip),
+		// which moves on in its own list; the paused copy here follows when the page opens the next
+		int browserSkip = 0;
 		// an audio track or subtitles (id 0: off) chosen, as the Audio & Subtitles page chooses one (and the web): the
 		// language remembered as the settings say, and "Audio: <its label>" over the top panel. false: no such track
 		bool chooseTrack(Player& p, TrackType type, int64_t id);
@@ -617,7 +620,13 @@ namespace bp
 		bool displayKey(Button b, Player& p);
 		bool displayPointer(const Pointer& pt, int x, int y, Player& p);
 		void drawDisplay(const Player& p);
-		Rect displayChip(int row, int i) const { return {48 + i * 138, row ? 260 : 160, 130, 64}; }
+		// a row's chips share the dialog's width: Show's 4, Style's one a visualizer
+		static int displayChips(int row) { return row ? VISUALIZERS : SHOWS; }
+		Rect displayChip(int row, int i) const
+		{
+			int n = displayChips(row), w = (544 - (n - 1) * 8) / n;
+			return {48 + i * (w + 8), row ? 260 : 160, w, 64};
+		}
 		void displaySet(int row, int value, Player& p);
 		// Sound (music's): two tabs, Equalizer and Effects (L/R), opened from the song's Sound button, its line, or
 		// Settings › Music (B goes back there, on its row); the tab last open kept for the run
@@ -861,7 +870,7 @@ namespace bp
 		// Main's header squares, the Playing tab's rows (PLAY_ROW + i)
 		static constexpr int ADD_BTN = 503, LIKE_BTN = 504, PLAY_ROW = 550;
 		// Sound's touch buttons, apart from the grid's and the photo's; its dialogs' rows from DLG_ROW, the Display
-		// popup's chips from CHIP_BTN (row * 4 + chip)
+		// popup's chips from CHIP_BTN (row * 8 + chip)
 		static constexpr int SOUND_TAB0 = 510, SOUND_TAB1 = 511, EQ_SWITCH = 520, EQ_PREV = 521, EQ_NEXT = 522, EQ_NAME_ZONE = 523,
 			EQ_RESET = 524, EQ_SAVE = 525, EQ_OPTIONS = 526, DLG_ROW = 700, CHIP_BTN = 600, FX_ROW = 800;
 		void stepGroup(int dir);	// to the settings group before (-1) or after (1), round

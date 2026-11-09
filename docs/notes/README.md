@@ -1,0 +1,14 @@
+# Engineering notes
+
+One dated note per investigation, named `YYYY-MM-DD-<slug>.md`: the problem as seen, the root cause, the numbers, what
+was ruled out, and how to reproduce or verify it. `CLAUDE.md` keeps only the one-line rules that came out of them; the
+reasoning lives here. An agent finishing an investigation adds a note and, if it made a rule, one line to `CLAUDE.md`.
+Write the way the rest of the repo does: plain and precise, with the why. Say what was not verified.
+
+## Index
+
+- [2026-11-09 visualizer performance](2026-11-09-visualizer-performance.md): lag on hi-res FLAC and above 1x speed; measured on the handheld.
+- [2026-11-09 silent handoff](2026-11-09-silent-handoff.md): browser to handheld play left the handheld's sound silent.
+- [2026-11-09 art graph, stale tracks](2026-11-09-art-graph-stale-tracks.md): songs going silent and freezing in art + visualizer.
+- [2026-11-09 iOS Safari history](2026-11-09-ios-safari-history.md): the web player's chevron leaving the page on iPhone.
+- [2026-11-09 crash log](2026-11-09-crash-log.md): why `crash.log` exists and how it is bounded.

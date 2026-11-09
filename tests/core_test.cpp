@@ -326,17 +326,32 @@ static void testSettings()
 	m.loop = LOOP_ONE;
 	Settings mb = parseSettings(serializeSettings(m));
 	CHECK_EQ(mb.musicShow == SHOW_BOTH && mb.visualizer == VIS_SPECTRUM && mb.loop == LOOP_ONE, true);
-	CHECK_EQ(visualizerGraph(VIS_WAVES, false).rfind("[aid1] asplit [ao] [v]; [v] showwaves", 0), (size_t)0);
+	CHECK_EQ(visualizerGraph(VIS_WAVES, false).rfind("[aid1] asplit [ao] [v]; [v] aformat=sample_rates=44100|48000,showwaves", 0), (size_t)0);
 	CHECK_EQ(visualizerGraph(VIS_SPECTRUM, true).find("[vid1]") != std::string::npos, true);
 	CHECK_EQ(visualizerGraph(VIS_SPECTRUM, true).find("showspectrum=s=640x200") != std::string::npos, true);
-	// art + visualizer: the art fitted once, only the 640x200 strip drawn each frame, and showfreqs timed by itself
+	// art + visualizer: the art fitted once, only the 640x200 strip drawn each frame over the art's slice (overlay's
+	// main, held), showfreqs timed by itself, nothing keyed nor converted per frame
 	CHECK_EQ(visualizerGraph(VIS_BARS, true),
-		std::string("[aid1] asplit [ao] [a]; [vid1] scale=640:480:force_original_aspect_ratio=decrease,pad=640:480:-1:-1:black,setsar=1,format=rgba,split [art1] [art2]; [art1] crop=640:280:0:0 [top]; [art2] crop=640:200:0:280 [under]; [a] showfreqs=s=640x200:mode=bar:cmode=combined:ascale=log:fscale=log:win_size=1024:rate=30:colors=0xC08A22|0xC08A22,split [s1] [s2]; [s1] [under] overlay=eof_action=repeat:format=rgb [base]; [s2] colorkey=black:0.1 [k]; [base] [k] overlay=format=rgb,format=rgba [strip]; [top] [strip] vstack [vo]"));
-	CHECK_EQ(visualizerGraph(VIS_SPECTRUM, true).find("showspectrum=s=640x200:slide=scroll:mode=combined:color=fire:scale=log,fps=30,format=rgba,split") != std::string::npos, true);
-	CHECK_EQ(visualizerGraph(VIS_WAVES, true).find("showwaves=s=640x200:mode=cline:split_channels=0:rate=30:colors=0xC08A22|0xC08A22,split") != std::string::npos, true);
+		std::string("[aid1] asplit [ao] [a]; [vid1] scale=640:480:force_original_aspect_ratio=decrease,pad=640:480:-1:-1:black,setsar=1,format=rgba,settb=AVTB,split [art1] [art2]; [art1] crop=640:280:0:0 [top]; [art2] crop=640:200:0:280 [under]; [a] aformat=sample_rates=44100|48000:channel_layouts=mono,showfreqs=s=640x200:mode=bar:cmode=combined:ascale=log:fscale=log:win_size=1024:rate=30:colors=0xC08A22|0xC08A22 [s]; [under] [s] overlay=format=rgb:alpha=premultiplied [strip]; [top] [strip] vstack [vo]"));
+	// Spectrum over the art: its loudness as alpha, laid on the art in YUV (no frame converted, no colorkey)
+	CHECK_EQ(visualizerGraph(VIS_SPECTRUM, true).find("showspectrum=s=640x200:slide=scroll:mode=combined:color=fire:scale=log:fps=30:opacity=4,format=yuva444p [s]") != std::string::npos, true);
+	CHECK_EQ(visualizerGraph(VIS_SPECTRUM, true).find("overlay=format=yuv444 [strip]") != std::string::npos, true);
+	CHECK_EQ(visualizerGraph(VIS_WAVES, true).find("showwaves=s=640x200:mode=cline:split_channels=0:rate=30:colors=0xC08A22|0xC08A22 [s]") != std::string::npos, true);
 	CHECK_EQ(visualizerGraph(VIS_BARS, true).find("loop="), std::string::npos);
-	CHECK_EQ(visualizerGraph(VIS_BARS, false).find("rate=30:colors=0xC08A22|0xC08A22,format=yuv420p") != std::string::npos, true);
+	// the visualizer alone: in the filter's own format (a per-frame conversion to yuv420p cost more than the drawing)
+	for (int v : {VIS_BARS, VIS_WAVES, VIS_SPECTRUM})
+		for (bool art : {false, true})
+		{
+			std::string g = visualizerGraph(v, art);
+			CHECK_EQ(g.find("yuv420p") == std::string::npos && g.find("colorkey") == std::string::npos, true);
+			// the sound drawn at 44.1/48 kHz, whatever the file's (a 192 kHz file cost up to twice as much)
+			CHECK_EQ(g.find("aformat=sample_rates=44100|48000") != std::string::npos, true);
+		}
 	CHECK_EQ(visualizerGraph(VIS_BARS, false).find("fps="), std::string::npos);
+	// alone, opaque (mpv would show a clear background as a checkerboard)
+	CHECK_EQ(visualizerGraph(VIS_BARS, false).find(":colors=0xC08A22|0xC08A22,format=rgb0 [vo]") != std::string::npos, true);
+	CHECK_EQ(visualizerGraph(VIS_WAVES, false).find(":colors=0xC08A22|0xC08A22,format=rgb0 [vo]") != std::string::npos, true);
+	CHECK_EQ(visualizerGraph(VIS_SPECTRUM, false).find(",fps="), std::string::npos);	// its own fps= only
 	// Circle: drawn from its tables; without them, as Bars
 	CHECK_EQ(visualizerGraph(VIS_CIRCLE, false).find("showfreqs") != std::string::npos, true);
 	CHECK_EQ(visualizerGraph(VIS_CIRCLE, false).find("remap"), std::string::npos);
@@ -354,15 +369,38 @@ static void testSettings()
 		// the middle is black (the palette's last column), straight up from it a bar's lowest step
 		std::ifstream in(std::string(cdir) + "/circle2-x.pgm", std::ios::binary);
 		std::string pgm((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
-		size_t head = pgm.size() - (size_t)CIRCLE_W * CIRCLE_H * 2;
-		auto at = [&](int x, int y) { size_t i = head + ((size_t)y * CIRCLE_W + x) * 2; return (unsigned char)pgm[i] << 8 | (unsigned char)pgm[i + 1]; };
+		size_t head = pgm.size() - (size_t)CIRCLE_BOX * CIRCLE_BOX * 2;
+		auto at = [&](int x, int y) { size_t i = head + ((size_t)(y - CIRCLE_Y) * CIRCLE_BOX + x - CIRCLE_X) * 2; return (unsigned char)pgm[i] << 8 | (unsigned char)pgm[i + 1]; };
 		CHECK_EQ(at(CIRCLE_W / 2, 274), 256 + 15);			// the middle: black
 		CHECK_EQ(at(CIRCLE_W / 2 - 1, 274 - 90) < 256, true);	// straight up: a bar
-		CHECK_EQ(at(5, 5), 256 + 15);							// the title's corner: black
+		CHECK_EQ(at(CIRCLE_X + 5, CIRCLE_Y + 5), 256 + 15);	// the square's corner: black
 		for (const char* f : {"/circle2-x.pgm", "/circle2-y.pgm"}) unlink((std::string(cdir) + f).c_str());
 		rmdir(cdir);
 	}
 	CHECK_EQ(parseSettings("visualizer = circle\n").visualizer, (int)VIS_CIRCLE);
+	// Timeline: read and written back by its id; a column a frame tiled into the scrolling picture, mono for any input
+	CHECK_EQ(parseSettings("visualizer = timeline\n").visualizer, (int)VIS_TIMELINE);
+	{
+		Settings t;
+		t.visualizer = VIS_TIMELINE;
+		CHECK_EQ(serializeSettings(t).find("visualizer = timeline\n") != std::string::npos, true);
+		CHECK_EQ(parseSettings(serializeSettings(t)).visualizer, (int)VIS_TIMELINE);
+		CHECK_EQ(std::string(visualizerLabel(VIS_TIMELINE)), std::string("Timeline"));
+		std::string v = visualizerGraph(VIS_TIMELINE, false), a = visualizerGraph(VIS_TIMELINE, true);
+		CHECK_EQ(v.rfind("[aid1] asplit [ao] [a]; [a] aformat=sample_rates=44100|48000:channel_layouts=mono,", 0), (size_t)0);
+		// drawn lying down and turned upright; the grid's lines in the strip, yuv420p (no full-frame conversion)
+		CHECK_EQ(v.find("pad=480:8:0:0:black@0,format=yuv420p,drawbox=x=383:") != std::string::npos, true);
+		CHECK_EQ(v.find("drawbox=x=95:y=0:w=1:h=8:c=white@0.1:t=fill,tile=1x80:overlap=79:init_padding=79,transpose=cclock [vo]") != std::string::npos, true);
+		CHECK_EQ(v.find("showvolume=r=30:b=0:w=914:h=6:f=0:t=0:v=0:o=h") != std::string::npos, true);
+		CHECK_EQ(v.find("crop=480:6:434:0,pad=480:8") != std::string::npos, true);
+		CHECK_EQ(a.find("showvolume=r=30:b=0:w=380:h=6") != std::string::npos, true);
+		// over the art: clear round the bars, laid on the art's slice premultiplied, no colour key
+		CHECK_EQ(a.find("tile=1x80:overlap=79:init_padding=79:color=black@0,transpose=cclock [s]") != std::string::npos, true);
+		CHECK_EQ(a.find("[under] [s] overlay=format=rgb:alpha=premultiplied [strip]") != std::string::npos, true);
+		CHECK_EQ(a.find("colorkey"), std::string::npos);
+		CHECK_EQ(a.find("[vid1]") != std::string::npos && a.find("drawbox") == std::string::npos, true);	// no grid over the art
+		CHECK_EQ(v.find("loop=") == std::string::npos && a.find("loop=") == std::string::npos, true);
+	}
 	CHECK_EQ(std::string(loopLabel(LOOP_ALL)), std::string("Loop all"));
 	// the setting before 0.1.1, carried over
 	Settings old = parseSettings("audio-display = cover-bars\n");

@@ -122,6 +122,9 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 		"##.##.##.##")
 	GLYPH(G_VIS_WAVES, "..##.......", ".#..#......", "#....#.....", ".....#....#", "......#..#.", ".......##..")
 	GLYPH(G_VIS_SPECTRUM, "...#.......", "..###...#..", "..####.###.", ".#########.", ".##########", "###########")
+	// Timeline: thin bars of a time series, a gap across them where the bass's part meets the rest's
+	GLYPH(G_VIS_TIMELINE, "........#..", "..#.....#..", "..#.#...#.#", "#.#.#.#.#.#", "#.#.#.#.#.#", "...........",
+		"#.#.#.#.#.#", "#.#.#.#.#.#")
 	GLYPH(G_VIS_CIRCLE, ".....#.....", ".#...#...#.", "..#.....#..", "....###....", "...#...#...", "##.#...#.##", "...#...#...",
 		"....###....", "..#.....#..", ".#...#...#.", ".....#.....")
 	// playlists: one (lines and a note), a select box empty and ticked, a row's grip, Move, Shuffle
@@ -223,7 +226,7 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 	}
 	static const char* SHOW_SHORT[SHOWS] = {"Art", "Both", "Viz", "None"};	// MusicShow on a button
 	static const char* LOOP_SHORT[LOOPS] = {"Off", "All", "One"};		// Loop on a button (beside its mark)
-	static const Ui::Glyph* const VIS_GLYPHS[VISUALIZERS] = {&G_VIS_BARS, &G_VIS_WAVES, &G_VIS_SPECTRUM, &G_VIS_CIRCLE};
+	static const Ui::Glyph* const VIS_GLYPHS[VISUALIZERS] = {&G_VIS_BARS, &G_VIS_WAVES, &G_VIS_SPECTRUM, &G_VIS_CIRCLE, &G_VIS_TIMELINE};
 	// a show mode's mark: the visualizer ones take the style's
 	static const Ui::Glyph* showGlyph(int show, int vis)
 	{
@@ -912,8 +915,15 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 	{
 		if (tab < 0 || tab >= BROWSE_TABS) return;
 		setSection(tab);
-		tabDir[tab].clear();
-		enterFolder(sectionTop(tab), p);
+		// where it was left (L/R, a tile, a marker), as switching back and forth shouldn't lose the place; its top if
+		// that folder or playlist is gone. A network place is kept as it was: its listing says if it's not there
+		std::string dir = tabDir[tab];
+		struct stat st;
+		bool gone = dir.empty() || (isPlDir(dir) && (stat(plFileOf(dir).c_str(), &st) != 0 || !S_ISREG(st.st_mode))) ||
+			(!pseudoDir(dir) && !isNetPath(dir) && (stat(dir.c_str(), &st) != 0 || !S_ISDIR(st.st_mode)));
+		// (Liked is a playlist whose file may not be written yet)
+		if (gone && isPlDir(dir) && plStore && plStore->isBuiltinFile(plFileOf(dir))) gone = false;
+		enterFolder(gone ? sectionTop(tab) : dir, p);
 	}
 
 	void Ui::openMainMenu(Player& p, int tab)
@@ -1467,7 +1477,7 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 		const int T = TOGGLE_ROW;
 		if (row >= STYLE_ROW0 && row < STYLE_ROW0 + STYLE_KEYS) return "How plain subtitles (SRT, VTT...) look. Styled ones (ASS) keep theirs.";
 		if (row == MUSIC_ROW) return "What the top screen shows while a song plays (SELECT while playing).";
-		if (row == VIS_ROW) return "How the music is drawn: Bars, Waves, Spectrum or Circle (SELECT while playing).";
+		if (row == VIS_ROW) return "How the music is drawn: Bars, Waves, Spectrum, Circle or Timeline (SELECT while playing).";
 		if (row == SOUND_ROW) return "Equalizer and effects for music (not videos). A opens it";
 		if (row == CLOCK_ROW) return "The time in the top corner of this screen";
 		if (row == SCREEN_OFF_ROW) return "While a song or video plays, this screen goes dark after that long untouched. A touch brings it back.";
@@ -2180,8 +2190,12 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 			}
 			else p.seekRelative(b == Button::Left ? -BACK_S : FORWARD_S);
 			break;
-		case Button::L: if (!p.prev()) p.osd("This is the first one"); break;
-		case Button::R: if (!p.next()) p.osd("This is the last one"); break;
+		case Button::L:
+		case Button::R:
+			// a page plays it: the page's song moves on, not this paused copy (which would start sounding here)
+			if (predicting(p)) { browserSkip = b == Button::R ? 1 : -1; break; }
+			if (b == Button::L ? !p.prev() : !p.next()) p.osd(b == Button::L ? "This is the first one" : "This is the last one");
+			break;
 		case Button::Up: case Button::Down:
 		{
 			double s = stepSpeed(p.speed, b == Button::Up ? 1 : -1);
@@ -5693,8 +5707,9 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 	{
 		removeArmed = false;
 		if (selMode == SEL_EDIT) { selEnd(); return; }
-		// B goes up a folder (Cancel doesn't); at a first page it leaves, files ticked asking twice
-		if (!button && !atFirstPage()) { browseUp(p); dropArmed = 0; return; }
+		// B (and "<") cancels the selection, as Cancel does: going up a folder instead read as B being ignored. Files
+		// ticked ask twice, so one stray press doesn't lose them
+		(void)button;
 		if (selMode == SEL_ADD && !picked.empty() && !(dropArmed && SDL_GetTicks() - dropArmed < QUIT_WINDOW_MS))
 		{
 			dropArmed = SDL_GetTicks();
@@ -6419,19 +6434,19 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 				return false;
 			}
 			for (int r = 0; r < 2; r++)
-				for (int i = 0; i < 4; i++)
+				for (int i = 0; i < displayChips(r); i++)
 					if (displayChip(r, i).hit(x, y))
 					{
-						pressedBtn = CHIP_BTN + r * 4 + i;
+						pressedBtn = CHIP_BTN + r * 8 + i;
 						displayRow = r;
 					}
 			return false;
 		}
-		if (pt.kind == Pointer::Up && pressedBtn >= CHIP_BTN && pressedBtn < CHIP_BTN + 8)
+		if (pt.kind == Pointer::Up && pressedBtn >= CHIP_BTN && pressedBtn < CHIP_BTN + 16)
 		{
 			int id = pressedBtn - CHIP_BTN;
 			pressedBtn = -1;
-			if (displayChip(id / 4, id % 4).hit(x, y)) displaySet(id / 4, id % 4, p);
+			if (displayChip(id / 8, id % 8).hit(x, y)) displaySet(id / 8, id % 8, p);
 		}
 		return false;
 	}
@@ -6439,7 +6454,7 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 	void Ui::drawDisplay(const Player& p)
 	{
 		static const char* SHOW_NAMES[SHOWS] = {"Album art", "Art + viz", "Visualizer", "None"};
-		static const char* STYLE_NAMES[VISUALIZERS] = {"Bars", "Waves", "Spectrum", "Circle"};
+		static const char* STYLE_NAMES[VISUALIZERS] = {"Bars", "Waves", "Spectrum", "Circle", "Timeline"};
 		drawDialog({32, 84, 576, 300}, "Display");
 		int show = std::clamp(p.settings.musicShow, 0, SHOWS - 1), vis = std::clamp(p.settings.visualizer, 0, VISUALIZERS - 1);
 		// the art alone, or the title alone: no visualizer, its style muted (still changeable, for later)
@@ -6450,21 +6465,22 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 			bool focus = r == displayRow;
 			drawTextMid(r ? "Style" : "Show", 0, focus ? ACCENT : TEXT, 52, rowY - 14, 200);
 			if (focus) fillRound({36, rowY, 4, 64}, ACCENT, 2);
-			for (int i = 0; i < 4; i++)
+			for (int i = 0; i < displayChips(r); i++)
 			{
 				Rect c = displayChip(r, i);
 				bool sel = i == (r ? vis : show), dim = r && muted;
-				SDL_Color bg = pressedBtn == CHIP_BTN + r * 4 + i ? PRESSED : sel ? (dim ? DIM : ACCENT) : dim ? TRACK : BUTTON;
+				SDL_Color bg = pressedBtn == CHIP_BTN + r * 8 + i ? PRESSED : sel ? (dim ? DIM : ACCENT) : dim ? TRACK : BUTTON;
 				SDL_Color ink = sel ? ON_ACCENT : dim ? DIM : TEXT;
 				drawBox(c, bg, R_BUTTON);
 				const Glyph* g = r ? VIS_GLYPHS[i] : i == SHOW_BOTH ? &G_ARTVIZ : showGlyph(i, vis);
 				drawGlyphMid(*g, c.x + c.w / 2, c.y + 20, ink);
-				drawTextMid(r ? STYLE_NAMES[i] : SHOW_NAMES[i], 0, ink, c.x + c.w / 2, c.y + 46, 122, 2);
+				drawTextMid(r ? STYLE_NAMES[i] : SHOW_NAMES[i], 0, ink, c.x + c.w / 2, c.y + 46, c.w - 8, 2);
 			}
 		}
 		const char* help = show == SHOW_ART ? "The style shows with Art + viz or Visualizer"
 			: show == SHOW_BOTH ? (vis == VIS_CIRCLE ? "Bars round a ring, the art inside it" : "The visualizer over the bottom of the art")
-			: show == SHOW_VIS ? "The visualizer alone" : "Just the title: the lightest on the battery";
+			: show == SHOW_VIS ? (vis == VIS_TIMELINE ? "The last moments scrolling by: the bass in coral" : "The visualizer alone")
+			: "Just the title: the lightest on the battery";
 		drawTextMid(help, 0, DIM, W / 2, 352, 544, 2);
 		drawHints({{"D-PAD", "Change"}, {"SELECT", "Show"}, {"B", "Done"}});
 	}

@@ -6,6 +6,7 @@ Banana Player: a video and music player for BananaOS (github.com/JorreFog/Banana
 Plus (RK3568, aarch64, two 4:3 panels: 640×480 or 1024×768; the bottom one is a touchscreen). C++17, libmpv, SDL2,
 SDL2_ttf, zlib. `README.md` is a short page for end users (what it is, install, the basics); every feature, control and setting
 is in `FEATURES.md` (a new one goes there); `DEVELOPMENT.md` has the technical detail and the roadmap.
+Investigations (cause, numbers, what was ruled out) are written up in `docs/notes/`; an agent finishing one adds a note there.
 
 ## Commands
 
@@ -88,9 +89,14 @@ tools/make-sprite.py                                 # regenerates web/sprite.sv
   has to be set by id. A graph's picture never ends, so mpv never ends a song that has one (every song without art):
   `checkSongEnd()` ends it, or restarts it for Loop one, once the clock passes the duration. Circle's graph reads
   two `remap` tables with `movie=` from the state folder (`graphFor()` writes them first; without them it's Bars).
-  In art + visualizer (Bars, Waves, Spectrum) the art is fitted once and only the 640×200 strip is drawn per frame; time any
-  new graph against Art+viz Bars (~0.85 ms/frame on the Mac), not only Visualizer Bars.
-  Keep visualizers cheap: Circle was shaped by timing `ffmpeg -filter_complex_threads 1` against Bars per frame.
+  In art + visualizer (Bars, Waves, Spectrum, Timeline) the art is fitted once and only the 640×200 strip is drawn per frame; time any
+  new graph against Art+viz Bars (~0.85 ms/frame on the Mac, ~4 on the handheld), not only Visualizer Bars.
+  Keep visualizers cheap: Circle was shaped by timing `ffmpeg -filter_complex_threads 1` against Bars per frame. (Numbers and the handheld benchmark: docs/notes/2026-11-09-visualizer-performance.md, tools/viz-bench/.)
+  Every visual branch starts with `aformat=sample_rates=44100|48000` (mono where channels share a colour; a 192 kHz
+  file otherwise costs up to 2× and draws ultrasound), makes at most 30 frames per second of the song (the filter's own
+  `rate=`/`fps=`; the graph runs before `speed`, so 2× shows 60/s), and converts no frame: no per-frame `format=`
+  but `rgb0` (RGBA's alpha shows as mpv's checkerboard), no `colorkey`. A swscale conversion of 640×480 costs the
+  A55s ~7 ms a frame, which the Mac hides: time on the handheld when you can (graphs run single-threaded there).
   A graph's still inputs must be single frames, never `loop=-1`: an endless source floods mpv past the song's end
   (its clock stops, so the song never ends, and memory grows by gigabytes; on the handheld, a freeze). Test such a
   graph in mpv with a memory watchdog: the ffmpeg CLI keeps running endless sources even after the output ends.
@@ -131,7 +137,7 @@ tools/make-sprite.py                                 # regenerates web/sprite.sv
   which is what `animating()` reports) over the four sections' tiles (`homeZone`/`homeStrip`/`homeGrid`, `homeCol` for
   coming back down). The sections are `browseTab` (Files `""`, Playlists `PLROOT`, Network `NETROOT`, Extensions `EXTDIR`,
   a placeholder); `drawSectionHeader` draws their markers (`pipRect`) where tabs were; `openSection` (L/R, a tile, a
-  marker) opens one at its top, `setSection` moves to one without entering (Show in folder, back from a video);
+  marker) opens one where it was left (`tabDir`; its top if that folder or playlist is gone), `setSection` moves to one without entering (Show in folder, back from a video);
   `atFirstPage()` (a section's top, or All recent, `RECENT`) is where B goes Home. Home's menus are `ctxItems` from
   `CTX_R_PLAY` on (`ctxWide()`). The header's right end is `drawBattery`: the battery, the web's globe, then the clock
   (`clockText`, not over a photo; the minute is in `signature()`); `statusLeft()` is where they start, and titles and

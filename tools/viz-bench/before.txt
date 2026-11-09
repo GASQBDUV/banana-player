@@ -1,0 +1,14 @@
+decode-only 44k: 0.125 s
+Bars      viz      44k: frames  1201 (30.0/s) graph  22.12s  18.42 ms/frame  55.3% of a core at 1x
+Bars      art+viz  44k: frames  1201 (30.0/s) graph  15.06s  12.54 ms/frame  37.6% of a core at 1x
+Waves     viz      44k: frames  1200 (30.0/s) graph  10.43s   8.70 ms/frame  26.1% of a core at 1x
+Waves     art+viz  44k: frames  1200 (30.0/s) graph  10.30s   8.58 ms/frame  25.7% of a core at 1x
+Spectrum  viz      44k: frames  1200 (30.0/s) graph  10.47s   8.73 ms/frame  26.2% of a core at 1x
+Spectrum  art+viz  44k: frames  1200 (30.0/s) graph  21.00s  17.50 ms/frame  52.5% of a core at 1x
+decode-only 192k: 0.433 s
+Bars      viz     192k: frames  1201 (30.0/s) graph  18.97s  15.80 ms/frame  47.5% of a core at 1x
+Bars      art+viz 192k: frames  1201 (30.0/s) graph  14.53s  12.10 ms/frame  36.3% of a core at 1x
+Waves     viz     192k: frames  1200 (30.0/s) graph  12.44s  10.37 ms/frame  31.1% of a core at 1x
+Waves     art+viz 192k: frames  1200 (30.0/s) graph  11.67s   9.72 ms/frame  29.2% of a core at 1x
+Spectrum  viz     192k: frames  1200 (30.0/s) graph  19.80s  16.50 ms/frame  49.5% of a core at 1x
+Spectrum  art+viz 192k: frames  1200 (30.0/s) graph  27.86s  23.22 ms/frame  69.7% of a core at 1x

@@ -25,8 +25,8 @@ namespace bp
 
 	static const char* SHOW_IDS[SHOWS] = {"art", "both", "visualizer", "none"};
 	static const char* SHOW_LABELS[SHOWS] = {"Album art", "Art + visualizer", "Visualizer", "None"};
-	static const char* VIS_IDS[VISUALIZERS] = {"bars", "waves", "spectrum", "circle"};
-	static const char* VIS_LABELS[VISUALIZERS] = {"Bars", "Waves", "Spectrum", "Circle"};
+	static const char* VIS_IDS[VISUALIZERS] = {"bars", "waves", "spectrum", "circle", "timeline"};
+	static const char* VIS_LABELS[VISUALIZERS] = {"Bars", "Waves", "Spectrum", "Circle", "Timeline"};
 	static const char* LOOP_IDS[LOOPS] = {"off", "all", "one"};
 	static const char* CLOCK_IDS[CLOCKS] = {"24h", "12h", "off"};
 	static const char* SCREEN_OFF_IDS[SCREEN_OFFS] = {"never", "15s", "30s", "1m", "2m", "5m"};
@@ -57,7 +57,7 @@ namespace bp
 
 	bool writeCircleMaps(const std::string& dir)
 	{
-		const int w = CIRCLE_W, h = CIRCLE_H;
+		const int w = CIRCLE_BOX, h = CIRCLE_BOX;
 		size_t bytes = (size_t)w * h * 2;
 		std::string header = "P5\n" + std::to_string(w) + " " + std::to_string(h) + "\n65535\n";
 		auto ready = [&](const std::string& path) {
@@ -69,7 +69,7 @@ namespace bp
 		for (int y = 0; y < h; y++)
 			for (int x = 0; x < w; x++)
 			{
-				double dx = x - w / 2.0 + 0.5, dy = y - CENTRE_Y + 0.5, r = std::hypot(dx, dy);
+				double dx = x + CIRCLE_X - CIRCLE_W / 2.0 + 0.5, dy = y + CIRCLE_Y - CENTRE_Y + 0.5, r = std::hypot(dx, dy);
 				double seg = std::fabs(std::atan2(dx, -dy)) / M_PI * SEGMENTS;	// 0 at the top, SEGMENTS at the bottom
 				int mx, my;
 				if (r >= BAR_FROM && r <= BAR_TO && seg - std::floor(seg) < 0.6)
@@ -130,22 +130,56 @@ namespace bp
 		// The still inputs (the gradient, the palette, the tables) are pictures that end, never loops: blend, hstack
 		// and remap go on with an ended input's last frame, and end when the bars (the sound) do. A loop never ends,
 		// so neither did the graph: past the song's end its sources poured out frames as fast as they could, mpv's
-		// clock stopped (the song never ended) and its memory grew by the gigabyte
+		// clock stopped (the song never ended) and its memory grew by the gigabyte. One frame each (r=1): nullsrc's
+		// 25 a second over d=1 made the first second 55 frames, each one remapped
 		std::string g =
 			"[aid1] asplit [ao] [a]; "
-			"[a] showfreqs=s=" + bars + ":mode=bar:cmode=combined:ascale=log:fscale=log:win_size=1024:rate=30:colors=white|white,format=gbrp [bars]; "
-			"nullsrc=s=" + bars + ":d=1,format=gbrp,"
+			"[a] aformat=sample_rates=44100|48000:channel_layouts=mono,showfreqs=s=" + bars + ":mode=bar:cmode=combined:ascale=log:fscale=log:win_size=1024:rate=30:colors=white|white,format=gbrp [bars]; "
+			"nullsrc=s=" + bars + ":r=1:d=1,format=gbrp,"
 			"geq=r='59+196*clip(2*X/W-1,0,1)':g='232-140*clip(2*X/W,0,1)-13*clip(2*X/W-1,0,1)':b='224+31*clip(2*X/W,0,1)-39*clip(2*X/W-1,0,1)' [grad]; "
 			"[bars] [grad] blend=all_mode=multiply [cbars]; "
-			"nullsrc=s=" + std::to_string(PALETTE) + "x" + std::to_string(BARS_H) + ":d=1,format=gbrp,"
+			"nullsrc=s=" + std::to_string(PALETTE) + "x" + std::to_string(BARS_H) + ":r=1:d=1,format=gbrp,"
 			"geq=r='207*exp(-pow(X/4,2))':g='232*exp(-pow(X/4,2))':b='255*exp(-pow(X/4,2))' [pal]; "
 			"[cbars] [pal] hstack [src]; "
 			"movie=" + xm + " [xm]; movie=" + ym + " [ym]; ";
-		if (!overCover) return g + "[src] [xm] [ym] remap [vo]";
+		std::string pad = ",pad=" + std::to_string(CIRCLE_W) + ":" + std::to_string(CIRCLE_H) + ":" + std::to_string(CIRCLE_X) + ":" + std::to_string(CIRCLE_Y) + ":black";
+		if (!overCover) return g + "[src] [xm] [ym] remap" + pad + " [vo]";
 		// the art inside the ring
-		return g + "[src] [xm] [ym] remap [ring]; "
+		return g + "[src] [xm] [ym] remap" + pad + " [ring]; "
 			"[vid1] scale=96:96:force_original_aspect_ratio=decrease,format=gbrp [cover]; "
 			"[ring] [cover] overlay=x=(W-w)/2:y=" + std::to_string((int)CENTRE_Y) + "-h/2:eof_action=repeat:format=gbrp [vo]";
+	}
+
+	// Timeline: each frame one 8-pixel bar's strip (a 6-pixel bar and a gap) for the last 30th of a second, and the
+	// last 80 together, the newest on the right (tile's overlap: each frame shifts the picture one bar). A bar is the
+	// sound's level in dB (showvolume's RMS, -50 dB at the foot, 0 at the top), green, with the bass's level (below
+	// 150 Hz, 20 dB down, so it sits under the rest) coral over it. showvolume's log scale spans ~95 dB: the bar is
+	// drawn longer than the picture and only its loud end kept, which spreads 50 dB over the height.
+	// The bars are drawn lying down (rows) and the picture turned upright at the end: tile copies an overlapped
+	// picture rect by rect, a row of pixels at a time, so 80 upright columns were 80 x 480 tiny copies a frame
+	// (3.6 ms on the A55s), 80 rows a few hundred long ones, and transpose costs less than the difference. Only the
+	// strip is converted (yuv420p alone, 480x8; over the art it stays RGBA, clear round its bars, alpha 0 or 255, so
+	// it's premultiplied as it is, and the tile's padding clear too). The grid is in the strip, so it starts on the
+	// right with the bars
+	static std::string timelineDraw(int h, bool grid)
+	{
+		int len = h * 20 * 100 / (21 * 50);
+		std::string H = std::to_string(h);
+		std::string vol = "showvolume=r=30:b=0:w=" + std::to_string(len) + ":h=6:f=0:t=0:v=0:o=h:m=r:ds=log:c=";
+		// showvolume's colours are 0xAABBGGRR: coral #F0806E, green #9EDB98
+		std::string g = "[a] aformat=sample_rates=44100|48000:channel_layouts=mono,asplit [tla] [tlb]; "
+						"[tlb] lowpass=f=150,volume=-20dB," + vol + "0xff6e80f0 [tlc]; "
+						"[tla] " + vol + "0xff98db9e [tlg]; "
+						"[tlg] [tlc] overlay=format=rgb,crop=" + H + ":6:" + std::to_string(len - h) + ":0,pad=" + H + ":8:0:0:black@0";
+		// a faint line every 96 pixels from the top (white at 10%: #19 on black, a shade lighter over a bar), drawn in
+		// the strip (the strip's x is the height from the foot): a still grid lightened under the bars (blend, with
+		// its frame sync) cost 1 ms a frame on the A55s, these next to nothing
+		if (grid)
+		{
+			g += ",format=yuv420p";
+			for (int y = 96; y < h; y += 96) g += ",drawbox=x=" + std::to_string(h - 1 - y) + ":y=0:w=1:h=8:c=white@0.1:t=fill";
+		}
+		return g + ",tile=1x80:overlap=79:init_padding=79" + (grid ? "" : ":color=black@0") + ",transpose=cclock";
 	}
 
 	std::string visualizerGraph(int vis, bool overCover, const std::string& mapsDir)
@@ -161,26 +195,43 @@ namespace bp
 		// a soft amber, not the menu's bright yellow: it fills much of a dark screen. One colour a channel: the filters
 		// give a channel with none its own (white for the second), and stereo is most music
 		const std::string ink = "0xC08A22|0xC08A22";
+		// The sound as the visualizers see it (the speakers' branch, [ao], keeps the file's own): 44.1 or 48 kHz, so a
+		// 96/192 kHz file costs no more than a CD (and its spectrum isn't mostly empty ultrasound), and Bars in mono
+		// (its two channels are drawn in one colour anyway, and every bar is painted pixel by pixel: half the cost)
+		const std::string in = "aformat=sample_rates=44100|48000";
 		switch (vis)
 		{
-		case VIS_WAVES: draw = "showwaves=" + size + ":mode=cline:split_channels=0:rate=30:colors=" + ink; break;
-		case VIS_SPECTRUM: draw = "showspectrum=" + size + ":slide=scroll:mode=combined:color=fire:scale=log,fps=30"; break;
-		default: draw = "showfreqs=" + size + ":mode=bar:cmode=combined:ascale=log:fscale=log:win_size=1024:rate=30:colors=" + ink; break;
+		case VIS_WAVES: draw = in + ",showwaves=" + size + ":mode=cline:split_channels=0:rate=30:colors=" + ink; break;
+		// its own fps: a frame made only every 30th of a second (an fps filter after it took one per column, each a
+		// copy of the whole picture, and dropped most)
+		case VIS_SPECTRUM: draw = in + ",showspectrum=" + size + ":slide=scroll:mode=combined:color=fire:scale=log:fps=30"; break;
+		default: draw = in + ":channel_layouts=mono,showfreqs=" + size + ":mode=bar:cmode=combined:ascale=log:fscale=log:win_size=1024:rate=30:colors=" + ink; break;
 		}
-		if (!overCover) return "[aid1] asplit [ao] [v]; [v] " + draw + ",format=yuv420p [vo]";
+		if (vis == VIS_TIMELINE && !overCover) return "[aid1] asplit [ao] [a]; " + timelineDraw(h, true) + " [vo]";
+		// near the format the filter draws in, which mpv shows as it is: converting each frame to yuv420p cost 6.5-7 ms
+		// a frame on the A55s, more than drawing Waves or Spectrum. RGBA's alpha dropped (rgb0, a byte shuffle: 0.5 ms):
+		// mpv would lay a clear background over a checkerboard; Spectrum's YUV as it comes
+		if (!overCover) return "[aid1] asplit [ao] [v]; [v] " + draw + (vis == VIS_SPECTRUM ? "" : ",format=rgb0") + " [vo]";
 		// the art fitted once, as one frame, and cut in two; only the 640x200 strip under it is drawn each frame (the
-		// visualizer over its slice of the art, black keyed out), in RGBA so no frame is converted back and forth.
+		// visualizer over its slice of the art), in the visualizer's own format so no frame is converted.
 		// Redrawing the whole picture cost 3.5-4.4 ms a frame on a Mac and over the 33 ms budget on the A55s, on the
-		// thread that feeds the sound. vstack repeats the top's ended frame, as Circle's hstack does
-		if (vis == VIS_SPECTRUM) draw += ",format=rgba";
+		// thread that feeds the sound. The art's slice is overlay's main input: its one frame is held, and a frame is
+		// made for each of the visualizer's, till the sound ends (its timebase fine, or the frames' times would be
+		// rounded to the picture's 25ths). Bars' and Waves' background is already clear, and their colours already
+		// scaled by their alpha (Waves' edges fade), hence premultiplied; Spectrum's is black, so it's drawn with alpha
+		// (its loudness, 4x: only the near-black clear, as colorkey did, without its 5 ms a frame).
+		// vstack repeats the top's ended frame, as Circle's hstack does
+		bool yuv = vis == VIS_SPECTRUM;
+		std::string strip = vis == VIS_TIMELINE ? timelineDraw(h, false)
+						  : yuv					? "[a] " + draw + ":opacity=4,format=yuva444p"
+												: "[a] " + draw;
 		return "[aid1] asplit [ao] [a]; "
-			   "[vid1] scale=640:480:force_original_aspect_ratio=decrease,pad=640:480:-1:-1:black,setsar=1,format=rgba,split [art1] [art2]; "
+			   "[vid1] scale=640:480:force_original_aspect_ratio=decrease,pad=640:480:-1:-1:black,setsar=1,format=rgba" +
+			   std::string(yuv ? ",scale=out_range=full,format=yuv444p" : "") + ",settb=AVTB,split [art1] [art2]; "
 			   "[art1] crop=640:280:0:0 [top]; "
-			   "[art2] crop=640:200:0:280 [under]; "
-			   "[a] " + draw + ",split [s1] [s2]; "
-			   "[s1] [under] overlay=eof_action=repeat:format=rgb [base]; "
-			   "[s2] colorkey=black:0.1 [k]; "
-			   "[base] [k] overlay=format=rgb,format=rgba [strip]; "
+			   "[art2] crop=640:200:0:280 [under]; " +
+			   strip + " [s]; "
+			   "[under] [s] overlay=format=" + (yuv ? "yuv444" : "rgb:alpha=premultiplied") + " [strip]; "
 			   "[top] [strip] vstack [vo]";
 	}
 

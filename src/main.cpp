@@ -930,6 +930,12 @@ int main(int argc, char** argv)
 						webServer->notify("handheld-play", "{}");
 					}
 				}
+				// Prev / Next pressed here while a page plays: the page moves on
+				if (ui.browserSkip)
+				{
+					webServer->notify("handheld-skip", ui.browserSkip > 0 ? "{\"dir\":1}" : "{\"dir\":-1}");
+					ui.browserSkip = 0;
+				}
 				// a seek made here while a page plays the file (-5 s, +10 s, the bar): the page goes there too
 				if (ui.browserPlaying && player.paused && player.loaded && !player.loading()
 					&& player.currentPath() == ui.browserPos.path)
