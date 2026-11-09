@@ -490,7 +490,10 @@ namespace bp
 				}
 				// a file that didn't open: only what leads elsewhere (the next file, the menu), and Like / Add
 				if (err && which != Button::L && which != Button::R && which != Button::Start && which != Button::L3 && which != Button::None) off = true;
-				drawBox(b, (pressedBtn == r * 5 + c || (which == Button::A && playHoldAt)) && !off ? PRESSED : BUTTON, R_BUTTON);
+				// the speed when it isn't 1x: a yellow key (as Locked is), so a changed speed can't go unnoticed
+				bool fast = which == Button::Up && !off && std::fabs(p.speed - 1) > 1e-6;
+				bool down = (pressedBtn == r * 5 + c || (which == Button::A && playHoldAt)) && !off;
+				drawBox(b, down ? PRESSED : fast ? ACCENT : BUTTON, R_BUTTON);
 				if (which == Button::A && playHoldAt)
 				{
 					// the hold that plays it here, filling as it goes (as the lock's)
@@ -540,8 +543,14 @@ namespace bp
 					drawTextMid("Playlist", 0, off ? DIM : DIM_ON, b.x + b.w / 2, b.y + b.h * 4 / 5 - 2, b.w - 6, 2);
 				}
 				// the button it stands for, while the buttons work here (Button hotkeys); else the name alone, centred
-				// speed lit while it isn't 1x, so a changed speed is seen at a glance (video and song alike)
-				else drawButton(b, g, label, key, off, 1, which == Button::Up && !off && std::fabs(p.speed - 1) > 1e-6);
+				else if (fast && !down)
+				{
+					// dark ink on the yellow key, its button name too
+					bool hint = key && *key;
+					drawTextMid(label, 1, ON_ACCENT, b.x + b.w / 2, hint ? b.y + b.h * 2 / 5 : b.y + b.h / 2, b.w - 12, 2);
+					if (hint) drawTextMid(key, 0, ON_ACCENT, b.x + b.w / 2, b.y + b.h * 4 / 5 - 2, b.w - 6, 2);
+				}
+				else drawButton(b, g, label, key, off, 1);
 			}
 
 		const Track* a = p.selected(TrackType::Audio);
