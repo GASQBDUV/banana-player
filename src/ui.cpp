@@ -4810,10 +4810,13 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 		if (touchLocked)
 		{
 			// locked: everything but the lock and Screen off dimmed (they're all that a finger does now)
+			// from just under the header (its back icon ends at 56): the source line's card mark starts above 64
 			SDL_Color veil = sdl(theme::BG, 170);
-			fill({0, 64, W, lk.y - 64}, veil);
+			fill({0, 58, W, lk.y - 58}, veil);
 			fill(inf, veil);
 			fill(q, veil);
+			// what unlocks it stays readable over the veil (B's "press again" can't come up while locked)
+			if (!quitArmed) drawTextMid("Hold the lock 1 s to unlock", 0, ACCENT, 616, STATUS_Y, 250, 1);
 		}
 	}
 
