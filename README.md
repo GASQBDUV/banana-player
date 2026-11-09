@@ -49,10 +49,10 @@ Videos play on the handheld's CPU. The various 1080p videos we tested play well;
 ## Install
 
 > [!TIP]
-> **Latest: [Banana Player 0.5.2](https://github.com/tonywei92/banana-player/releases/tag/v0.5.2)**, for BananaOS on the
+> **Latest: [Banana Player 0.5.3](https://github.com/tonywei92/banana-player/releases/tag/v0.5.3)**, for BananaOS on the
 > Anbernic RG DS and RG DS Plus.
 
-1. **Download** `BananaPlayer-0.5.2-aarch64.zip` from [the release](https://github.com/tonywei92/banana-player/releases/tag/v0.5.2).
+1. **Download** `BananaPlayer-0.5.3-aarch64.zip` from [the release](https://github.com/tonywei92/banana-player/releases/tag/v0.5.3).
 2. **Unzip it into `roms/ports`** on your SD card. You should end up with `Banana Player.sh`, a `BananaPlayer` folder
    and a `media` folder there. (On a Mac, if the zip opens into a folder of its own, move those three out of it.)
 3. **Play:** put the card back in, open the **Ports** shelf and choose **Banana Player**.
