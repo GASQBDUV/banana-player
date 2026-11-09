@@ -1891,6 +1891,13 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 	{
 		sameBrightness = p.settings.sameBrightness;
 		webInputAt = SDL_GetTicks();
+		// dark (Screen off, or off by itself): any button brings the panel back and does nothing else, as a touch
+		// does (the thumb can't see what it would do). F + START still quits, in main
+		if (!panel.on())
+		{
+			panel.set(true);
+			return false;
+		}
 		if (quickOpen) return quickKey(b, p);
 		if (kbOpen)
 		{
@@ -1925,8 +1932,6 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 			}
 			return false;
 		}
-		// the buttons play on with the panel dark; the ones that open a page bring it back
-		if (!panel.on() && (b == Button::X || b == Button::Y || b == Button::Start)) panel.set(true);
 		if (b != Button::B) quitArmed = 0;
 		if (inMenu)
 		{
