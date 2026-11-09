@@ -390,7 +390,8 @@ static void testSettings()
 		std::string v = visualizerGraph(VIS_PEAKS, false), a = visualizerGraph(VIS_PEAKS, true);
 		for (const std::string& g : {v, a})
 		{
-			CHECK_EQ(g.find("[a] aformat=sample_rates=44100|48000:channel_layouts=mono,showfreqs=s=64x256:") != std::string::npos, true);
+			CHECK_EQ(g.find("[a] aformat=sample_rates=44100|48000:channel_layouts=mono,showfreqs=s=72x256:") != std::string::npos, true);
+			CHECK_EQ(g.find("colors=white,crop=64:256:0:0,scale=64:1") != std::string::npos, true);	// the top 8 (16-24 kHz) cut off
 			CHECK_EQ(g.find("lagfun=decay=") != std::string::npos, true);	// the caps' fall
 			CHECK_EQ(g.find("loop=") == std::string::npos && g.find("colorkey") == std::string::npos, true);
 			CHECK_EQ(g.find("rgb"), std::string::npos);	// YUV throughout: no picture converted from RGB each frame

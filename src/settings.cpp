@@ -199,8 +199,12 @@ namespace bp
 			g += "[vid1] scale=640:480:force_original_aspect_ratio=decrease,pad=640:480:-1:-1:black,setsar=1,format=yuv420p,"
 				 "settb=AVTB,split [art1] [art2]; [art1] crop=640:280:0:0 [top]; [art2] crop=640:200:0:280,extractplanes=y+u+v "
 				 "[pkay] [pkau] [pkav]; ";
-		g += "[a] aformat=sample_rates=44100|48000:channel_layouts=mono,showfreqs=s=" + std::to_string(N) +
-			 "x256:mode=bar:cmode=combined:ascale=log:fscale=log:win_size=1024:rate=30:colors=white,scale=" + std::to_string(N) +
+		// TOP more bars measured than drawn, the highest cut off: at 44.1/48 kHz they're 16-24 kHz, where music has next
+		// to nothing, so the rightmost bars sat still or twitched at the noise floor
+		const int TOP = 8;
+		g += "[a] aformat=sample_rates=44100|48000:channel_layouts=mono,showfreqs=s=" + std::to_string(N + TOP) +
+			 "x256:mode=bar:cmode=combined:ascale=log:fscale=log:win_size=1024:rate=30:colors=white,crop=" + std::to_string(N) +
+			 ":256:0:0,scale=" + std::to_string(N) +
 			 ":1:flags=area,format=gray,lut=c0='val*252/255',split [pkv] [pkp]; "
 			 "[pkp] format=gray16le,lut=c0='65535*exp((val/257-252)/24)',lagfun=decay=0.8679,"
 			 "lut=c0='clip(257*(252+24*log(max(val,1)/65535)),0,257*250)',format=gray," + stretch + " [pkP]; "
