@@ -19,9 +19,11 @@ el.volume = B.vol / 100;
 // playing here with the page hidden (a locked phone): keep listening; paused and hidden: stop (battery)
 el.addEventListener('play', () => {
 	openSSE();
-	// a Play from anywhere (the mini player, Space, the headset) tells the handheld, which pauses: one sound only
+	// a Play from anywhere (the mini player, Space, the headset) tells the handheld, which pauses: one sound only. Only
+	// when the handheld has something to silence: after its Stop it holds nothing, and this page plays on alone (the
+	// first "Play in this browser" opens the held copy through its own browser-play)
 	const s = store.snap;
-	if (B.meta && (!s || s.paused === false || !s.browserPlaying || s.path !== B.meta.p)) announce();
+	if (B.meta && (!s || (s.path && (s.paused === false || !s.browserPlaying || s.path !== B.meta.p)))) announce();
 });
 el.addEventListener('pause', () => { if (document.hidden) closeSSE(); });
 // every browser-play and browser-pos carries this tab and a number that only grows (across reloads too): two posts can

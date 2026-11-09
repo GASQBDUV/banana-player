@@ -48,6 +48,12 @@ namespace bp
 	void Ui::showBrowser(Player& p, const std::string& lastPlayed, const PlaySource& from, int index)
 	{
 		page = Page::Browse;
+		// (left while it plays: it goes on behind; stopped: nothing plays)
+		bgPlay = p.playing();
+		ctxOpen = false;
+		if (roots.empty()) roots = browseRoots();	// (started with a file: the browser never read them)
+		// its row lit a moment, and the mini bar's edge: it's still playing, here
+		if (bgPlay) landFlashUntil = SDL_GetTicks() + 900;
 		touchLocked = false;	// the lock is the video's
 		dropTouch();
 		if (inMenu && menuTab == TAB_PLAYING) inMenu = false;	// (its tab is what played: gone with it)
@@ -136,6 +142,7 @@ namespace bp
 		plMissingSerial++;
 		if (dir == HOMEDIR)
 		{
+			homeListedFor = p.currentPath();
 			// the Recent strip listed again, the focus kept on the file it was on (gone: the card that took its place)
 			std::string was = homeStrip < (int)recent.size() ? recent[homeStrip].path : "";
 			int wasAt = homeStrip;
@@ -659,7 +666,23 @@ namespace bp
 			switch (what)
 			{
 			case CTX_SETTINGS: openMainMenu(p, TAB_SETTINGS); break;
-			case CTX_R_START: p.forgetPosition(path); openFile(path, p); break;
+			case CTX_R_START:
+				// (what plays: from its start, on the player)
+				if (p.playing() && p.currentPath() == path) { p.seekFraction(0); p.unpause(); showPlayer(); break; }
+				p.forgetPosition(path);
+				openFile(path, p);
+				break;
+			// the mini bar's
+			case CTX_NP_NOW: goNowPlaying(p); break;
+			case CTX_NP_PLAY: miniToggle(p); break;
+			case CTX_NP_LIKE: likeNow(p); break;
+			case CTX_NP_ADD: if (p.playing() && !p.playingPhoto()) openAddOne(p.currentPath(), p.title, p.loaded ? p.duration : -1, p); break;
+			case CTX_NP_SHOW: showInFolder(p.playing() && !p.playingPhoto() ? p.currentPath() : parked.path, p); break;
+			case CTX_NP_STOP:
+				// (the one stopped for a photo: forgotten, its place kept)
+				if (p.playing() && !p.playingPhoto()) stopPressed = true;
+				else parked = Parked();
+				break;
 			case CTX_R_PLAY: openFile(path, p); break;
 			case CTX_R_SHOW: showInFolder(path, p); break;
 			case CTX_R_ADD:
@@ -996,6 +1019,8 @@ namespace bp
 				// selecting: a ticked row on a lighter ground; Move's block lit as the cursor is
 				bool block = sel && ((moving && plSel.count(i)) || (plDrag.on && dragSel.count(i)));
 				if (block) drawFocus({16, y, 608, ROW_H - 4});
+				// back from the player: the playing row lit a moment (still playing, here)
+				else if (at && browse && landFlashUntil && rowChip(i)) drawBox({16, y, 608, ROW_H - 4}, PRESSED, R_BUTTON, true);
 				else if (at && !(sel && plDrag.on)) drawFocus({16, y, 608, ROW_H - 4});
 				else if (sel && selTicked(i)) drawBox({16, y, 608, ROW_H - 4}, SURFACE, R_BUTTON);
 				if (browse && r[i].id == PL_ITEM)
@@ -1040,6 +1065,9 @@ namespace bp
 						drawGlyphMid(G_HEART_S, noteW ? 608 - noteW : 601, mid, ACCENT);
 						noteW += 22;
 					}
+					// the file that plays: its chip, as the dashboard's lists mark it
+					if (!sel)
+						if (int k = rowChip(i)) noteW += drawChip(608 - noteW, mid, k) + 10;
 				}
 				else if (style)
 				{
@@ -1095,8 +1123,8 @@ namespace bp
 		else if (emptyAction())
 			drawHints({{"A", "Add connection"}, {"B", back}, {"X", "Options"}, {"L/R", "Sections"}, {"START", "Menu"}});
 		else if (plEmpty) drawHints({{"B", back}, {"X", "Options"}, {"L/R", "Sections"}, {"START", "Menu"}});
-		else if (yMenu) drawHints({{"A", file ? "Play" : "Open"}, {"B", back}, {"X", "Options"}, {"Y", "Menu"}, {"L/R", "Sections"}});
-		else drawHints({{"A", file ? "Play" : "Open"}, {"B", back}, {"X", "Options"}, {"L/R", "Sections"}});
+		else if (yMenu) drawHints({{"A", file ? (rowChip(cursor) ? "Go to it" : "Play") : "Open"}, {"B", back}, {"X", "Options"}, {"Y", "Menu"}, {"L/R", "Sections"}});
+		else drawHints({{"A", file ? (rowChip(cursor) ? "Go to it" : "Play") : "Open"}, {"B", back}, {"X", "Options"}, {"L/R", "Sections"}});
 	}
 
 	void Ui::drawUpRow(int y, bool at)
@@ -1140,6 +1168,9 @@ namespace bp
 				noteW += 30;
 			}
 		}
+		// the item that plays (this playlist playing): its chip
+		if (!edit)
+			if (int k = rowChip(i)) noteW += drawChip(right - noteW, mid, k) + 10;
 		int x = liked && !edit ? 66 : 96;
 		if (miss)
 		{

@@ -420,6 +420,11 @@ namespace bp
 		SDL_SetRenderDrawColor(ren, BG.r, BG.g, BG.b, 255);
 		SDL_RenderClear(ren);
 		webInd = {0, 0, 0, 0};	// (drawBattery puts it back where it draws it)
+		// what plays behind the browser: its bar along the bottom, its row's chip, the header's mark (drawBattery says
+		// whether it moved)
+		miniUp = miniBarShown(p);
+		setChip(p);
+		markAnim = false;
 		if (page == Page::Info || page == Page::About) drawInfo(p);
 		else if (page == Page::Web) drawWeb(p);
 		else if (page == Page::Exit) drawExit(p);
@@ -429,9 +434,10 @@ namespace bp
 		else if (page == Page::Playing) drawPlaying(p);
 		else if (page != Page::Main) drawTracks(p);
 		else drawMain(p);
+		if (miniUp) drawMiniBar(p);
 		if (displayShown(p)) drawDisplay(p);
 		if (inMenu) drawTabs(p);
-		if (ctxOpen && page == Page::Browse) drawBrowseMenu();
+		if (ctxOpen && page == Page::Browse) drawBrowseMenu(p);
 		if (pickerOpen) drawPicker();
 		if (addPending.serial && page == Page::Browse) drawBusy();
 		if (popupShown(p)) drawUpdatePopup();
@@ -469,18 +475,49 @@ namespace bp
 		if (webIndicatorShown(p)) left = (battery.percent >= 0 ? left - 8 : left) - 18;
 		std::string c = clockText(p);
 		if (!c.empty()) left -= (left == 616 ? 0 : 10) + (int)std::lround(textWidth(c, 0) / sx);
+		left -= markW(p);
 		return left;
+	}
+
+	int Ui::markW(const Player& p) const
+	{
+		// something plays behind the browser (not on the player itself, nor a photo)
+		return bgPlay && page != Page::Main && p.playing() && !p.playingPhoto() ? 18 + 10 : 0;
+	}
+
+	bool Ui::markLive(const Player& p) const
+	{
+		if (pageDrives(p)) return pagePlaying();
+		return !p.paused && !p.loading() && p.error.empty();
+	}
+
+	void Ui::drawMark(int right, int cy, const Player& p)
+	{
+		// three bars, moving while it plays (a frame about 6 times a second), dim and still while paused
+		bool live = markLive(p);
+		double t = (SDL_GetTicks() / 166) * 166 / 160.0;
+		for (int i = 0; i < 3; i++)
+		{
+			int h = live ? 5 + (int)std::lround(std::fabs(std::sin(t + i * 1.7)) * 11) : 5;
+			fillRound({right - 18 + i * 7, cy + 8 - h, 4, h}, live ? ACCENT : DIM, 1);
+		}
+		markAnim = live;
 	}
 
 	void Ui::drawBattery(int right, int y, const Player& p, int minX)
 	{
 		// the clock, left of the rest (as statusLeft has it); dim while touch is locked
+		// (then the playing mark, left of it)
 		auto clock = [&](int edge) {
 			std::string c = clockText(p);
-			if (c.empty()) return;
 			int cr = edge - (edge == right ? 0 : 10);
-			if (cr - (int)std::lround(textWidth(c, 0) / sx) < minX) return;
-			drawTextMid(c, 0, touchLocked && page == Page::Main ? DIM : TEXT, cr, y + 8, 0, 1);
+			if (!c.empty())
+			{
+				if (cr - (int)std::lround(textWidth(c, 0) / sx) < minX) return;
+				drawTextMid(c, 0, touchLocked && page == Page::Main ? DIM : TEXT, cr, y + 8, 0, 1);
+				cr -= (int)std::lround(textWidth(c, 0) / sx) + 10;
+			}
+			if (markW(p) && cr - 18 >= minX) drawMark(cr, y + 8, p);
 		};
 		if (battery.percent < 0)
 		{
@@ -566,7 +603,7 @@ namespace bp
 		drawBackIcon();
 		int room = 616 - 72 - (battery.percent >= 0 ? BATTERY_W : 0) - (webIndicatorShown(p) ? 26 : 0);
 		// the clock's room too (none over a photo: its title as it always was)
-		if (!clockText(p).empty()) room = std::min(room, statusLeft(p) - 12 - 72);
+		if (!clockText(p).empty() || markW(p)) room = std::min(room, statusLeft(p) - 12 - 72);
 		if (titleRight) room = std::min(room, titleRight - 12 - 72);
 		drawTextMid(title, 2, TEXT, 72, 32, room);
 		drawBattery(616, 24, p);
@@ -591,17 +628,17 @@ namespace bp
 		{
 			if (!h.key.empty())
 			{
-				drawTextMid(h.key, 0, ACCENT, x, FOOT_Y);
+				drawTextMid(h.key, 0, ACCENT, x, footY());
 				x += w(h.key) + 7;
 			}
-			drawTextMid(h.verb, 0, DIM, x, FOOT_Y);
+			drawTextMid(h.verb, 0, DIM, x, footY());
 			x += w(h.verb) + gap;
 		}
 	}
 
 	void Ui::drawFooterText(const std::string& text, SDL_Color c)
 	{
-		drawTextMid(text, 0, c, W / 2, FOOT_Y, 612, 2);
+		drawTextMid(text, 0, c, W / 2, footY(), 612, 2);
 	}
 
 	void Ui::drawFocus(Rect r)

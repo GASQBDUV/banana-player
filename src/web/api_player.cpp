@@ -178,6 +178,8 @@ namespace bp
 				s.artist = p.artist();
 				s.album = p.album();
 				s.kind = p.playingPhoto() ? "photo" : p.playingAudio() ? "audio" : "video";
+				// the handheld's bottom screen: its player, or the browser with this playing behind it
+				s.screen = u.playerShown(p) ? "player" : "browser";
 				const PlaySource& src = p.source();
 				s.sourceKind = src.kind == SourceKind::Playlist ? (src.id.empty() ? "selection" : "playlist") : "folder";
 				s.sourceTitle = src.title;
@@ -404,7 +406,7 @@ namespace bp
 			const std::string& cur = p.currentPath();
 			std::string dir = real.back() == '/' ? real : real + "/";
 			if (cur != real && cur.compare(0, dir.size(), dir) != 0) return false;
-			// as the web's Stop: main closes it as the loop comes round (back to the browser)
+			// as the web's Stop: main stops it as the loop comes round (back to the browser if the player showed)
 			u.stopRequest = true;
 			u.browserPlaying = false;
 			return true;
@@ -796,7 +798,15 @@ namespace bp
 					fprintf(stderr, "web: browser-play dropped (late, seq %lld < %lld): %s\n", seq, u.browserSeq, real.substr(real.rfind('/') + 1).c_str());
 					return std::string("{\"ok\":true,\"stale\":true}");
 				}
-				if (stop) { u.browserPlaying = false; u.browserFile.clear(); }
+				if (stop)
+				{
+					// the page stopped: the handheld's paused copy of its file was only a mirror, unloaded too (main stops
+					// it; the screens change only if the player showed)
+					bool held = u.browserPlaying && p.playing() && p.paused && !u.browserFile.empty() && p.currentPath() == u.browserFile;
+					u.browserPlaying = false;
+					u.browserFile.clear();
+					if (held) u.stopRequest = true;
+				}
 				else
 				{
 					if (!real.empty()) u.browserFile = real;

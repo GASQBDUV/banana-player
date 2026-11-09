@@ -27,6 +27,7 @@ namespace bp
 	{
 		std::string path, title, artist, album;	// path: virtual ("" when nothing plays)
 		std::string kind;	// "video", "audio", "photo" or "" for none
+		std::string screen;	// the handheld's bottom screen: "player", or "browser" (it plays behind it); "" none
 		std::string sourceKind, sourceTitle, sourceId;	// "folder", "playlist", "selection", "" ; id: the playlist's id
 		int index = 0, count = 0;	// the file's place in the source (0-based; count 0 = none)
 		bool loading = false, paused = false;
@@ -53,7 +54,7 @@ namespace bp
 	};
 
 	// The JSON a page gets in `event: state`. Keys: path, title, artist, album, kind, source {kind, title, id, index,
-	// count}, loading, paused, position, positionAt, duration, speed, volume, eq {on, preset, gains[10]}, fx, loop,
+	// count}, screen, loading, paused, position, positionAt, duration, speed, volume, eq {on, preset, gains[10]}, fx, loop,
 	// shuffled, chapters [{title, start}], chapter, tracks (null, or {audio: [{id, label, selected, default, forced,
 	// external}], sub: [the same], aid, sid}), browserPlaying, clients, playlistSerial, liked, showHiddenFolders.
 	std::string toJson(const WebSnapshot&);

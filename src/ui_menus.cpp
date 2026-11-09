@@ -92,6 +92,8 @@ namespace bp
 			{
 				// an item that isn't there: what can be done about it (its menu, why under the title)
 				if (plMissingAt(i)) { openBrowseMenu(i, MENU_Y); return; }
+				// the item that plays (from this playlist): back to it, never from its start
+				if (int k = rowChip(i)) { if (k == 4) resumeParked(p, true); else showPlayer(); return; }
 				plPlay(plCur, i, false, p);
 				return;
 			}
@@ -192,7 +194,8 @@ namespace bp
 	void Ui::closeMenu(Player& p)
 	{
 		inMenu = false;
-		if (p.playing()) { page = Page::Main; return; }
+		// (over what plays behind the browser: back to the browser)
+		if (playerShown(p)) { page = Page::Main; return; }
 		// the browser, back in its folder (and on its row), listed again (a setting can change what it lists)
 		page = Page::Browse;
 		cursor = menuReturnCursor;
@@ -539,7 +542,7 @@ namespace bp
 		drawHints({{"A", "Choose"}, {"B", items.size() > 1 ? "Later" : "Close"}});
 	}
 
-	void Ui::drawBrowseMenu()
+	void Ui::drawBrowseMenu(const Player& p)
 	{
 		Rect box = ctxBox();
 		// its title: the connection, the folder Hide is for, else the place it's over
@@ -602,6 +605,25 @@ namespace bp
 				: it == CTX_PL_RENAME ? &G_PENCIL : it == CTX_PL_DEDUP || it == CTX_PL_REMOVE ? &G_MINUS : it == CTX_PL_SHOW ? &G_FOLDER
 				: it == CTX_PL_ADD_FILES ? &G_PLUS : it == CTX_PL_ADD_FOLDER ? &G_FOLDER : it == CTX_PL_SELECT || it == CTX_SELECT_FILES ? &G_BOX_ON
 				: it == CTX_PL_MOVE ? &G_MOVE : it == CTX_ADD_TO ? &G_PLAYLIST : it == CTX_WEB ? &G_WEB : &G_CROSS;
+			// the mini bar's: what plays (or was stopped for a photo)
+			if (it >= CTX_NP_NOW)
+			{
+				bool live = p.playing() && !p.playingPhoto();
+				bool on = live && (pageDrives(p) ? pagePlaying() : !p.paused);
+				bool liked = live && likedNow(p);
+				std::string where = live ? p.currentPath() : parked.path;
+				where = isNetPath(where) ? netBaseName(netParent(where)) : baseName(parentFolder(where));
+				std::string npLabel = it == CTX_NP_NOW ? "Now playing" : it == CTX_NP_PLAY ? (on ? "Pause" : "Play")
+					: it == CTX_NP_LIKE ? (liked ? "Unlike" : "Like") : it == CTX_NP_ADD ? "Add to playlist\xE2\x80\xA6"
+					: it == CTX_NP_SHOW ? "Show in folder" : "Stop";
+				const Glyph* ng = it == CTX_NP_NOW ? &G_RIGHT : it == CTX_NP_PLAY ? (on ? &G_PAUSE : &G_PLAY)
+					: it == CTX_NP_LIKE ? (liked ? &G_HEART_O : &G_HEART) : it == CTX_NP_ADD ? &G_PL_ADD
+					: it == CTX_NP_SHOW ? &G_FOLDER : &G_STOP;
+				std::string npNote = it == CTX_NP_SHOW ? where : it == CTX_NP_STOP ? "Place kept in Recent" : it == CTX_NP_NOW && p.settings.buttonHotkeys ? "SELECT" : "";
+				drawDialogRow(ctxRow(i), ng, npLabel, i == ctxCursor, pressedBtn == 100 + i,
+					it == CTX_NP_STOP ? DANGER : it == CTX_NP_NOW ? ACCENT : TEXT, npNote, noteInk);
+				continue;
+			}
 			drawDialogRow(ctxRow(i), g, label, i == ctxCursor, pressedBtn == 100 + i, del ? (armed ? ACCENT : DANGER) : it == CTX_CANCEL ? DIM
 				: it == CTX_R_LIKE && !likedR ? ACCENT : TEXT, note, noteInk);
 		}
@@ -851,9 +873,9 @@ namespace bp
 
 	std::vector<int> Ui::playingRows() const
 	{
-		// Show in folder closes what plays: only where that leads to the browser
-		if (browserMode) return {PR_LIKE, PR_ADD, PR_SHOW, PR_INFO};
-		return {PR_LIKE, PR_ADD, PR_INFO};
+		// behind the browser: Now playing first (back to the player); Stop last, either way
+		if (bgPlay) return {PR_NOW, PR_LIKE, PR_ADD, PR_SHOW, PR_INFO, PR_STOP};
+		return {PR_LIKE, PR_ADD, PR_SHOW, PR_INFO, PR_STOP};
 	}
 
 	bool Ui::playingKey(Button b, Player& p)
@@ -878,8 +900,21 @@ namespace bp
 		{
 		case PR_LIKE: likeNow(p); return false;	// (the tab stays: the row says what it is now)
 		case PR_ADD: openAddOne(p.currentPath(), p.title, p.loaded ? p.duration : -1, p); return false;
+		case PR_NOW: showPlayer(); return false;
+		case PR_STOP:
+			// main stops it (the place kept); the menu closed first, so it lands where Stop leads
+			closeMenu(p);
+			stopPressed = true;
+			return false;
 		case PR_SHOW:
-			// closed, then its folder (showBrowser)
+			// its folder: the player left first (it plays on behind the browser), then the folder (showBrowser)
+			if (bgPlay)
+			{
+				inMenu = false;
+				page = Page::Browse;
+				showInFolder(p.currentPath(), p);
+				return false;
+			}
 			showAfterLeave = p.currentPath();
 			inMenu = false;
 			page = Page::Main;
@@ -935,6 +970,18 @@ namespace bp
 				if (liked) ink = ACCENT;
 				break;
 			case PR_ADD: g = &G_PL_ADD; label = "Add to playlist\xE2\x80\xA6"; note = plStore ? playingIn : ""; break;
+			case PR_NOW:
+				g = &G_RIGHT;
+				label = "Now playing";
+				note = p.settings.buttonHotkeys ? "also SELECT, from any list" : "";
+				ink = ACCENT;
+				break;
+			case PR_STOP:
+				g = &G_STOP;
+				label = "Stop";
+				note = "Place kept in Recent";
+				ink = DANGER;
+				break;
 			case PR_SHOW:
 				g = &G_FOLDER;
 				label = "Show in folder";
@@ -950,7 +997,7 @@ namespace bp
 				drawTextMid(note, 0, at ? DIM_ON : DIM, r.x + r.w - 14, mid, 240, 1);
 				nw = std::min(240, (int)std::lround(textWidth(note, 0) / sx)) + 24;
 			}
-			drawTextMid(label, 1, at ? ACCENT : TEXT, r.x + 56, mid, r.w - 70 - nw);
+			drawTextMid(label, 1, at ? ACCENT : rows[i] == PR_STOP ? DANGER : TEXT, r.x + 56, mid, r.w - 70 - nw);
 		}
 		drawHints({{"UP/DOWN", "Move"}, {"A", "Choose"}, {"B", "Close"}, {"L/R", "Tabs"}});
 	}

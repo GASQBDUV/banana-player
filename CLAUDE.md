@@ -108,6 +108,12 @@ tools/make-sprite.py                                 # regenerates web/sprite.sv
   (`tools/make-sprite.py`); web-only glyphs are inline in `index.html`. `web/style.css` copies `theme.h` by hand.
 - **Playing in the browser:** the paused copy on the handheld is never given the page's position; its first play there
   does `ao-reload`; iPhone/iPad play in the page is off (`NO_HERE`).
+- **Leaving is not stopping** (docs/notes/2026-11-10-background-playback.md): `press`/`pointer` returning true is
+  `main`'s `leave()`, a screen change (what plays goes on behind the browser, `Ui::bgPlay`); stopping is
+  `stopPlaying()` (`takeStopPressed`, `takeStopRequest`, the end of the list), which changes screens only when
+  `Ui::playerShown()`. "Back to Main" goes through `home()`/`showPlayer()`, never `p.playing()` alone. Any Stop clears
+  the browser hand-off (`Ui::stopped`) without telling the page; the page announces only to a snapshot with a path.
+  A photo opened over a song parks it (`Ui::park`); the mini bar (`drawMiniBar`, `miniBarShown`) offers it back.
 - **Fonts:** SDL_ttf has no fallback (`Ui::runs()` picks per run); libass uses the bundle's `fonts.conf` (player's fonts
   only). The icon's 32×32 grid lives in both `packaging/icon/make-icon.py` and `src/logo.h`: change both.
 - **Code style:** tabs; comments say why, not what. Screenshots/README use Blender's *Sintel* (CC BY 3.0); no

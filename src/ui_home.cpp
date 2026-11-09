@@ -98,7 +98,8 @@ namespace bp
 	{
 		// two by two under the strip; taller with no Recent (a line in its place)
 		bool has = !recent.empty();
-		int y0 = has ? 200 : 96, h = has ? 110 : 162;
+		// (shorter over the mini bar)
+		int y0 = has ? 200 : 96, h = has ? (miniUp ? 100 : 110) : (miniUp ? 154 : 162);
 		return {16 + g % 2 * 312, y0 + g / 2 * (h + 8), 296, h};
 	}
 
@@ -176,13 +177,13 @@ namespace bp
 	{
 		if (b == Button::B)
 		{
-			// over what plays: back to it; else twice leaves
-			if (p.playing()) { page = Page::Main; return false; }
+			// something playing (or stopped for a photo): back to it, so B never quits while it plays; else twice leaves
+			if (goNowPlaying(p)) return false;
 			if (quitArmed && SDL_GetTicks() - quitArmed < QUIT_WINDOW_MS) return true;
 			quitArmed = SDL_GetTicks();
 			return false;
 		}
-		if (b == Button::Start) { openMainMenu(p); return false; }
+		if (b == Button::Start) { openMainMenu(p, playingTabShown(p) ? TAB_PLAYING : TAB_SETTINGS); return false; }
 		if (b == Button::X) { openHomeOptions(); return false; }
 		bool has = !recent.empty();
 		if (homeZone == HOME_STRIP && has)
@@ -292,7 +293,9 @@ namespace bp
 
 	void Ui::openFile(const std::string& path, Player& p)
 	{
-		(void)p;
+		// what plays (or was stopped for a photo): back to it, never from its start
+		if (p.playing() && !p.playingPhoto() && p.currentPath() == path) { showPlayer(); return; }
+		if (parkedShown() && parked.path == path) { resumeParked(p, true); return; }
 		// a network file whose folder wasn't listed (Recent): listed first, a moment, for the files that play after it,
 		// its subtitles and its cover (netListed opens it)
 		NetPath np;
@@ -393,21 +396,40 @@ namespace bp
 				{
 					// the name on up to two lines; under it, what kind, how far, and a network mark; a bar along the foot
 					const RecentItem& it = recent[i];
-					auto lines = wrapText(it.name, 1, CARD_W - 28, 2);
+					// what plays (or was stopped for a photo): a chip top right, its time and bar live
+					int chip = chipKind && it.path == chipPath ? chipKind : 0;
+					std::string sub = it.sub;
+					double frac = it.frac;
+					bool lit = !it.at.empty();
+					if (chip && chip != 4 && p.playing() && p.duration > 0)
+					{
+						double pos = std::max(0.0, shownPosition(p));
+						sub = formatTime(pos) + " / " + formatTime(p.duration);
+						frac = std::clamp(pos / p.duration, 0.0, 1.0);
+						lit = true;
+					}
+					else if (chip == 4 && parked.dur > 0)
+					{
+						sub = formatTime(parked.pos) + " / " + formatTime(parked.dur);
+						frac = std::clamp(parked.pos / parked.dur, 0.0, 1.0);
+						lit = true;
+					}
+					int chipW = chip ? drawChip(x + CARD_W - 8, CARD_Y + 19, chip, true) + 8 : 0;
+					auto lines = wrapText(it.name, 1, CARD_W - 28 - chipW, 2);
 					for (size_t k = 0; k < lines.size(); k++)
-						drawTextMid(lines[k], 1, ink, x + 14, CARD_Y + (lines.size() == 1 ? 34 : 24) + (int)k * 26, CARD_W - 28);
+						drawTextMid(lines[k], 1, ink, x + 14, CARD_Y + (lines.size() == 1 ? 34 : 24) + (int)k * 26, CARD_W - 28 - (k ? 0 : chipW));
 					drawGlyphMid(*it.kind, x + 25, CARD_Y + 78, soft);
 					// a liked one: a small heart, left of the network mark
 					bool liked = plStore && plStore->isLiked(it.path);
-					drawTextMid(it.sub, 0, soft, x + 44, CARD_Y + 78, CARD_W - 58 - (it.net ? 30 : 0) - (liked ? 22 : 0));
+					drawTextMid(sub, 0, soft, x + 44, CARD_Y + 78, CARD_W - 58 - (it.net ? 30 : 0) - (liked ? 22 : 0));
 					int mx = x + CARD_W - 22;
 					if (it.net) { drawGlyphMid(G_NETWORK, mx - 3, CARD_Y + 78, soft); mx -= 30; }
 					if (liked) drawGlyphMid(G_HEART_S, mx, CARD_Y + 78, ACCENT);
 					// along the card's foot, in its corners: over its edge, or inside the cursor's yellow one
-					int w = (int)std::lround(CARD_W * it.frac);
+					int w = (int)std::lround(CARD_W * frac);
 					Rect in = at ? Rect{x + theme::EDGE, CARD_Y + theme::EDGE, CARD_W - 2 * theme::EDGE, CARD_H - 2 * theme::EDGE} : r;
 					if (w > 0)
-						fillRoundBand(in, at ? R_TILE - theme::EDGE : R_TILE, CARD_Y + CARD_H - 4, in.y + in.h, it.at.empty() ? DIM : ACCENT, x + w);
+						fillRoundBand(in, at ? R_TILE - theme::EDGE : R_TILE, CARD_Y + CARD_H - 4, in.y + in.h, lit && chip != 4 ? ACCENT : DIM, x + w);
 				}
 				else
 				{
@@ -449,10 +471,12 @@ namespace bp
 			}
 		}
 		if (quitArmed) { drawFooterText("Press B again to quit", ACCENT); return; }
+		// (something playing: B goes back to it, never quits)
+		const char* b = nowPlayable(p) ? "Now playing" : "Quit";
 		if (homeZone == HOME_STRIP && has && homeStrip < (int)recent.size())
-			drawHints({{"A", "Play"}, {"Y", "Menu"}, {"X", "Options"}, {"B", "Quit"}, {"START", "Menu"}});
-		else if (homeZone == HOME_STRIP && has) drawHints({{"A", "Open"}, {"X", "Options"}, {"B", "Quit"}, {"START", "Menu"}});
-		else drawHints({{"D-PAD", "Move"}, {"A", "Open"}, {"X", "Options"}, {"B", "Quit"}, {"START", "Menu"}});
+			drawHints({{"A", chipKind && recent[homeStrip].path == chipPath ? "Go to it" : "Play"}, {"Y", "Menu"}, {"X", "Options"}, {"B", b}, {"START", "Menu"}});
+		else if (homeZone == HOME_STRIP && has) drawHints({{"A", "Open"}, {"X", "Options"}, {"B", b}, {"START", "Menu"}});
+		else drawHints({{"D-PAD", "Move"}, {"A", "Open"}, {"X", "Options"}, {"B", b}, {"START", "Menu"}});
 	}
 
 	Ui::Rect Ui::pipRect(int k, const Player& p) const
@@ -483,5 +507,205 @@ namespace bp
 		}
 		drawTextMid("R", 0, ACCENT, first.x + 164, 32);
 		drawBattery(616, 24, p);
+	}
+
+	// ---- what plays behind the browser: the mini bar, the playing row's chip, what a photo stopped ----
+
+	void Ui::park(const Player& p)
+	{
+		if (!p.playing() || p.playingPhoto() || !p.error.empty()) return;
+		Parked k;
+		k.path = p.currentPath();
+		k.title = !p.title.empty() ? p.title : entryTitle(k.path);
+		k.paths = p.paths();
+		k.index = p.index();
+		k.source = p.source();
+		if (isNetPath(k.path)) k.names = netFolderNames(netParent(k.path));
+		k.pos = std::max(0.0, shownPosition(p));
+		k.dur = p.duration;
+		k.audio = p.playingAudio();
+		parked = k;
+	}
+
+	void Ui::resumeParked(Player& p, bool show)
+	{
+		if (!parkedShown()) return;
+		Parked k = parked;
+		parked = Parked();
+		playRequest = {};
+		playRequest.paths = k.paths;
+		playRequest.index = std::clamp(k.index, 0, std::max(0, (int)k.paths.size() - 1));
+		playRequest.source = k.source;
+		playRequest.names = k.names;
+		playRequest.stay = !show;
+		// at its place (a song too, which otherwise starts at its start), once it knows its length
+		seekPath = k.path;
+		seekTo = k.pos;
+		seekUntil = SDL_GetTicks() + 8000;
+		(void)p;
+	}
+
+	bool Ui::goNowPlaying(Player& p)
+	{
+		if (p.playing() && !p.playingPhoto())
+		{
+			showPlayer();
+			return true;
+		}
+		if (!parkedShown()) return false;
+		resumeParked(p, true);
+		return true;
+	}
+
+	bool Ui::miniBarShown(const Player& p) const
+	{
+		// on Home and the lists; not while selecting (its bar owns the bottom), typing, or on the connection pages
+		return page == Page::Browse && !inMenu && selMode == SEL_NONE && !kbOpen && browseDir != FORMDIR && browseDir != FINDNET &&
+			!addPending.serial && nowPlayable(p);
+	}
+
+	void Ui::miniToggle(Player& p)
+	{
+		if (p.playing() && !p.playingPhoto())
+		{
+			// a page plays it: the page's play / pause (as A on the player)
+			if (pageDrives(p)) { toggleBrowser(p); return; }
+			if (!p.error.empty()) return;
+			if (p.paused) resumeFromBrowser(p);
+			p.togglePause();
+			return;
+		}
+		resumeParked(p, false);
+	}
+
+	void Ui::openNowMenu(const Player& p)
+	{
+		bool live = p.playing() && !p.playingPhoto();
+		std::vector<int> items = {CTX_NP_NOW, CTX_NP_PLAY};
+		if (live && likeable(p)) items.push_back(CTX_NP_LIKE);
+		if (live && plStore && PlaylistStore::likable(p.currentPath())) items.push_back(CTX_NP_ADD);
+		items.push_back(CTX_NP_SHOW);
+		items.push_back(CTX_NP_STOP);
+		ctxRecent.clear();
+		ctxOpen = true;
+		ctxCursor = 0;
+		ctxItems = items;
+		ctxServer.clear();
+		ctxStatus.clear();
+		ctxArmed = false;
+		ctxPath.clear();
+		ctxFolder.clear();
+		ctxTitle = live ? (!p.title.empty() ? p.title : entryTitle(p.currentPath())) : parked.title;
+		ctxNote.clear();
+		ctxPlFile.clear();
+		ctxPlItem = -1;
+		quitArmed = 0;
+	}
+
+	void Ui::setChip(const Player& p)
+	{
+		chipKind = 0;
+		chipPath.clear();
+		chipPlDir.clear();
+		const PlaySource* src = nullptr;
+		if (p.playing() && !p.playingPhoto())
+		{
+			chipPath = p.currentPath();
+			chipKind = pageDrives(p) ? 3 : p.paused ? 2 : 1;
+			src = &p.source();
+		}
+		else if (parkedShown())
+		{
+			chipPath = parked.path;
+			chipKind = 4;
+			src = &parked.source;
+		}
+		if (src && src->kind == SourceKind::Playlist && !src->id.empty()) chipPlDir = plDirFor(src->id);
+	}
+
+	int Ui::rowChip(int i) const
+	{
+		if (!chipKind || i < 0 || i >= (int)browsePaths.size() || i >= (int)browseRows.size() || browsePaths[i] != chipPath) return 0;
+		// in a playlist's page only when it plays from that playlist; in a folder (or All recent) wherever it's from
+		if (browseRows[i].id == PL_ITEM) return browseDir == chipPlDir ? chipKind : 0;
+		return browseRows[i].id == 2 ? chipKind : 0;
+	}
+
+	int Ui::drawChip(int right, int mid, int kind, bool card)
+	{
+		static const char* ROW[] = {"", "Playing", "Paused", "In browser", "Stopped"};
+		static const char* CARD[] = {"", "Now", "Paused", "Browser", "Stopped"};
+		const Glyph* g = kind == 1 ? &G_PLAY : kind == 2 ? &G_PAUSE : kind == 3 ? &G_WEB : nullptr;
+		std::string t = (card ? CARD : ROW)[std::clamp(kind, 0, 4)];
+		int tw = (int)std::lround(textWidth(t, 0) / sx), gw = g ? glyphW(*g, 1) + 5 : 0;
+		int w = 8 + gw + tw + 8;
+		bool off = kind == 4;
+		SDL_Color ink = off ? DIM : ON_ACCENT;
+		fillRound({right - w, mid - 11, w, 22}, off ? SURFACE : ACCENT, R_CHIP);
+		if (g) drawGlyphMid(*g, right - w + 8 + (gw - 5) / 2, mid, ink, 1);
+		drawTextMid(t, 0, ink, right - w + 8 + gw, mid);
+		return w;
+	}
+
+	void Ui::drawMiniBar(const Player& p)
+	{
+		Rect b = MINI_BOX;
+		int mid = b.y + b.h / 2;
+		bool live = p.playing() && !p.playingPhoto();
+		bool held = live && pageDrives(p);
+		bool err = live && !p.error.empty();
+		bool flash = landFlashUntil != 0;
+		drawBox(b, pressedBtn == MINI_BAR ? PRESSED : SURFACE, R_BUTTON, flash);
+		// how far into it, along its foot (dim: stopped for a photo)
+		double pos = live ? shownPosition(p) : parked.pos, dur = live ? p.duration : parked.dur;
+		double frac = dur > 0 && pos >= 0 ? std::clamp(pos / dur, 0.0, 1.0) : 0;
+		int fw = (int)std::lround(b.w * frac);
+		Rect in = flash ? Rect{b.x + theme::EDGE, b.y + theme::EDGE, b.w - 2 * theme::EDGE, b.h - 2 * theme::EDGE} : b;
+		if (fw > 0 && !err) fillRoundBand(in, flash ? R_BUTTON - theme::EDGE : R_BUTTON, in.y + in.h - 3, in.y + in.h, live ? ACCENT : DIM, b.x + fw);
+		// its play mark, a zone of its own (held while a page plays the file: filling, as Main's Play does)
+		bool playingNow = held ? pagePlaying() : live && !p.paused && !err;
+		if (pressedBtn == MINI_PP || (playHoldMini && playHoldAt)) fillRound({b.x + 4, b.y + 4, 36, b.h - 8}, PRESSED, 8);
+		if (playHoldMini && playHoldAt)
+		{
+			double f = std::min(1.0, (SDL_GetTicks() - playHoldAt) / (double)PLAY_HOLD_MS);
+			fillRound({b.x + 6, b.y + b.h - 8, (int)(32 * f), 3}, ACCENT, 1);
+		}
+		drawGlyphMid(playingNow ? G_PAUSE : G_PLAY, b.x + 22, mid, err ? DIM : ACCENT);
+		fill({b.x + 44, b.y + 7, 2, b.h - 14}, RULE);
+		bool audio = live ? p.playingAudio() : parked.audio;
+		drawGlyphMid(audio ? G_NOTE : G_FILM, b.x + 62, mid, DIM);
+		// the right end: SELECT Now playing, a chevron
+		drawGlyphMid(G_RIGHT, b.x + b.w - 14, mid, DIM);
+		int xr = b.x + b.w - 28;
+		std::string verb = " Now playing";
+		int vw = (int)std::lround(textWidth(verb, 0) / sx);
+		drawTextMid(verb, 0, DIM, xr, mid, 0, 1);
+		int keyX = xr - vw;
+		if (p.settings.buttonHotkeys)
+		{
+			drawTextMid("SELECT", 0, ACCENT, keyX, mid, 0, 1);
+			keyX -= (int)std::lround(textWidth("SELECT", 0) / sx);
+		}
+		// the title, then how it stands (dim; yellow for a page's; red for an error)
+		std::string title = live ? (!p.title.empty() ? p.title : entryTitle(p.currentPath())) : parked.title;
+		std::string sub;
+		SDL_Color subInk = DIM;
+		if (err) { sub = "Couldn't read"; subInk = DANGER; }
+		else if (held) { sub = pagePlaying() ? "Playing in your browser" : "Paused in your browser"; subInk = ACCENT; }
+		else if (!live) sub = "stopped at " + formatTime(pos);
+		else if (p.loading()) sub = "Loading" + std::string(SDL_GetTicks() / 400 % 4, '.');
+		else sub = formatTime(pos) + " / " + formatTime(dur) + (p.paused ? " \xC2\xB7 paused" : "");
+		int x0 = b.x + 78, room = keyX - 14 - x0;
+		int sw = std::min(room / 2, (int)std::lround(textWidth(sub, 0) / sx));
+		int tmax = std::max(40, room - sw - 12);
+		drawTextMid(title, 0, TEXT, x0, mid, tmax);
+		int tw = std::min(tmax, (int)std::lround(textWidth(title, 0) / sx));
+		int sx0 = x0 + tw + 12;
+		if (held)
+		{
+			drawGlyphMid(G_WEB, sx0 + glyphW(G_WEB, 1) / 2, mid, ACCENT, 1);
+			sx0 += glyphW(G_WEB, 1) + 6;
+		}
+		if (keyX - 14 - sx0 > 20) drawTextMid(sub, 0, subInk, sx0, mid, keyX - 14 - sx0);
 	}
 }

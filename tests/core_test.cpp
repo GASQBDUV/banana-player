@@ -2431,12 +2431,20 @@ static void testWeb()
 		j.chapter = 0;
 		j.loop = "one";
 		j.clients = 1;
+		j.screen = "browser";
 		CHECK_EQ(toJson(j), std::string("{\"path\":\"0/M\\\"x\\\\.mp3\",\"title\":\"\",\"artist\":\"\",\"album\":\"\",\"kind\":\"audio\","
-			"\"source\":{\"kind\":\"playlist\",\"title\":\"\",\"id\":\"Road.m3u\",\"index\":0,\"count\":2},\"loading\":false,"
+			"\"source\":{\"kind\":\"playlist\",\"title\":\"\",\"id\":\"Road.m3u\",\"index\":0,\"count\":2},\"screen\":\"browser\",\"loading\":false,"
 			"\"paused\":false,\"position\":1.5,\"positionAt\":42,\"duration\":0,\"speed\":1,\"volume\":0,"
 			"\"eq\":{\"on\":false,\"preset\":\"\",\"gains\":[-3,0,0,0,0,0,0,0,0,0]},\"fx\":\"\",\"loop\":\"one\","
 			"\"shuffled\":false,\"chapters\":[{\"title\":\"A\",\"start\":0}],\"chapter\":0,\"tracks\":null,\"browserPlaying\":false,"
 			"\"clients\":1,\"playlistSerial\":0,\"liked\":false,\"showHiddenFolders\":false}"));
+
+		// the handheld's screen (its player left, or back to it) is news: the dashboard says "in the background"
+		{
+			WebSnapshot x = j, y = j;
+			y.screen = "player";
+			CHECK_EQ(snapshotChanged(x, y), true);
+		}
 
 		// a video's tracks: listed, and a change of choice is news
 		WebSnapshot v;

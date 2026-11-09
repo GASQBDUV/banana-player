@@ -196,6 +196,8 @@ namespace bp
 		void stop();
 		bool playing() const { return !playlist.empty(); }
 		std::string currentPath() const { return playlist.empty() ? "" : playlist[current]; }
+		// the files it plays from, in their order (index(): the one playing)
+		const std::vector<std::string>& paths() const { return playlist; }
 		const ResumeStore& resumeStore() const { return resume; }
 		const PlayHistory& history() const { return played; }
 		void clearHistory();

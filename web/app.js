@@ -23,6 +23,8 @@ import { toast } from './js/toasts.js';
 const NAV = [['playing', 'Playing', 'note', '#/playing'], ['files', 'Files', 'folder', '#/files'], ['playlists', 'Playlists', 'playlist', '#/playlists']];
 async function loadPls() { try { set({ pls: (await get('/api/playlists', null, { quiet: true })).playlists || [] }); } catch (e) {} }
 
+// the handheld plays it behind its browser (its player left, not stopped): the bars say so
+const bgShown = () => !!store.snap && !!store.snap.path && store.snap.screen === 'browser' && !store.snap.browserPlaying;
 // the phone's small player, floating over the tab bar
 function MiniPlayer() {
 	const v = view(); useTick(1000);
@@ -30,7 +32,7 @@ function MiniPlayer() {
 	const frac = v.duration ? Math.min(1, v.pos() / v.duration) : 0;
 	return html`<div class="mini box surface" onClick=${() => go('#/playing')} role="region" aria-label="Now playing">
 		<div class="tile art-sm"><${Art} src=${coverUrl(v.kind === 'video' ? v.path : v.cover)} seed=${v.path} kind=${v.kind} /></div>
-		<div class="meta"><div class="t ell">${v.title}</div><div class="m ell">${v.here ? 'In this browser' : html`<span class="y">On handheld</span>`}${v.artist ? ' · ' + v.artist : ''}</div></div>
+		<div class="meta"><div class="t ell">${v.title}</div><div class="m ell">${v.here ? 'In this browser' : html`<span class="y">On handheld</span>`}${!v.here && bgShown() ? ' · in the background' : v.artist ? ' · ' + v.artist : ''}</div></div>
 		${likable(v) && html`<${LikeBtn} v=${v} cls="ib" />`}
 		<button class="ib play" aria-label=${v.paused ? 'Play' : 'Pause'} onClick=${e => { e.stopPropagation(); ctl.toggle(); }}><${Icon} n=${v.paused ? 'play' : 'pause'} k=${2} /></button>
 		<div class="prog" aria-hidden="true"><i style=${'width:' + frac * 100 + '%'}></i></div></div>`;
@@ -49,7 +51,7 @@ function PlayerBar() {
 			<span class="ptime">${fmtTime(v.pos())} / ${fmtTime(v.duration)}</span></div>
 		<div class=${'pb-now' + (onPage ? ' here' : '')}>
 			<div class="go" onClick=${open} role=${onPage ? undefined : 'link'} tabindex=${onPage ? undefined : 0} aria-label=${onPage ? undefined : 'Open the player'} onKeyDown=${e => { if (e.key === 'Enter') open(); }}>
-				<span class="tile art-sm"><${Art} src=${coverUrl(v.kind === 'video' ? v.path : v.cover)} seed=${v.path} kind=${v.kind} /></span><span class="grow"><div class="t ell">${v.title}</div><div class="m ell">${v.artist || targetLabel(s.target)}</div></span></div>
+				<span class="tile art-sm"><${Art} src=${coverUrl(v.kind === 'video' ? v.path : v.cover)} seed=${v.path} kind=${v.kind} /></span><span class="grow"><div class="t ell">${v.title}</div><div class="m ell">${v.artist || targetLabel(s.target)}${!v.here && bgShown() ? ' · in the background' : ''}</div></span></div>
 			${likable(v) && html`<${LikeBtn} v=${v} cls="ib" /><button class=${'ib' + (s.addOpen ? ' open' : '')} aria-label="Add to playlist" title="Add to playlist" aria-haspopup="dialog" aria-expanded=${!!s.addOpen} onClick=${e => addToPlaylist([v.path], v.title, e.currentTarget)}><${Icon} n="pl-add" k=${2} /></button>`}</div>
 		<div class="right">
 			<button class=${'ib opt' + (v.shuffled ? ' on' : '')} aria-label="Shuffle" title=${v.shuffled ? 'Shuffle: On' : 'Shuffle: Off'} aria-pressed=${!!v.shuffled} onClick=${ctl.shuffle} disabled=${off}><${Icon} n="shuffle" k=${2} /></button>

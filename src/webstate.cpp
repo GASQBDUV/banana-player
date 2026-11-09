@@ -15,6 +15,7 @@ namespace bp
 		j.key("kind").str(s.kind);
 		j.key("source").obj().key("kind").str(s.sourceKind).key("title").str(s.sourceTitle).key("id").str(s.sourceId);
 		j.key("index").num(s.index).key("count").num(s.count).end();
+		j.key("screen").str(s.screen);
 		j.key("loading").boolean(s.loading).key("paused").boolean(s.paused);
 		j.key("position").num(s.position).key("positionAt").num(s.positionAtMs);
 		j.key("duration").num(s.duration).key("speed").num(s.speed).key("volume").num(s.volume);
@@ -50,7 +51,7 @@ namespace bp
 
 	bool snapshotChanged(const WebSnapshot& a, const WebSnapshot& b)
 	{
-		if (a.path != b.path || a.title != b.title || a.artist != b.artist || a.album != b.album || a.kind != b.kind ||
+		if (a.path != b.path || a.title != b.title || a.artist != b.artist || a.album != b.album || a.kind != b.kind || a.screen != b.screen ||
 			a.sourceKind != b.sourceKind || a.sourceTitle != b.sourceTitle || a.sourceId != b.sourceId ||
 			a.index != b.index || a.count != b.count || a.loading != b.loading || a.paused != b.paused ||
 			a.duration != b.duration || a.speed != b.speed || a.volume != b.volume || a.eqOn != b.eqOn ||

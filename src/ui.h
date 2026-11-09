@@ -53,7 +53,10 @@ namespace bp
 		void tick(Player& p);
 		// something moves by itself (a flick, a playlist's rows scrolling under a dragged one): the loop should come
 		// round often
-		bool animating() const { return playHoldAt != 0 || flickAt != 0 || plDrag.on || stripT0 != 0 || likePopAt != 0 || addFlashUntil != 0; }
+		bool animating() const { return playHoldAt != 0 || flickAt != 0 || plDrag.on || stripT0 != 0 || likePopAt != 0 || addFlashUntil != 0 || landFlashUntil != 0; }
+		// the header's playing mark moves (something plays behind the browser, the bottom panel lit): the loop comes
+		// round a few times a second for its frames
+		bool markMoving() const { return markAnim && panel.on(); }
 		// the playlist edited in the browser, written now (its edits are written a second after they stop): before
 		// quitting, or stopping what plays
 		void flushPlaylist(Player& p) { plFlush(p); }
@@ -75,8 +78,24 @@ namespace bp
 		{
 			page = Page::Main;
 			inMenu = false;
+			bgPlay = false;
+			ctxOpen = false;
 			dropTouch();
 		}
+		// what plays (a song or a video) has its screen as the bottom panel's base: Main, or a page or the menu over it.
+		// False while it plays behind the browser (the player left with B, "<" or Back)
+		bool playerShown(const Player& p) const { return p.playing() && !bgPlay; }
+		// the player's own Stop (Main's Stop, START › Playing › Stop, the mini bar's menu), once: main stops what plays
+		bool takeStopPressed() { bool r = stopPressed; stopPressed = false; return r; }
+		// what plays stopped (any Stop, the end of the list): a page playing the file has nothing held here any more
+		// (the page plays on: not told)
+		void stopped() { browserPlaying = false; browserFile.clear(); playHoldAt = 0; }
+		// a song or video stopped for a photo (one mpv: a photo replaces it): its place kept, the mini bar offers it back
+		// (park, before the photo opens). Resumed by the bar's play (in the background) or its tap / SELECT (the player)
+		void park(const Player& p);
+		bool parkedShown() const { return !parked.path.empty(); }
+		// the parked one played again behind the browser (its PlayRequest's stay): the browser stays the base page
+		void playBehind() { bgPlay = true; }
 		bool browsing() const { return page == Page::Browse; }
 		std::string browseFolder() const { return browseDir; }
 		// a video picked in the browser, once: the caller opens it
@@ -91,7 +110,9 @@ namespace bp
 		}
 		std::string takeOpenRequest() { std::string r; r.swap(openRequest); return r; }
 		// a playlist picked in the browser (an item, Play, Shuffle play), once: the caller opens it (openPlaylist)
-		struct PlayRequest { std::vector<std::string> paths; int index = 0; PlaySource source; };
+		// names: a network folder's listing (open's folderNames); stay: opened behind the browser (the parked song's
+		// play from the mini bar), not on the player
+		struct PlayRequest { std::vector<std::string> paths; int index = 0; PlaySource source; std::vector<std::string> names; bool stay = false; };
 		bool takePlayRequest(PlayRequest& out)
 		{
 			if (playRequest.paths.empty()) return false;
@@ -253,7 +274,7 @@ namespace bp
 		int setGroup = -1;
 		std::vector<int> settingRows() const;	// the open group's rows, by id
 		void openGroup(int g);
-		Page home(const Player& p) const { return p.playing() ? Page::Main : Page::Browse; }
+		Page home(const Player& p) const { return playerShown(p) ? Page::Main : Page::Browse; }
 		// HOMEDIR Home, "" the cards (Files' top), RECENT the recent videos (All recent)
 		void enterFolder(std::string dir, Player& p);
 		// the browser's four sections, opened from Home's tiles: Files (the cards), Playlists (the saved ones, then their
@@ -497,7 +518,9 @@ namespace bp
 			// Remove from Recent
 			CTX_R_PLAY, CTX_R_START, CTX_R_SHOW, CTX_R_LIKE, CTX_R_ADD, CTX_R_REMOVE,
 			// Home's X
-			CTX_CLEAR_RECENT, CTX_HIDDEN, CTX_SETTINGS };
+			CTX_CLEAR_RECENT, CTX_HIDDEN, CTX_SETTINGS,
+			// the mini bar's (a hold on it): Now playing, Play / Pause, Like, Add to playlist..., Show in folder, Stop
+			CTX_NP_NOW, CTX_NP_PLAY, CTX_NP_LIKE, CTX_NP_ADD, CTX_NP_SHOW, CTX_NP_STOP };
 		// how it was opened: X (the place's menu), Y (the row's), a finger held on a row (the row's, folders and
 		// connections only)
 		enum MenuHow { MENU_X, MENU_Y, MENU_HOLD };
@@ -512,7 +535,7 @@ namespace bp
 		Uint32 holdAt = 0;	// a finger down on a row, for the hold that opens it
 		void openBrowseMenu(int row, MenuHow how);
 		void chooseBrowseMenu(int item, Player& p);
-		void drawBrowseMenu();
+		void drawBrowseMenu(const Player& p);
 		// the updater's pop-up over the file list: a release found (Update now, Later, Not until tomorrow), then the
 		// download's progress (Hide), then Restart now / Later, or what went wrong (OK)
 		bool popupClosed = false, popupFollow = false;
@@ -619,12 +642,17 @@ namespace bp
 		Rect tabRect(int tab) const { return {72 + tab * 136, 10, 128, 44}; }
 		void drawTabs(const Player& p);
 		// the Playing tab: the file's card, then its rows (PLAY_ROW + i)
-		enum PlayingRow { PR_LIKE, PR_ADD, PR_SHOW, PR_INFO };
+		// Now playing (while it plays behind the browser) first, Stop last
+		enum PlayingRow { PR_LIKE, PR_ADD, PR_SHOW, PR_INFO, PR_NOW, PR_STOP };
 		std::vector<int> playingRows() const;
 		void drawPlaying(const Player& p);
 		bool playingKey(Button b, Player& p);
 		bool playingChoose(int row, Player& p);	// true: leave (Show in folder closes what plays)
-		Rect playingRowRect(int i) const { return {16, 142 + i * 54, 608, 50}; }
+		Rect playingRowRect(int i) const
+		{
+			int step = playingRows().size() > 5 ? 46 : 54;	// (six: closer, to end above the footer)
+			return {16, 142 + i * step, 608, step - 4};
+		}
 		// Show in folder from the Playing tab: what plays closed, then its folder shown (showBrowser)
 		std::string showAfterLeave;
 		// Like: toggled (the heart, START's Playing tab, L3), the heart's pop and the top panel's card
@@ -951,6 +979,51 @@ namespace bp
 		std::string webSig(const Player& p) const;	// for signature()
 		int levelMs = 0;
 		bool stopRequest = false;
+
+		// ---- playing behind the browser ----
+		// the player left (B, "<", Back) while a song or video plays on: the browser is the base page; showPlayer ends it
+		bool bgPlay = false;
+		bool stopPressed = false;	// the player's own Stop (takeStopPressed)
+		// what was stopped for a photo: where it played from, and where it was
+		struct Parked
+		{
+			std::string path, title;
+			std::vector<std::string> paths, names;
+			int index = 0;
+			PlaySource source;
+			double pos = 0, dur = 0;
+			bool audio = false;
+		} parked;
+		void resumeParked(Player& p, bool show);	// played again at its place (show: on the player)
+		// back to what plays (SELECT on a browse page, the bar, Now playing, B at Home): the player, or the parked one
+		// reopened there. False: nothing to go back to
+		bool goNowPlaying(Player& p);
+		bool nowPlayable(const Player& p) const { return (p.playing() && !p.playingPhoto()) || parkedShown(); }
+		// the mini bar (Now playing) along the bottom of Home and the browser's pages: a tap the player, its play mark
+		// play / pause (a page playing the file: the page's, held: here), a hold its menu
+		static constexpr Rect MINI_BOX{16, 422, 608, 34};
+		static constexpr int MINI_PP = 560, MINI_BAR = 561;
+		bool miniBarShown(const Player& p) const;
+		bool miniUp = false;	// shown in the last frame drawn (tileRect, the footer's line)
+		void drawMiniBar(const Player& p);
+		void miniToggle(Player& p);	// its play mark: play / pause what plays (a page's, the parked one in the background)
+		void openNowMenu(const Player& p);
+		Uint32 miniHoldAt = 0;
+		bool playHoldMini = false;	// the Play hold (a page plays the file) is on the mini bar's play mark
+		int footY() const { return miniUp ? 468 : FOOT_Y; }
+		// the playing file's row (and Recent card): a chip ("Playing", "Paused", "In browser", "Stopped"), set each frame
+		std::string chipPath, chipPlDir;	// chipPlDir: a playlist's page (only there, of the playlists: the one playing)
+		int chipKind = 0;	// 0 none, 1 playing, 2 paused, 3 in a browser, 4 stopped (for a photo)
+		void setChip(const Player& p);
+		int drawChip(int right, int mid, int kind, bool card = false);	// its width
+		int rowChip(int i) const;	// the chip of the browser's row i (0 none)
+		// back from the player: the playing file's row (and the bar's edge) lit a moment
+		Uint32 landFlashUntil = 0;
+		bool markAnim = false;	// drawBattery drew the playing mark moving
+		int markW(const Player& p) const;	// its room in the header (0 none)
+		bool markLive(const Player& p) const;	// it moves: what plays plays (a page's: as the page does)
+		void drawMark(int right, int cy, const Player& p);
+		std::string homeListedFor;	// what played as Home's Recent was listed (it's listed again when that changes)
 		// the equalizer changed from the web (a slider's run): written (commitEq) a second after the last change
 		Uint32 eqWebDirtyAt = 0;
 		// a seek waiting for its file to open (the hand-off from a browser: at that position): path, seconds

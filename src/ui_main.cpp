@@ -248,7 +248,9 @@ namespace bp
 		if (id == BUSY_CANCEL) return {152, 224, 336, 46};
 		if (id == WEB_NEWPIN) return {296, 384, 152, 52};
 		if (id == WEB_OFF) return {464, 384, 152, 52};
-		if (id >= PLAY_ROW && id < PLAY_ROW + 4) return playingRowRect(id - PLAY_ROW);
+		if (id >= PLAY_ROW && id < PLAY_ROW + 6) return playingRowRect(id - PLAY_ROW);
+		if (id == MINI_PP) return {MINI_BOX.x, MINI_BOX.y, 44, MINI_BOX.h};
+		if (id == MINI_BAR) return {MINI_BOX.x + 44, MINI_BOX.y, MINI_BOX.w - 44, MINI_BOX.h};
 		if (id >= PHOTO_BTN) return {0, 0, 0, 0};	// photoBtn's: they move with the pan area
 		if (id == QUIT_BTN) return {468, 428, 148, 44};
 		if (id == EMPTY_BTN) return {200, 300, 240, 52};
@@ -341,10 +343,14 @@ namespace bp
 		}
 
 		drawLeave(p);
-		// along the bottom, beside it: what A does here, or what a second B would do
-		const char* leave = browserMode ? "close" : "quit";
-		if (quitArmed) drawTextMid(std::string(hints ? "Press B again to " : "Tap again to ") + leave, 0, ACCENT, 24, 450, 430);
-		else if (hints) drawTextMid("A", 0, ACCENT, 24, 450), drawTextMid("Zoom to 2x, or the whole photo", 0, DIM, 24 + (int)std::lround(textWidth("A", 0) / sx) + 7, 450, 400);
+		// what a photo stopped: it waits in the list (the mini bar plays it again)
+		if (parkedShown())
+		{
+			drawGlyphMid(parked.audio ? G_NOTE : G_FILM, 33, 404, DIM);
+			drawTextMid(parked.title + " stopped at " + formatTime(parked.pos) + " \xC2\xB7 it waits in the list", 0, DIM, 52, 404, 564);
+		}
+		// along the bottom, beside it: what A does here
+		if (hints) drawTextMid("A", 0, ACCENT, 24, 450), drawTextMid("Zoom to 2x, or the whole photo", 0, DIM, 24 + (int)std::lround(textWidth("A", 0) / sx) + 7, 450, 400);
 	}
 
 	bool Ui::chapterLineShown(const Player& p) const
@@ -363,13 +369,11 @@ namespace bp
 		drawHeader(!p.title.empty() ? p.title : err ? name : "Opening...", p);
 		if (roots.empty()) roots = browseRoots();	// (started with a file: the browser never read them)
 		drawSource(p);
-		const char* leave = browserMode ? "close" : "quit";
 		bool hotkeys = p.settings.buttonHotkeys;
 		// the status line: how it plays (or what went wrong), and on its right the count or what a press does now
 		std::string right = p.count() > 1 ? std::to_string(p.index() + 1) + " / " + std::to_string(p.count()) : "";
 		SDL_Color rightInk = DIM;
-		if (quitArmed) { right = std::string(hotkeys ? "Press B again to " : "Tap again to ") + leave; rightInk = ACCENT; }
-		else if (touchLocked) { right = "Hold the lock 1 s to unlock"; rightInk = ACCENT; }
+		if (touchLocked) { right = "Hold the lock 1 s to unlock"; rightInk = ACCENT; }
 		if (err)
 		{
 			drawGlyphMid(G_ALERT, 35, STATUS_Y, DANGER);
@@ -439,7 +443,7 @@ namespace bp
 		}
 		if (!right.empty()) drawTextMid(right, 0, rightInk, 616, STATUS_Y, 250, 1);
 		// a file with chapters, the buttons on: what L2/R2 do, left of the count (a message in yellow takes the place)
-		if (!err && !p.chapters.empty() && hotkeys && !quitArmed && !touchLocked)
+		if (!err && !p.chapters.empty() && hotkeys && !touchLocked)
 		{
 			int x = 616;
 			if (!right.empty())
@@ -662,8 +666,8 @@ namespace bp
 			fill({0, 58, W, lk.y - 58}, veil);
 			fill(inf, veil);
 			fill(q, veil);
-			// what unlocks it stays readable over the veil (B's "press again" can't come up while locked)
-			if (!quitArmed) drawTextMid("Hold the lock 1 s to unlock", 0, ACCENT, 616, STATUS_Y, 250, 1);
+			// what unlocks it stays readable over the veil
+			drawTextMid("Hold the lock 1 s to unlock", 0, ACCENT, 616, STATUS_Y, 250, 1);
 		}
 	}
 
@@ -673,13 +677,14 @@ namespace bp
 		bool hotkeys = p.settings.buttonHotkeys;
 		drawBox(q, pressedBtn == QUIT_BTN ? PRESSED : BUTTON, R_BUTTON);
 		{
-			// leaving: B twice (a press in a pocket isn't one), or this twice
-			std::string t = quitArmed ? "Again?" : browserMode ? "Close" : "Quit";
-			const Glyph& g = browserMode ? G_CROSS : G_POWER;
-			std::string key = hotkeys && !quitArmed ? "B\xC3\x97" "2" : "";
+			// a song or video: Stop, one tap (B only leaves the player: it plays on); a photo: Close, as B
+			bool photo = p.playingPhoto();
+			std::string t = photo ? "Close" : "Stop";
+			const Glyph& g = photo ? G_CROSS : G_STOP;
+			std::string key = hotkeys && photo ? "B" : "";
 			int tw = (int)std::lround(textWidth(t, 0) / sx), gw = glyphW(g), kw = key.empty() ? 0 : (int)std::lround(textWidth(key, 0) / sx) + 10;
 			int x = q.x + q.w / 2 - (gw + 8 + tw + kw) / 2;
-			SDL_Color ink = quitArmed ? ACCENT : TEXT;
+			SDL_Color ink = photo ? TEXT : DANGER;
 			drawGlyphMid(g, x + gw / 2, q.y + q.h / 2, ink);
 			drawTextMid(t, 0, ink, x + gw + 8, q.y + q.h / 2);
 			if (!key.empty()) drawTextMid(key, 0, ACCENT, x + gw + 8 + tw + 10, q.y + q.h / 2);

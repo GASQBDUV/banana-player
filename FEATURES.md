@@ -45,7 +45,7 @@ Open Banana Player and the bottom screen shows **Home**:
 
 Move with the D-pad: **UP/DOWN** between the strip and the tiles (back to the card or the column you left),
 **LEFT/RIGHT** along them. **X** on Home: **Clear Recent** (press twice), **Show hidden folders**, **Settings**. **B**
-twice quits, **START** opens the menu.
+twice quits (while something plays, **B** goes back to it instead), **START** opens the menu.
 
 Inside a section the header reads its name with four markers beside it, the open one lit: **L/R** go to the section
 before or after, or tap a marker. Each section opens where you left it (its top if that folder or playlist is gone),
@@ -59,8 +59,39 @@ button's name in yellow, then what it does. See [Playlists](#playlists).
 
 Everything in a folder plays as one playlist: **L/R** go to the previous or next file, and the next one starts when
 the current one ends. Folders can mix videos and music. Photos are a list of their own: from a photo you step through
-the folder's photos, and from a video or a song through its videos and songs. When you close something, you're back in
+the folder's photos, and from a video or a song through its videos and songs. When you stop something, you're back in
 its folder on that file.
+
+## Playing while you browse
+
+Leaving the player doesn't stop what plays. **B** (or **Back**, or **<**) on the playing screen takes you to the list,
+and the song or video goes on: a video keeps playing full size on the top screen, a song keeps its visualizer or art.
+Paused stays paused. You land in the folder (or playlist) it plays from, the cursor on it, whatever folder you
+browsed meanwhile; its row lights up for a moment. When the next file starts by itself, that's where you land next
+time.
+
+- **The mini bar**, along the bottom of Home and every list (Files, Playlists, Network, All recent): the play / pause
+  mark, the title, `0:14 / 1:00` (· paused), and a line showing how far it has got. Tap the bar to go back to the
+  playing screen; tap the mark on its left to play or pause and stay where you are; hold the bar for its menu:
+  **Now playing**, **Play** / **Pause**, **Like**, **Add to playlist…**, **Show in folder**, **Stop**. It's hidden
+  while you select files, type, fill in a connection, and on Settings and Info.
+- **The header** shows three small yellow bars left of the clock while something plays behind the list (dim and still
+  when it's paused).
+- **The playing file's row** carries a chip: **Playing**, **Paused**, **In browser** (the web dashboard plays it), or
+  **Stopped**. Its card on Home says **Now** with its time and bar running. **A** on that row or card goes back to it,
+  never from its start.
+- **Back to the playing screen:** **SELECT** on any list or on Home, a tap on the mini bar, **START** › **Playing** ›
+  **Now playing**, **A** on its row or card, or **B** on Home.
+- **L3** (press the stick) likes or unlikes what plays, from the lists too.
+- **Stop** ends it: **Stop** at the bottom right of the playing screen, **START** › **Playing** › **Stop**, or the mini
+  bar's menu. The place is kept (its card on Home resumes it). Reaching the end of the folder or playlist stops too:
+  on the playing screen you're back in the list on it; while browsing the bar folds away and the top screen says
+  **Finished**.
+- **Opening a photo** while a song or video plays stops it with its place kept (there's one picture on the top
+  screen): the photo says so, and back in the list the mini bar offers it again as `stopped at 0:33`. Its mark plays it
+  again where it was, behind the list; a tap on the bar (or **SELECT**) reopens the player on it.
+- **Screen off after** (Settings) works while browsing too, as long as something plays (not paused).
+- Started with a file (`banana-player FILE`): **B** opens the list on its folder, as if you'd started with none.
 
 ## Playlists
 
@@ -160,9 +191,9 @@ Like a song or a video to keep it in **Liked**, a playlist of its own. Photos an
 | **X** | Video: audio and subtitles (one page, two tabs: **Y** / **X** or **L / R** switch them) · Music: No loop → Loop all → Loop one |
 | **Y** | Video: chapters · Music: chapters, for a song or audiobook that has them (on other songs it does nothing) |
 | **SELECT** | Video: Fit → Fill → Stretch · Music: the Display popup (what's shown, and the visualizer's style) |
-| **START** | Menu, on its **Playing** tab: Like, Add to playlist…, Show in folder, Info |
+| **START** | Menu, on its **Playing** tab: Like, Add to playlist…, Show in folder, Info, Stop |
 | **L3** (press the stick, RG DS Plus) | Like / Unlike what plays |
-| **B** (or **Back**) **twice** | Close the video (back to the list) |
+| **B** (or **Back**) | Back to the list: it keeps playing (see [Playing while you browse](#playing-while-you-browse)) |
 | **F + L2** | Screenshot of both screens (saved in the card's `screenshots` folder) |
 | **F + START** | Quit Banana Player at once (anywhere; your place is kept) |
 | **Menu/Function** (F) | Quick settings: volume, brightness, Same brightness for both screens, Web dashboard, Quit |
@@ -175,10 +206,10 @@ Like a song or a video to keep it in **Liked**, a playlist of its own. Photos an
   song without chapters, the **Sound** button (**FX**) does the same.
 - **Chapters:** tap the chapter line above the progress bar to see the chapters.
 - **Lists:** tap to choose, drag to scroll.
-- **Close:** tap **<** (top left) once, or Close (bottom right, marked **B×2**) twice.
-- **Lock**, **Info** and **Screen off** are along the bottom, beside Close.
-- **<** is at the top left of every page and does what **B** does: in the file list it goes up a folder (at the top:
-  tap twice to quit), on a page or in the menu it goes back.
+- **Back to the list:** tap **<** (top left): it keeps playing. **Stop** (bottom right, in red) stops it, one tap.
+- **Lock**, **Info** and **Screen off** are along the bottom, beside Stop.
+- **<** is at the top left of every page and does what **B** does: in the file list it goes up a folder (on Home with
+  nothing playing: tap twice to quit), on a page or in the menu it goes back.
 
 Under the progress bar you'll see the time played, the time left (at the current speed) and the total length.
 
@@ -197,7 +228,7 @@ shuffled playlist, its place in the shuffled order).
 | **L3** (press the stick) | Rotate a quarter turn |
 | **SELECT** | Fit (the whole photo) or Fill (the screen filled) |
 | **START** | Menu |
-| **B** (or **Back**) **twice** | Close the photo |
+| **B** (or **Back**) | Close the photo (**Close** at the bottom right too) |
 
 See [Photos](#photos) for the touch screen.
 
@@ -214,15 +245,19 @@ See [Photos](#photos) for the touch screen.
 | **X** | Options: **Refresh** (read the folder again), and on a folder **Hide folder** / **Unhide folder** (or hold the folder on the touch screen). In Files: **Show hidden folders**. In Files and Network: **Select files**, to tick files and add them to a playlist. In Network: **Add connection**, **Find on the network**, **Refresh**, **Web dashboard…**. In Playlists: **New playlist…**. In All recent: Home's options |
 | **Hold** (touch screen) | On a file in Files or Network: starts selecting, with that file ticked |
 | **Y** | On a folder: **Add to playlist…** (first). On a network connection: **Edit connection**, **Test connection**, **Delete connection** (press twice) (or hold it on the touch screen). On a playlist or its item: see [Playlists](#playlists) |
-| **START** | Menu |
+| **SELECT** | Back to what plays (the playing screen); in select mode, Select all |
+| **L3** (press the stick) | Like / Unlike what plays |
+| **START** | Menu (on its **Playing** tab while something plays) |
+| **Mini bar** (touch screen) | Tap: the playing screen · its play mark: play / pause · hold: its menu |
 
 ### The menu (START)
 
 Two tabs, three while a song or video plays. Switch with **L/R** or a tap; **B**, **START** or **<** closes it. (What
 you played last is on Home.)
 
-- **Playing** (only while a song or video plays, and the tab it opens on): **Like** / **Liked**, **Add to playlist…**
-  (with the playlists it's already in), **Show in folder** and **Info**. See [Like and Add to playlist](#like-and-add-to-playlist).
+- **Playing** (only while a song or video plays, and the tab it opens on, from the lists too): **Now playing** (from
+  the lists: back to the playing screen), **Like** / **Liked**, **Add to playlist…** (with the playlists it's already
+  in), **Show in folder**, **Info** and **Stop** (the place is kept). See [Like and Add to playlist](#like-and-add-to-playlist).
 - **Settings:** see [Settings](#settings).
 - **About:** version, licence and the libraries it uses.
 
@@ -438,6 +473,11 @@ handheld, carries on at 1:27"):
   the browser was: the button fills as you hold, the top screen says **Playing on the handheld**, and the browser stops.
   **L / R** on the handheld move the browser's list on, however fast they're pressed: every press counts, and both end
   on the same file.
+  Leaving the handheld's player (**B**) changes nothing for the browser: its mini bar reads **Playing in your browser**
+  (tap its mark to play or pause the browser, hold the mark to take it over). **Stop** on the handheld only lets go of
+  its paused copy: the browser plays on. **Stop** in the browser unloads the handheld's copy too.
+- While the handheld plays something behind its list (its player left, not stopped), the dashboard's player says
+  **On handheld · in the background**, and its controls still drive it.
 - Switching the target while something plays carries on from the same place.
 - A file the browser can't play (AVI, AC3 or DTS sound, WMA, APE and so on) says **Plays on the handheld only**.
 - **Up next**, **Chapters**, **Tracks** (audio and subtitles), **Sound** (the volume, the equalizer's presets and its ten

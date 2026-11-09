@@ -14,7 +14,8 @@ export function applySnap(s) {
 	// says "playing": Continue here starts the browser a moment before the handheld's pause shows in the state
 	// (and only once it has been seen paused on this page's file: opening it there, it can look like playing a moment)
 	if (B.active && B.meta && s.path === B.meta.p && s.paused && !s.loading) B.handheldQuiet = true;
-	if (s.paused === false && !s.loading && prev && prev.paused === true && B.active && B.handheldQuiet && !el.paused && !B.leaving && Date.now() - (B.announcedAt || 0) > 2000) handheldTookOver();
+	// (a Stop there isn't playing again: nothing plays, so its "paused" is false too, and this page plays on)
+	if (s.path && s.paused === false && !s.loading && prev && prev.paused === true && B.active && B.handheldQuiet && !el.paused && !B.leaving && Date.now() - (B.announcedAt || 0) > 2000) handheldTookOver();
 	if (!prev || prev.playlistSerial !== s.playlistSerial) set({ plTick: store.plTick + 1 });
 	// a playlist playing on the handheld is a recent one (the Playlists page's Recent, the sidebar's)
 	if (s.source && s.source.kind === 'playlist' && s.source.id && !s.paused && (!prev || prev.path !== s.path)) markUsed(s.source.id);

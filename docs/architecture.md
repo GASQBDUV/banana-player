@@ -4,7 +4,7 @@ Moved out of `CLAUDE.md`, which keeps the one-line rules and the map; the reason
 
 - **`main.cpp`** owns SDL: the top window (GL/GLES context; mpv draws into it through its render API), the bottom
   window (an SDL_Renderer that `Ui` draws on), and the single event loop. The loop also handles browser vs playing
-  mode (`leave()`), scripted steps, screenshots, periodic redraws, and the hand-off of events from background threads.
+  mode (`leave()` leaves the player, what plays going on behind the browser; `stopPlaying()` stops), scripted steps, screenshots, periodic redraws, and the hand-off of events from background threads.
   Background threads (`SleepWatch`, `BottomTouch`, `LevelWatch`, mpv's callbacks) never touch UI state: they push SDL
   user events (`evMpv`, `evRender`, `evTouch`, `evLevel`), or for pause call libmpv directly, which is thread-safe.
 - **`Player`** wraps libmpv and owns everything about playing: the playlist (the file's folder, `playlist.*`),
@@ -95,8 +95,9 @@ Moved out of `CLAUDE.md`, which keeps the one-line rules and the map; the reason
   through these, not `fill`. `BP_BOTTOM_SIZE=1024x768` draws the bottom window at the RG DS Plus's size for screenshots. Layout is in fixed 640×480 logical units, scaled by `sx`/`sy`; text
   is rendered at the real panel size. It redraws only when
   `signature()` changes (or when forced), so any new state that affects drawing must be added to `signature()`.
-  `press(Button)` and `pointer(Pointer)` return true for "leave", which `main` turns into closing the video (browser
-  mode) or quitting.
+  `press(Button)` and `pointer(Pointer)` return true for "leave", which `main` turns into leaving the player (it plays
+  on behind the browser, `bgPlay`; a photo closes) or, with nothing playing, quitting. Stop is its own request
+  (`takeStopPressed`). See docs/notes/2026-11-10-background-playback.md.
 - **Playlists** (`PlaylistStore`, `playlists.*`) are browser pages: `PLROOT` (the Playlists tab) and `PLDIR` (`"\x01pl:"` plus
   the m3u's path) are pseudo-dirs that `pseudoDir()` recognises, so a new path check must go through it. Select, add and
   move are `selMode` states of the browser page, not pages of their own. Edits are debounced 1 s (a dirty flag checked in
@@ -192,7 +193,7 @@ Ui (class declared in `src/ui.h`; file-static names shared by the files are in `
 | `ui_main.cpp` | the playing screen (`drawMain`, `drawLeave`), photo view, predicted position, `musicKey`, `buttonRect` |
 | `ui_sound.cpp` | the Display popup, the Sound page (Equalizer, Effects) |
 | `ui_web.cpp` | the Web dashboard page and the header's globe |
-| `ui_home.cpp` | Home: the Recent strip, tiles, section header |
+| `ui_home.cpp` | Home: the Recent strip, tiles, section header; what plays behind the browser: the mini bar, the playing row's chip, what a photo parked |
 
 Web app (`web/app.js` is the entry: shell, App, debug hook; `web/js/` the modules; `index.html` loads `/app.js` as a module):
 `store.js` (store, `useStore`, `parseRoute`, layout queries, `NO_HERE`), `router.js` (history bookkeeping), `util.js`, `api.js`,

@@ -432,20 +432,60 @@ int main(int argc, char** argv)
 			player.open(list, index);
 		}
 		bool topDark = false;	// the top panel cleared while there's no video
-		// the video's Quit (or its end): back to the browser when it opened the video, else out
-		auto leave = [&] {
-			if (browserMode && player.playing())
+		Uint32 levelUntil = 0;
+		// started with a file: the browser from now on (B, Stop: its folder), as if started with none
+		auto toBrowserMode = [&] {
+			if (browserMode) return;
+			browserMode = true;
+			ui.browserMode = true;
+		};
+		// Stopping what plays (the player's Stop, the menus', the web's, the end of the list): the place kept; the
+		// browser on the file only if the player was what the bottom panel showed (behind the browser it stays where
+		// it is). A page playing the file plays on (the handheld only lets go of its paused copy)
+		enum class StopWhy { Handheld, Web, End };
+		auto stopPlaying = [&](StopWhy why) {
+			if (!player.playing()) return;
+			// started with a file: its end still quits (as it always did)
+			if (!browserMode && why == StopWhy::End) { running = false; return; }
+			bool shown = !haveUi || ui.playerShown(player);
+			toBrowserMode();
+			// what it played from, read before stop() forgets it: a playlist goes back to that playlist
+			std::string last = player.currentPath();
+			PlaySource from = player.source();
+			int index = player.index();
+			if (haveUi)
 			{
-				// what it played from, read before stop() forgets it: a playlist goes back to that playlist
-				std::string last = player.currentPath();
-				PlaySource from = player.source();
-				int index = player.index();
-				if (haveUi) ui.flushPlaylist(player);
-				player.stop();
-				ui.showBrowser(player, last, from, index);
-				topDark = false;
+				ui.flushPlaylist(player);
+				ui.stopped();
 			}
-			else running = false;
+			player.stop();
+			topDark = false;
+			fprintf(stderr, "stop: %s (%s)\n", why == StopWhy::End ? "the end of the list" : why == StopWhy::Web ? "the web" : "Stop",
+				shown ? "back to the browser" : "behind the browser");
+			if (shown && haveUi) ui.showBrowser(player, last, from, index);
+			else if (why == StopWhy::End)
+			{
+				// browsing meanwhile: the bar folds away, the list stays where it is; the top panel says why
+				player.osd("Finished", 2000);
+				levelUntil = SDL_GetTicks() + 2000;
+			}
+		};
+		// B, "<" or Back on the player (a press() or pointer() that says leave): the screen only, what plays goes on
+		// behind the browser, which opens on its folder (or playlist), the cursor on it. A photo (and a file that
+		// didn't open) closes instead. With nothing playing (B twice at Home), out
+		auto leave = [&] {
+			if (!player.playing()) { running = false; return; }
+			if (player.playingPhoto() || !player.error.empty())
+			{
+				toBrowserMode();
+				stopPlaying(StopWhy::Handheld);
+				return;
+			}
+			if (!haveUi) { running = false; return; }
+			toBrowserMode();
+			ui.flushPlaylist(player);
+			fprintf(stderr, "leave: the player left, %s plays on\n", player.currentPath().substr(player.currentPath().rfind('/') + 1).c_str());
+			ui.showBrowser(player, player.currentPath(), player.source(), player.index());
 		};
 
 		// the top panel's pixels (RGBA, top row first), the frame drawn again for it: screenshots
@@ -506,7 +546,6 @@ int main(int argc, char** argv)
 			ev.user.data1 = new std::string(what);
 			SDL_PushEvent(&ev);
 		});
-		Uint32 levelUntil = 0;
 		int topDraws = 0;
 		bool logNextTop = false;
 
@@ -531,7 +570,7 @@ int main(int argc, char** argv)
 			}
 			if (crashTest && SDL_GetTicks() >= crashAt) bp::crashlog::testCrash(crashTest);
 			SDL_Event e;
-			bool got = SDL_WaitEventTimeout(&e, ui.animating() ? 16 : ui.typing() ? 50 : held != Button::None || player.loading() ? 20 : SDL_GetTicks() < freshUntil || levelUntil ? 50 : 250);
+			bool got = SDL_WaitEventTimeout(&e, ui.animating() ? 16 : ui.typing() ? 50 : held != Button::None || player.loading() ? 20 : SDL_GetTicks() < freshUntil || levelUntil ? 50 : ui.markMoving() ? 80 : 250);
 			while (got)
 			{
 				// every button in the log (home/.config/banana-player/log.txt on the card), mapped or not: what the
@@ -712,12 +751,10 @@ int main(int argc, char** argv)
 			player.checkLoading();
 			if (haveUi) ui.tick(player);
 			if (player.quit || ui.quitRequested || ui.restartRequested) running = false;
-			// the web's Stop: back to the browser (started with a file: paused, as there's no browser to go back to)
-			if (ui.takeStopRequest())
-			{
-				if (browserMode && player.playing()) leave();
-				else if (player.playing() && !player.paused) player.togglePause();
-			}
+			// the web's Stop (a file deleted or renamed from the web, the page's own Stop for its held copy) and the
+			// player's own
+			if (ui.takeStopRequest()) stopPlaying(StopWhy::Web);
+			if (ui.takeStopPressed()) stopPlaying(StopWhy::Handheld);
 			if (int ms = ui.takeLevelShown())
 			{
 				levelUntil = SDL_GetTicks() + ms;
@@ -733,7 +770,7 @@ int main(int argc, char** argv)
 				// played to its end: next time from the start; on to the next video, or out after the last
 				player.saveResume();
 				player.finished = false;
-				if (!player.advance()) leave();
+				if (!player.advance()) stopPlaying(StopWhy::End);
 			}
 			// the place is kept now and then too: a battery that runs out, a power-off after sleeping
 			bool woke = slept.exchange(false);
@@ -763,14 +800,28 @@ int main(int argc, char** argv)
 					if (list.empty()) list = {pick};
 				}
 				else list = siblingVideos(pick, index);
+				// a photo while a song or video plays: one mpv, one picture. What plays stops, its place kept, and the
+				// mini bar offers it back after the photos
+				std::string was = player.currentPath();
+				bool parks = haveUi && isPhotoFile(pick) && player.playing() && !player.playingPhoto() && player.error.empty();
+				std::string note = (player.title.empty() ? was.substr(was.rfind('/') + 1) : player.title) + " stopped \xC2\xB7 kept at " +
+					formatTime(std::max(0.0, player.position));
+				if (parks) ui.park(player);
 				player.open(list, index, names);
 				ui.showPlayer();
+				if (parks && ui.parkedShown())
+				{
+					fprintf(stderr, "park: %s stopped for a photo\n", was.substr(was.rfind('/') + 1).c_str());
+					player.osd(note, 2400);
+				}
 			}
-			// a playlist picked in the browser: its items, in its order (or shuffled)
+			// a playlist picked in the browser: its items, in its order (or shuffled); or what a photo stopped, again
 			if (Ui::PlayRequest pr; ui.takePlayRequest(pr))
 			{
-				player.openPlaylist(pr.paths, pr.index, pr.source);
-				ui.showPlayer();
+				if (pr.source.kind == SourceKind::Playlist) player.openPlaylist(pr.paths, pr.index, pr.source);
+				else player.open(pr.paths, pr.index, pr.names);
+				if (pr.stay) ui.playBehind();
+				else ui.showPlayer();
 			}
 			// a connection added, changed or deleted: mpv's opens see it
 			if (netStore.version() != netVersion)

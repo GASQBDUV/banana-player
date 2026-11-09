@@ -269,6 +269,12 @@ namespace bp
 			pickerKey(b, p);
 			return false;
 		}
+		// something playing behind the browser: SELECT goes back to it, L3 likes it (a page's own keys don't use them)
+		if (page == Page::Browse && !inMenu && selMode == SEL_NONE && browseDir != FORMDIR)
+		{
+			if (b == Button::Select && nowPlayable(p)) { goNowPlaying(p); return false; }
+			if (b == Button::L3 && p.playing() && !p.playingPhoto()) { likeNow(p); return false; }
+		}
 		if (page == Page::Browse && !inMenu && selMode != SEL_NONE && selKey(b, p)) return false;
 		if (page == Page::Browse && !inMenu && atHome()) return homeKey(b, p);
 		// All recent: X Home's options, Y a file's menu (as on its card)
@@ -310,7 +316,8 @@ namespace bp
 			browseUp(p);
 			return false;
 		}
-		if (page == Page::Browse && b == Button::Start) { openMainMenu(p); return false; }
+		// (on what plays behind it, as over the player)
+		if (page == Page::Browse && b == Button::Start) { openMainMenu(p, playingTabShown(p) ? TAB_PLAYING : TAB_SETTINGS); return false; }
 		if (page == Page::Tracks)
 		{
 			// the tabs: Y the left one (Audio), X the right one (Subtitles); L/R as well, as the browser's tabs go
@@ -355,13 +362,9 @@ namespace bp
 			if (p.paused) resumeFromBrowser(p);
 			p.togglePause();
 			break;
-		case Button::B:
-			if (quitArmed && SDL_GetTicks() - quitArmed < QUIT_WINDOW_MS) return true;
-			quitArmed = SDL_GetTicks();
-			// (Button hotkeys off: it came from the touch button, and B does nothing here)
-			p.osd(std::string(p.settings.buttonHotkeys ? "Press B" : "Tap") + " again to " + (browserMode ? "close" : "quit"),
-				QUIT_WINDOW_MS);
-			break;
+		// out of the player at once: what plays goes on behind the browser (nothing is lost, so a pocket's press costs
+		// nothing); a photo closes
+		case Button::B: return true;
 		case Button::X: if (!musicKey(b, p)) openTracks(tracksTab, p); break;
 		// (a file with no chapters, or none known yet: the page says so)
 		case Button::Y: if (!musicKey(b, p)) openChapters(p); break;
@@ -415,18 +418,38 @@ namespace bp
 		}
 		// A or the Play button held while a page plays the file: here instead, once, as the hold reaches its length (not
 		// as it lets go). Gone off the player (B, the menu), or the page gone: nothing
-		if (playHoldAt && (page != Page::Main || inMenu || !pageDrives(p))) playHoldAt = 0;
+		// (the mini bar's play mark holds the same way, over the browser)
+		bool holdHere = (page == Page::Main && !inMenu) || (playHoldMini && page == Page::Browse && miniBarShown(p));
+		if (playHoldAt && (!holdHere || !pageDrives(p))) playHoldAt = 0;
+		if (!playHoldAt) playHoldMini = false;
 		if (playHoldAt && SDL_GetTicks() - playHoldAt >= PLAY_HOLD_MS)
 		{
 			playHoldAt = 0;
+			playHoldMini = false;
 			if (playHoldTouch) { pressedBtn = -1; swallowTouch = true; }	// the finger's lift presses nothing
 			takeOver(p);
 		}
+		// a finger held on the mini bar: its menu (the lift that follows chooses nothing)
+		if (miniHoldAt && (pressedBtn == MINI_BAR || pressedBtn == MINI_PP) && SDL_GetTicks() - miniHoldAt >= 600)
+		{
+			miniHoldAt = 0;
+			pressedBtn = -1;
+			swallowTouch = true;
+			if (miniBarShown(p)) openNowMenu(p);
+		}
+		if (landFlashUntil && SDL_GetTicks() >= landFlashUntil) landFlashUntil = 0;
+		// what was stopped for a photo: forgotten once something else plays (a photo is no song's place)
+		if (parkedShown() && p.playing() && !p.playingPhoto()) parked = Parked();
+		// Home's Recent: listed again when what plays changes (the next song started by itself: its card comes first)
+		if (page == Page::Browse && !inMenu && atHome() && !homeTouch && !ctxOpen && p.currentPath() != homeListedFor)
+			enterFolder(HOMEDIR, p);
 		if (browserWant >= 0 && SDL_GetTicks() - browserWantAt >= WANT_MS) browserWant = -1;
 		// the hand-off from a browser: its position, once the file it opened knows its length (5 s at most)
 		if (!seekPath.empty())
 		{
-			if (SDL_GetTicks() > seekUntil || p.currentPath() != seekPath || !p.error.empty()) seekPath.clear();
+			// (a play request still to be opened by main: not yet the file)
+			if (!playRequest.paths.empty()) {}
+			else if (SDL_GetTicks() > seekUntil || p.currentPath() != seekPath || !p.error.empty()) seekPath.clear();
 			else if (p.loaded && p.duration > 0)
 			{
 				p.seekFraction(std::clamp(seekTo / p.duration, 0.0, 1.0));
@@ -500,7 +523,17 @@ namespace bp
 		if (id == BACK_ICON && page == Page::Main && p.playing()) return true;
 		// elsewhere (a page over what plays, START's menu): B, back a step
 		if (id == BACK_ICON && (inMenu || (page != Page::Browse && page != Page::Main))) return pressAnyway(Button::B, p);
-		if (id == QUIT_BTN || id == BACK_ICON) return pressAnyway(Button::B, p);
+		// Main's Stop (over a photo: Close); "<" elsewhere: B
+		if (id == QUIT_BTN)
+		{
+			if (p.playingPhoto()) return true;
+			stopPressed = true;
+			return false;
+		}
+		if (id == BACK_ICON) return pressAnyway(Button::B, p);
+		// the mini bar: the player, or its play mark
+		if (id == MINI_BAR) { goNowPlaying(p); return false; }
+		if (id == MINI_PP) { miniToggle(p); return false; }
 		if (id == EMPTY_BTN) { doEmptyAction(p); return false; }
 		// the select mode's bar: its keys' (Cancel leaves from any folder)
 		if (id == SEL_ALL) { selKey(Button::Select, p); return false; }
@@ -515,7 +548,7 @@ namespace bp
 			if (p.playing()) openAddOne(p.currentPath(), p.title, p.loaded ? p.duration : -1, p);
 			return false;
 		}
-		if (id >= PLAY_ROW && id < PLAY_ROW + 4) return playingChoose(id - PLAY_ROW, p);
+		if (id >= PLAY_ROW && id < PLAY_ROW + 6) return playingChoose(id - PLAY_ROW, p);
 		// a song's line under the buttons, and its Sound button (Y's place, a song with no chapters): the Sound page
 		if (page == Page::Main && p.playingAudio() && (id == LINE1_BTN || (id == 6 && p.chapters.empty() && p.error.empty())))
 		{
@@ -731,6 +764,17 @@ namespace bp
 			if (pt.kind != Pointer::Up) return false;
 			int id = pressedBtn;
 			pressedBtn = -1;
+			miniHoldAt = 0;
+			// the mini bar's play mark while a page plays the file: let go before the hold took it over here, the
+			// page's play / pause
+			if (id == MINI_PP && playHoldMini)
+			{
+				bool on = playHoldAt != 0;
+				playHoldAt = 0;
+				playHoldMini = false;
+				if (on && buttonRect(id).hit(x, y) && pageDrives(p)) toggleBrowser(p);
+				return false;
+			}
 			if (id == PLAY_GRID && page == Page::Main && !inMenu && ((playHoldTouch && playHoldAt) || pageDrives(p)))
 			{
 				playHoldAt = 0;
@@ -771,6 +815,21 @@ namespace bp
 		// "<": B (up a folder; twice, out of what plays or, from the first page, out of the player)
 		if (backIconShown(p) && buttonRect(BACK_ICON).hit(x, y)) { pressedBtn = BACK_ICON; return false; }
 		if (emptyAction() && buttonRect(EMPTY_BTN).hit(x, y)) { pressedBtn = EMPTY_BTN; return false; }
+		// the mini bar: acts as the finger lifts (a hold: its menu, tick()); its play mark while a page plays the file
+		// holds as Main's Play does (here instead)
+		if (miniBarShown(p) && MINI_BOX.hit(x, y))
+		{
+			pressedBtn = x < MINI_BOX.x + 44 ? MINI_PP : MINI_BAR;
+			miniHoldAt = SDL_GetTicks();
+			if (pressedBtn == MINI_PP && pageDrives(p))
+			{
+				miniHoldAt = 0;
+				playHoldAt = SDL_GetTicks();
+				playHoldTouch = true;
+				playHoldMini = true;
+			}
+			return false;
+		}
 		if (page == Page::Info || page == Page::About)
 		{
 			if (y < INFO_Y) return false;
@@ -977,6 +1036,14 @@ namespace bp
 		}
 		// the clock: its minute
 		if (!clockText(p).empty()) photo += "|clk" + std::to_string((long long)time(nullptr) / 60);
+		// behind the browser: the mini bar (what it shows, its press, its flash), the rows' chip, the header's mark (its
+		// frame while it moves), what was stopped for a photo
+		{
+			char bb[160];
+			snprintf(bb, sizeof bb, "|bg%d %d %d %d %d %d %d %d %.0f", bgPlay, miniBarShown(p), chipKind, landFlashUntil != 0, playHoldMini,
+				markW(p), markW(p) && markLive(p) && panel.on() ? (int)(SDL_GetTicks() / 166) : -1, p.loading(), parked.pos);
+			photo += bb + chipPath + "|" + parked.path + "|" + p.currentPath();
+		}
 		// Home: the focus, the strip's scroll, a finger on a card or a tile, the tiles' lines (the connections)
 		if (atHome())
 		{
