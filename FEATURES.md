@@ -216,14 +216,15 @@ See [Photos](#photos) for the touch screen.
 
 ### The menu (START)
 
-Three tabs, four while a song or video plays. Switch with **L/R** or a tap; **B**, **START** or **<** closes it. (What
+Two tabs, three while a song or video plays. Switch with **L/R** or a tap; **B**, **START** or **<** closes it. (What
 you played last is on Home.)
 
 - **Playing** (only while a song or video plays, and the tab it opens on): **Like** / **Liked**, **Add to playlist…**
   (with the playlists it's already in), **Show in folder** and **Info**. See [Like and Add to playlist](#like-and-add-to-playlist).
 - **Settings:** see [Settings](#settings).
 - **About:** version, licence and the libraries it uses.
-- **Quit:** quits Banana Player, keeping your place.
+
+To quit, use **Quit Banana Player** in quick settings (**F**), or **F + START** from anywhere.
 
 ## Network folders
 

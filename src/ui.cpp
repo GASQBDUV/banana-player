@@ -3558,8 +3558,9 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 
 	std::vector<int> Ui::menuTabs(const Player& p) const
 	{
-		if (playingTabShown(p)) return {TAB_PLAYING, TAB_SETTINGS, TAB_ABOUT, TAB_EXIT};
-		return {TAB_SETTINGS, TAB_ABOUT, TAB_EXIT};
+		// no Quit tab: quick settings (F) has Quit, and F + START quits from anywhere
+		if (playingTabShown(p)) return {TAB_PLAYING, TAB_SETTINGS, TAB_ABOUT};
+		return {TAB_SETTINGS, TAB_ABOUT};
 	}
 
 	bool Ui::playingTabShown(const Player& p) const { return p.playing() && !p.playingPhoto(); }
