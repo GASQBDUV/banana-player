@@ -1975,7 +1975,7 @@ namespace bp
 			std::string vis = graph.find("showwaves") != std::string::npos ? "Waves"
 							  : graph.find("showspectrum") != std::string::npos ? "Spectrum"
 							  : graph.find("] remap [") != std::string::npos ? "Circle"
-							  : graph.find("lagfun") != std::string::npos ? "Peaks" : "Bars";
+							  : graph.find("lagfun") != std::string::npos ? "Peaks" : "Bars";	// the colours aren't told apart
 			row("Top screen", graph == blankGraph() ? "Title only"
 				: graph.find("[vid1]") != std::string::npos ? "Album art + " + vis
 				: !graph.empty() ? "Visualizer: " + vis

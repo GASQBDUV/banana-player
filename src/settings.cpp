@@ -25,8 +25,8 @@ namespace bp
 
 	static const char* SHOW_IDS[SHOWS] = {"art", "both", "visualizer", "none"};
 	static const char* SHOW_LABELS[SHOWS] = {"Album art", "Art + visualizer", "Visualizer", "None"};
-	static const char* VIS_IDS[VISUALIZERS] = {"bars", "waves", "spectrum", "circle", "peaks"};
-	static const char* VIS_LABELS[VISUALIZERS] = {"Bars", "Waves", "Spectrum", "Circle", "Peaks"};
+	static const char* VIS_IDS[VISUALIZERS] = {"bars", "waves", "spectrum", "circle", "peaks", "peaks-yellow"};
+	static const char* VIS_LABELS[VISUALIZERS] = {"Bars", "Waves", "Spectrum", "Circle", "Peaks", "Peaks Banana"};
 	static const char* LOOP_IDS[LOOPS] = {"off", "all", "one"};
 	static const char* CLOCK_IDS[CLOCKS] = {"24h", "12h", "off"};
 	static const char* SCREEN_OFF_IDS[SCREEN_OFFS] = {"never", "15s", "30s", "1m", "2m", "5m"};
@@ -176,7 +176,8 @@ namespace bp
 	// - full size: only the luma, scaled x2 (nearest: a bar 8 pixels, a gap 2, a cap 4)
 	// No RGB anywhere, nothing converted: YUV straight to mpv. Over the art no alpha either: the art's slice (made
 	// once, one frame) is split into its planes and each plane is a lut2's second input, kept where nothing's drawn
-	static std::string peaksGraph(bool overCover)
+	struct PeaksColours { int barY, barU, barV, capY, capU, capV; };
+	static std::string peaksGraph(bool overCover, const PeaksColours& c)
 	{
 		const int N = 64, BW = 5, W = N * BW;	// at half size: a bar 4 columns and a 1-column gap
 		const int H = overCover ? 100 : 240;
@@ -188,8 +189,11 @@ namespace bp
 		const std::string stretch = "scale=" + w + ":1:flags=neighbor,pad=" + w + ":" + h + ":0:" + std::to_string(mid) +
 									",fillborders=top=" + std::to_string(mid) + ":bottom=" + std::to_string(H - 1 - mid) +
 									":mode=smear,setsar=1";
-		// coral #F0806E and green #9EDB98 in BT.601 limited YUV (mpv's reading of a picture this size): Y 153/182,
-		// U 103/108, V 178/106; black 16/128/128
+		// the colours in BT.601 limited YUV (mpv's reading of a picture this size); black is 16/128/128. Coral
+		// #F0806E and green #9EDB98: bar 153/103/178, cap 182/108/106. A bar's and a cap's Y must differ (the planes
+		// are told apart by it)
+		const std::string bY = std::to_string(c.barY), bU = std::to_string(c.barU), bV = std::to_string(c.barV),
+						  cY = std::to_string(c.capY), cU = std::to_string(c.capU), cV = std::to_string(c.capV);
 		std::string g = "[aid1] asplit [ao] [a]; ";
 		if (overCover)
 			g += "[vid1] scale=640:480:force_original_aspect_ratio=decrease,pad=640:480:-1:-1:black,setsar=1,format=yuv420p,"
@@ -213,16 +217,16 @@ namespace bp
 			};
 			return g + "[pkV] [pkQ] lut2=c0='if(eq(y,254),2,if(lte(y,x)*lt(y,253),1,0))',split=3 [pkc0] [pkc1] [pkc2]; "
 					   "[pkc0] scale=640:200:flags=neighbor [pkcy]; "
-					   "[pkcy] [pkay] lut2=c0=" + paint("153", "182") + " [pkY]; "
-					   "[pkc1] [pkau] lut2=c0=" + paint("103", "108") + " [pkU]; "
-					   "[pkc2] [pkav] lut2=c0=" + paint("178", "106") + " [pkW]; "
+					   "[pkcy] [pkay] lut2=c0=" + paint(bY.c_str(), cY.c_str()) + " [pkY]; "
+					   "[pkc1] [pkau] lut2=c0=" + paint(bU.c_str(), cU.c_str()) + " [pkU]; "
+					   "[pkc2] [pkav] lut2=c0=" + paint(bV.c_str(), cV.c_str()) + " [pkW]; "
 					   "[pkY] [pkU] [pkW] mergeplanes=0x001020:yuv420p [strip]; [top] [strip] vstack [vo]";
 		}
 		// the luma at half size, then U and V from it (a lut each) and the luma scaled up
-		g += "[pkV] [pkQ] lut2=c0='if(eq(y,254),182,if(lte(y,x)*lt(y,253),153,16))',split=3 [pky] [pku] [pkw]; "
+		g += "[pkV] [pkQ] lut2=c0='if(eq(y,254)," + cY + ",if(lte(y,x)*lt(y,253)," + bY + ",16))',split=3 [pky] [pku] [pkw]; "
 			 "[pky] scale=640:480:flags=neighbor [pkY]; "
-			 "[pku] lut=c0='if(eq(val,182),108,if(eq(val,153),103,128))' [pkU]; "
-			 "[pkw] lut=c0='if(eq(val,182),106,if(eq(val,153),178,128))' [pkW]; "
+			 "[pku] lut=c0='if(eq(val," + cY + ")," + cU + ",if(eq(val," + bY + ")," + bU + ",128))' [pkU]; "
+			 "[pkw] lut=c0='if(eq(val," + cY + ")," + cV + ",if(eq(val," + bY + ")," + bV + ",128))' [pkW]; "
 			 "[pkY] [pkU] [pkW] mergeplanes=0x001020:yuv420p";
 		// a faint line every 96 pixels (white at 10%), over the bars too: four 1-pixel boxes
 		for (int y = 96; y < 480; y += 96) g += ",drawbox=x=0:y=" + std::to_string(y) + ":w=640:h=1:c=white@0.1:t=fill";
@@ -254,7 +258,9 @@ namespace bp
 		case VIS_SPECTRUM: draw = in + ",showspectrum=" + size + ":slide=scroll:mode=combined:color=fire:scale=log:fps=30"; break;
 		default: draw = in + ":channel_layouts=mono,showfreqs=" + size + ":mode=bar:cmode=combined:ascale=log:fscale=log:win_size=1024:rate=30:colors=" + ink; break;
 		}
-		if (vis == VIS_PEAKS) return peaksGraph(overCover);
+		// Peaks: coral and green; Peaks Banana: Midnight's yellow #FFD23F bars, cream #E8E2D3 caps
+		if (vis == VIS_PEAKS) return peaksGraph(overCover, {153, 103, 178, 182, 108, 106});
+		if (vis == VIS_PEAKS_BANANA) return peaksGraph(overCover, {193, 57, 158, 210, 121, 132});
 		// near the format the filter draws in, which mpv shows as it is: converting each frame to yuv420p cost 6.5-7 ms
 		// a frame on the A55s, more than drawing Waves or Spectrum. RGBA's alpha dropped (rgb0, a byte shuffle: 0.5 ms):
 		// mpv would lay a clear background over a checkerboard; Spectrum's YUV as it comes
@@ -327,9 +333,10 @@ namespace bp
 				if (key == "music-show" && value == SHOW_IDS[v]) s.musicShow = v;
 			for (int v = 0; v < VISUALIZERS; v++)
 				if (key == "visualizer" && value == VIS_IDS[v]) s.visualizer = v;
-			// Timeline (0.5.x, briefly) became Peaks; Spectrum is hidden, read as Bars
+			// Timeline (0.5.x, briefly) became Peaks; Bars, Waves and Spectrum are retired, read as Peaks
 			if (key == "visualizer" && value == "timeline") s.visualizer = VIS_PEAKS;
-			if (key == "visualizer" && s.visualizer == VIS_SPECTRUM) s.visualizer = VIS_BARS;
+			if (key == "visualizer" && (s.visualizer == VIS_BARS || s.visualizer == VIS_WAVES || s.visualizer == VIS_SPECTRUM))
+				s.visualizer = VIS_PEAKS;
 			for (int v = 0; v < LOOPS; v++)
 				if (key == "loop" && value == LOOP_IDS[v]) s.loop = v;
 			for (int v = 0; v < CLOCKS; v++)
@@ -348,11 +355,11 @@ namespace bp
 			// the one setting before 0.1.1, kept: auto, cover-bars, bars, waves, spectrum, cover
 			if (key == "audio-display")
 			{
-				if (value == "cover-bars") { s.musicShow = SHOW_BOTH; s.visualizer = VIS_BARS; }
+				if (value == "cover-bars") { s.musicShow = SHOW_BOTH; s.visualizer = VIS_PEAKS; }
 				else if (value == "bars" || value == "waves" || value == "spectrum")
 				{
 					s.musicShow = SHOW_VIS;
-					s.visualizer = value == "waves" ? VIS_WAVES : VIS_BARS;	// Spectrum: hidden, as Bars
+					s.visualizer = VIS_PEAKS;	// retired: read as Peaks
 				}
 				else s.musicShow = SHOW_ART;
 			}

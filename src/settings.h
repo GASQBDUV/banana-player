@@ -13,12 +13,13 @@ namespace bp
 	enum MusicShow { SHOW_ART, SHOW_BOTH, SHOW_VIS, SHOW_NONE, SHOWS };
 	// Circle: the bars round a ring (cyan to purple to pink), drawn by looking each pixel up in two tables (remap)
 	// Peaks: a spectrum analyser's bars (coral) with a cap over each (green) that holds the bar's top and falls back
-	// Spectrum is hidden (the owner's call: its look), its graph kept: nothing offers it and a setting naming it reads
-	// as Bars; VIS_SHOWN lists what's offered, in order
-	enum Visualizer { VIS_BARS, VIS_WAVES, VIS_SPECTRUM, VIS_CIRCLE, VIS_PEAKS, VISUALIZERS };
-	constexpr int VIS_SHOWN[] = {VIS_BARS, VIS_WAVES, VIS_CIRCLE, VIS_PEAKS};
+	// Peaks Banana: the same in BananaOS's colours (yellow bars, cream caps)
+	// Bars, Waves and Spectrum are retired, their graphs and enum values kept: nothing offers them and a setting
+	// naming one reads as Peaks; VIS_SHOWN lists what's offered, in order
+	enum Visualizer { VIS_BARS, VIS_WAVES, VIS_SPECTRUM, VIS_CIRCLE, VIS_PEAKS, VIS_PEAKS_BANANA, VISUALIZERS };
+	constexpr int VIS_SHOWN[] = {VIS_PEAKS, VIS_PEAKS_BANANA, VIS_CIRCLE};
 	constexpr int VIS_SHOWN_COUNT = (int)(sizeof(VIS_SHOWN) / sizeof(VIS_SHOWN[0]));
-	// a visualizer's place in VIS_SHOWN (a hidden one: Bars's, 0)
+	// a visualizer's place in VIS_SHOWN (a hidden one: Peaks's, 0)
 	int visualizerSlot(int v);
 	// the next one offered after v (dir 1) or before it (-1), round
 	int stepVisualizer(int v, int dir);
@@ -65,7 +66,7 @@ namespace bp
 		// the handheld's buttons while a video plays; off: only touch acts there (no press by accident in a pocket
 		// or a hand), the menus' and the browser's buttons still work
 		bool buttonHotkeys = true;
-		int musicShow = SHOW_ART, visualizer = VIS_BARS, loop = LOOP_OFF;
+		int musicShow = SHOW_ART, visualizer = VIS_PEAKS, loop = LOOP_OFF;
 		// folders with a ".hidden" file in them: listed (and their videos in Recent) only when this is on
 		bool showHiddenFolders = false;
 		// the battery's percent beside its icon on the bottom panel (the icon is always there)

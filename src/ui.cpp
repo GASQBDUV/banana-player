@@ -125,6 +125,8 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 	// Peaks: bars with a cap held over each, a gap under the caps of the bars that fell
 	GLYPH(G_VIS_PEAKS, "...##......", ".........##", "##.##......", "......##.##", "##.##.##.##", "##.##.##.##", "##.##.##.##",
 		"##.##.##.##")
+	GLYPH(G_VIS_PEAKS_BANANA, "...##......", ".........##", "##.##......", "......##.##", "##.##.##.##", "##.##.##.##", "##.##.##.##",
+		"##.##.##.##")
 	GLYPH(G_VIS_CIRCLE, ".....#.....", ".#...#...#.", "..#.....#..", "....###....", "...#...#...", "##.#...#.##", "...#...#...",
 		"....###....", "..#.....#..", ".#...#...#.", ".....#.....")
 	// playlists: one (lines and a note), a select box empty and ticked, a row's grip, Move, Shuffle
@@ -226,7 +228,7 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 	}
 	static const char* SHOW_SHORT[SHOWS] = {"Art", "Both", "Viz", "None"};	// MusicShow on a button
 	static const char* LOOP_SHORT[LOOPS] = {"Off", "All", "One"};		// Loop on a button (beside its mark)
-	static const Ui::Glyph* const VIS_GLYPHS[VISUALIZERS] = {&G_VIS_BARS, &G_VIS_WAVES, &G_VIS_SPECTRUM, &G_VIS_CIRCLE, &G_VIS_PEAKS};
+	static const Ui::Glyph* const VIS_GLYPHS[VISUALIZERS] = {&G_VIS_BARS, &G_VIS_WAVES, &G_VIS_SPECTRUM, &G_VIS_CIRCLE, &G_VIS_PEAKS, &G_VIS_PEAKS_BANANA};
 	// a show mode's mark: the visualizer ones take the style's
 	static const Ui::Glyph* showGlyph(int show, int vis)
 	{
@@ -1477,7 +1479,7 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 		const int T = TOGGLE_ROW;
 		if (row >= STYLE_ROW0 && row < STYLE_ROW0 + STYLE_KEYS) return "How plain subtitles (SRT, VTT...) look. Styled ones (ASS) keep theirs.";
 		if (row == MUSIC_ROW) return "What the top screen shows while a song plays (SELECT while playing).";
-		if (row == VIS_ROW) return "How the music is drawn: Bars, Waves, Circle or Peaks (SELECT while playing).";
+		if (row == VIS_ROW) return "How the music is drawn: Peaks, Peaks Banana or Circle (SELECT while playing).";
 		if (row == SOUND_ROW) return "Equalizer and effects for music (not videos). A opens it";
 		if (row == CLOCK_ROW) return "The time in the top corner of this screen";
 		if (row == SCREEN_OFF_ROW) return "While a song or video plays, this screen goes dark after that long untouched. A touch brings it back.";
@@ -6403,7 +6405,7 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 	{
 		Settings s = p.settings;
 		if (row == 0) s.musicShow = (value % SHOWS + SHOWS) % SHOWS;
-		else s.visualizer = value >= 0 && value < VISUALIZERS ? value : VIS_BARS;	// a visualizer, not a chip
+		else s.visualizer = value >= 0 && value < VISUALIZERS ? value : VIS_PEAKS;	// a visualizer, not a chip
 		if (s.musicShow != p.settings.musicShow || s.visualizer != p.settings.visualizer) p.setSettings(s);
 	}
 
@@ -6414,7 +6416,7 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 		{
 		case Button::Up: case Button::Down: displayRow = 1 - displayRow; break;
 		case Button::Left: case Button::Right:
-			// Style steps through the offered ones only (Spectrum is hidden)
+			// Style steps through the offered ones only (Bars, Waves and Spectrum are retired)
 			displaySet(displayRow, displayRow ? stepVisualizer(now, b == Button::Right ? 1 : -1) : now + (b == Button::Right ? 1 : -1), p);
 			break;
 		case Button::Select: displaySet(0, p.settings.musicShow + 1, p); break;
@@ -6457,7 +6459,7 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 	void Ui::drawDisplay(const Player& p)
 	{
 		static const char* SHOW_NAMES[SHOWS] = {"Album art", "Art + viz", "Visualizer", "None"};
-		static const char* STYLE_NAMES[VISUALIZERS] = {"Bars", "Waves", "Spectrum", "Circle", "Peaks"};
+		static const char* STYLE_NAMES[VISUALIZERS] = {"Bars", "Waves", "Spectrum", "Circle", "Peaks", "Peaks Banana"};
 		drawDialog({32, 84, 576, 300}, "Display");
 		int show = std::clamp(p.settings.musicShow, 0, SHOWS - 1), vis = std::clamp(p.settings.visualizer, 0, VISUALIZERS - 1);
 		// the art alone, or the title alone: no visualizer, its style muted (still changeable, for later)
@@ -6484,7 +6486,7 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 		}
 		const char* help = show == SHOW_ART ? "The style shows with Art + viz or Visualizer"
 			: show == SHOW_BOTH ? (vis == VIS_CIRCLE ? "Bars round a ring, the art inside it" : "The visualizer over the bottom of the art")
-			: show == SHOW_VIS ? (vis == VIS_PEAKS ? "Bars with caps that hold their highest and fall back" : "The visualizer alone")
+			: show == SHOW_VIS ? (vis == VIS_PEAKS || vis == VIS_PEAKS_BANANA ? "Bars with caps that hold their highest and fall back" : "The visualizer alone")
 			: "Just the title: the lightest on the battery";
 		drawTextMid(help, 0, DIM, W / 2, 352, 544, 2);
 		drawHints({{"D-PAD", "Change"}, {"SELECT", "Show"}, {"B", "Done"}});

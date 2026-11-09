@@ -91,8 +91,8 @@ tools/make-sprite.py                                 # regenerates web/sprite.sv
   two `remap` tables with `movie=` from the state folder (`graphFor()` writes them first; without them it's Bars).
   In art + visualizer (Bars, Waves, Spectrum, Peaks) the art is fitted once and only the 640×200 strip is drawn per frame; time any
   new graph against Art+viz Bars (~0.85 ms/frame on the Mac, ~4 on the handheld), not only Visualizer Bars.
-  Offered: Bars, Waves, Circle, Peaks (`VIS_SHOWN`; `stepVisualizer` cycles them). Spectrum is hidden, its code kept:
-  a setting naming it reads as Bars. Peaks draws from 64 numbers (showfreqs measures, `lagfun` on exp() values makes
+  Offered: Peaks (default), Peaks Banana (same graph, `PeaksColours`), Circle (`VIS_SHOWN`; `stepVisualizer` cycles them). Bars, Waves and Spectrum are retired, code kept:
+  a setting naming one reads as Peaks. Peaks draws from 64 numbers (showfreqs measures, `lagfun` on exp() values makes
   the caps fall evenly), at half size with `lut2` against a still height picture, only the luma scaled up.
   Keep visualizers cheap: Circle was shaped by timing `ffmpeg -filter_complex_threads 1` against Bars per frame. (Numbers and the handheld benchmark: docs/notes/2026-11-09-visualizer-performance.md, tools/viz-bench/.)
   Every visual branch starts with `aformat=sample_rates=44100|48000` (mono where channels share a colour; a 192 kHz

@@ -318,14 +318,14 @@ static void testSettings()
 	CHECK_EQ(d.showHiddenFolders, false);
 	CHECK_EQ(parseSettings("show-hidden-folders = yes\n").showHiddenFolders, true);
 	CHECK_EQ(d.musicShow, (int)SHOW_ART);
-	CHECK_EQ(d.visualizer, (int)VIS_BARS);
+	CHECK_EQ(d.visualizer, (int)VIS_PEAKS);
 	CHECK_EQ(d.loop, (int)LOOP_OFF);
 	Settings m;
 	m.musicShow = SHOW_BOTH;
-	m.visualizer = VIS_WAVES;
+	m.visualizer = VIS_CIRCLE;
 	m.loop = LOOP_ONE;
 	Settings mb = parseSettings(serializeSettings(m));
-	CHECK_EQ(mb.musicShow == SHOW_BOTH && mb.visualizer == VIS_WAVES && mb.loop == LOOP_ONE, true);
+	CHECK_EQ(mb.musicShow == SHOW_BOTH && mb.visualizer == VIS_CIRCLE && mb.loop == LOOP_ONE, true);
 	CHECK_EQ(visualizerGraph(VIS_WAVES, false).rfind("[aid1] asplit [ao] [v]; [v] aformat=sample_rates=44100|48000,showwaves", 0), (size_t)0);
 	CHECK_EQ(visualizerGraph(VIS_SPECTRUM, true).find("[vid1]") != std::string::npos, true);
 	CHECK_EQ(visualizerGraph(VIS_SPECTRUM, true).find("showspectrum=s=640x200") != std::string::npos, true);
@@ -404,26 +404,38 @@ static void testSettings()
 		CHECK_EQ(a.find("[pkY] [pkU] [pkW] mergeplanes=0x001020:yuv420p [strip]; [top] [strip] vstack [vo]") != std::string::npos, true);
 		CHECK_EQ(a.find("overlay") == std::string::npos && a.find("drawbox") == std::string::npos, true);
 	}
-	// Spectrum: hidden (its graph kept); a setting naming it reads, and is written back, as Bars; the cycle skips it
-	CHECK_EQ(parseSettings("visualizer = spectrum\n").visualizer, (int)VIS_BARS);
-	CHECK_EQ(serializeSettings(parseSettings("visualizer = spectrum\n")).find("visualizer = bars\n") != std::string::npos, true);
-	CHECK_EQ(parseSettings("audio-display = spectrum\n").visualizer, (int)VIS_BARS);
-	CHECK_EQ(stepVisualizer(VIS_WAVES, 1), (int)VIS_CIRCLE);
-	CHECK_EQ(stepVisualizer(VIS_CIRCLE, -1), (int)VIS_WAVES);
-	CHECK_EQ(stepVisualizer(VIS_PEAKS, 1), (int)VIS_BARS);
-	CHECK_EQ(stepVisualizer(VIS_BARS, -1), (int)VIS_PEAKS);
-	CHECK_EQ(stepVisualizer(VIS_SPECTRUM, 1), (int)VIS_WAVES);	// from a hidden one: as from Bars
+	// Bars, Waves and Spectrum: retired (graphs kept); a setting naming one reads, and is written back, as Peaks
+	for (const char* id : {"bars", "waves", "spectrum"})
+	{
+		CHECK_EQ(parseSettings(std::string("visualizer = ") + id + "\n").visualizer, (int)VIS_PEAKS);
+		CHECK_EQ(parseSettings(std::string("audio-display = ") + id + "\n").visualizer, (int)VIS_PEAKS);
+		CHECK_EQ(serializeSettings(parseSettings(std::string("visualizer = ") + id + "\n")).find("visualizer = peaks\n") != std::string::npos, true);
+	}
+	CHECK_EQ(Settings().visualizer, (int)VIS_PEAKS);
+	// Peaks Banana: the same graph in other colours
+	CHECK_EQ(parseSettings("visualizer = peaks-yellow\n").visualizer, (int)VIS_PEAKS_BANANA);
+	CHECK_EQ(parseSettings(serializeSettings(parseSettings("visualizer = peaks-yellow\n"))).visualizer, (int)VIS_PEAKS_BANANA);
+	CHECK_EQ(std::string(visualizerLabel(VIS_PEAKS_BANANA)), std::string("Peaks Banana"));
+	CHECK_EQ(visualizerGraph(VIS_PEAKS_BANANA, false) != visualizerGraph(VIS_PEAKS, false), true);
+	CHECK_EQ(visualizerGraph(VIS_PEAKS_BANANA, true) != visualizerGraph(VIS_PEAKS, true), true);
+	CHECK_EQ(visualizerGraph(VIS_PEAKS_BANANA, false).find("lagfun=decay=") != std::string::npos, true);
+	// the cycle: Peaks, Peaks Banana, Circle; from a hidden one as from Peaks
+	CHECK_EQ(stepVisualizer(VIS_PEAKS, 1), (int)VIS_PEAKS_BANANA);
+	CHECK_EQ(stepVisualizer(VIS_PEAKS_BANANA, 1), (int)VIS_CIRCLE);
+	CHECK_EQ(stepVisualizer(VIS_CIRCLE, 1), (int)VIS_PEAKS);
+	CHECK_EQ(stepVisualizer(VIS_PEAKS, -1), (int)VIS_CIRCLE);
+	CHECK_EQ(stepVisualizer(VIS_SPECTRUM, 1), (int)VIS_PEAKS_BANANA);
 	{
 		int seen = 0;
-		for (int i = 0, v = VIS_BARS; i < VIS_SHOWN_COUNT; i++, v = stepVisualizer(v, 1)) seen |= 1 << v;
-		CHECK_EQ(seen, (1 << VIS_BARS) | (1 << VIS_WAVES) | (1 << VIS_CIRCLE) | (1 << VIS_PEAKS));
+		for (int i = 0, v = VIS_PEAKS; i < VIS_SHOWN_COUNT; i++, v = stepVisualizer(v, 1)) seen |= 1 << v;
+		CHECK_EQ(seen, (1 << VIS_PEAKS) | (1 << VIS_PEAKS_BANANA) | (1 << VIS_CIRCLE));
 	}
 	CHECK_EQ(std::string(loopLabel(LOOP_ALL)), std::string("Loop all"));
 	// the setting before 0.1.1, carried over
 	Settings old = parseSettings("audio-display = cover-bars\n");
-	CHECK_EQ(old.musicShow == SHOW_BOTH && old.visualizer == VIS_BARS, true);
+	CHECK_EQ(old.musicShow == SHOW_BOTH && old.visualizer == VIS_PEAKS, true);
 	old = parseSettings("audio-display = waves\n");
-	CHECK_EQ(old.musicShow == SHOW_VIS && old.visualizer == VIS_WAVES, true);
+	CHECK_EQ(old.musicShow == SHOW_VIS && old.visualizer == VIS_PEAKS, true);
 	CHECK_EQ(parseSettings("audio-display = auto\n").musicShow, (int)SHOW_ART);
 	CHECK_EQ(parseSettings(serializeSettings(d)).keepHistory, true);
 	CHECK_EQ(parseSettings("keep-history = no\n").keepHistory, false);
