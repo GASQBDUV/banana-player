@@ -81,16 +81,17 @@ namespace bp
 			browsePaths.push_back("");
 		};
 		auto value = [](const std::string& v, const std::string& placeholder) { return v.empty() ? std::string(1, DIM_NOTE) + placeholder : v; };
-		bool ftp = form.type == NetType::Ftp;
+		bool ftp = form.type == NetType::Ftp, dlna = form.type == NetType::Dlna;
 		NetServer s = formServer();
-		add(FORM_TYPE, "Type", ftp ? "< FTP >" : "< SMB (Windows, NAS) >");
+		add(FORM_TYPE, "Type", ftp ? "< FTP >" : dlna ? "< DLNA (Plex, Jellyfin, NAS) >" : "< SMB (Windows, NAS) >");
 		add(FORM_NAME, "Name", value(form.name, automaticServerName(s)));
-		add(FORM_HOST, "Server", value(form.host, "Address or name"));
-		add(FORM_PORT, "Port", form.port > 0 && form.port != defaultPort(form.type) ? std::to_string(form.port) : std::string(1, DIM_NOTE) + std::to_string(defaultPort(form.type)));
+		add(FORM_HOST, "Server", value(form.host, dlna ? "Address, name or description URL" : "Address or name"));
+		std::string usualPort = defaultPort(form.type) > 0 ? std::to_string(defaultPort(form.type)) : std::string("Automatic");
+		add(FORM_PORT, "Port", form.port > 0 && form.port != defaultPort(form.type) ? std::to_string(form.port) : std::string(1, DIM_NOTE) + usualPort);
 		if (ftp) add(FORM_FOLDER, "Folder", value(form.folder, "/"));
-		else add(FORM_SHARE, "Share", value(form.share, "Any (choose after)"));
-		add(FORM_SIGNIN, "Sign in", form.guest ? (ftp ? "< Anonymous >" : "< As a guest >") : "< With an account >");
-		if (!form.guest)
+		else if (!dlna) add(FORM_SHARE, "Share", value(form.share, "Any (choose after)"));
+		if (!dlna) add(FORM_SIGNIN, "Sign in", form.guest ? (ftp ? "< Anonymous >" : "< As a guest >") : "< With an account >");
+		if (!dlna && !form.guest)
 		{
 			add(FORM_USER, "User", value(form.user, "User name"));
 			std::string pw = formPasswordTyped ? (formPassword.empty() ? std::string(1, DIM_NOTE) + "None" : std::string(std::min<size_t>(formPassword.size(), 12), '*'))
@@ -110,7 +111,7 @@ namespace bp
 		{
 			// the port follows the type, unless one was typed
 			bool usual = form.port <= 0 || form.port == defaultPort(form.type);
-			form.type = form.type == NetType::Smb ? NetType::Ftp : NetType::Smb;
+			form.type = form.type == NetType::Smb ? NetType::Ftp : form.type == NetType::Ftp ? NetType::Dlna : NetType::Smb;
 			if (usual) form.port = defaultPort(form.type);
 		}
 		else if (id == FORM_SIGNIN) form.guest = !form.guest;
