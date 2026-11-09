@@ -3,6 +3,12 @@
 # container: Debian 12's glibc (2.36) is older than BananaOS's, so what's built here loads there.
 #
 #   packaging/build-bundle.sh            (on the host: runs itself in Docker)
+#   packaging/build-bundle.sh --quick    (for the handheld: no zip, no shelf picture)
+#   packaging/build-bundle.sh --clean    (everything from scratch: the libraries and the player)
+#
+# Fast again and again: the build tools are baked into a Docker image made once (bp-builder, tagged by the package
+# list below), and the libraries are installed into .cache/bundle/prefix, kept between runs (built again only when a
+# version below changes, or with --clean); the player builds incrementally in .cache/bundle/bp-build.
 #
 # Out: dist/ports/BananaPlayer/ (bin, lib, share) and dist/ports/Banana Player.sh, ready for roms/ports on the card;
 # dist/BananaPlayer-<version>-aarch64.zip with both; dist/symbols/banana-player-<version>, the player unstripped (for crash.log).
@@ -22,30 +28,49 @@ LIBSMB2_VERSION=6.2
 
 HERE="$(cd "$(dirname "$0")/.." && pwd)"
 
-if [ "${1:-}" != "--inside" ]; then
-	mkdir -p "$HERE/dist" "$HERE/.cache/bundle"
-	exec docker run --rm --platform linux/arm64 \
-		-v "$HERE":/src -v "$HERE/.cache/bundle":/cache \
-		debian:bookworm bash /src/packaging/build-bundle.sh --inside
-fi
-
-# ---- inside the container ----------------------------------------------------------------------------------------
-export DEBIAN_FRONTEND=noninteractive
-apt-get update -qq
-apt-get install -y -qq --no-install-recommends \
+# the build tools, once: an image with them installed (its tag changes with the list, so a new package makes a new one)
+read -r -d '' BUILDER <<'DOCKERFILE' || true
+FROM debian:bookworm
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update -qq && apt-get install -y -qq --no-install-recommends \
 	build-essential pkg-config cmake meson ninja-build nasm git ca-certificates curl xz-utils zip patchelf file \
 	python3 python3-jinja2 python3-pip \
 	libdav1d-dev libfreetype-dev libfribidi-dev libharfbuzz-dev libfontconfig-dev zlib1g-dev libasound2-dev \
-	libsdl2-dev libsdl2-ttf-dev libegl-dev libgles-dev libdrm-dev libssl-dev libcurl4-openssl-dev >/dev/null
-
+	libsdl2-dev libsdl2-ttf-dev libegl-dev libgles-dev libdrm-dev libssl-dev libcurl4-openssl-dev >/dev/null \
+	&& rm -rf /var/lib/apt/lists/*
 # mpv wants Meson 1.3 or newer; Debian 12 has 1.0
-pip3 install -q --break-system-packages 'meson>=1.3' 2>&1 | grep -v "^WARNING" || true
-hash -r
+RUN pip3 install -q --break-system-packages 'meson>=1.3' 2>&1 | grep -v "^WARNING" || true
+DOCKERFILE
 
-PREFIX=/opt/bp
+if [ "${1:-}" != "--inside" ]; then
+	mkdir -p "$HERE/dist" "$HERE/.cache/bundle"
+	TAG="bp-builder:$(printf '%s' "$BUILDER" | shasum -a 256 | cut -c1-12)"
+	if ! docker image inspect "$TAG" >/dev/null 2>&1; then
+		echo "== the build tools image ($TAG), once"
+		printf '%s\n' "$BUILDER" | docker build --platform linux/arm64 -q -t "$TAG" - >/dev/null
+	fi
+	exec docker run --rm --platform linux/arm64 \
+		-v "$HERE":/src -v "$HERE/.cache/bundle":/cache \
+		"$TAG" bash /src/packaging/build-bundle.sh --inside "$@"
+fi
+shift
+QUICK=0; CLEAN=0
+for a in "$@"; do case "$a" in --quick) QUICK=1 ;; --clean) CLEAN=1 ;; esac; done
+
+# ---- inside the container ----------------------------------------------------------------------------------------
+# the libraries' install, kept in the cache: built again only when a version changes (or --clean)
+PREFIX=/cache/prefix
 export PKG_CONFIG_PATH=$PREFIX/lib/pkgconfig
 export LD_LIBRARY_PATH=$PREFIX/lib
 SRC=/cache/src
+STAMP="$FFMPEG_VERSION $LIBPLACEBO_VERSION $LIBASS_VERSION $MPV_VERSION $LIBSMB2_VERSION"
+if [ "$CLEAN" = 1 ] || [ "$(cat $PREFIX/.versions 2>/dev/null)" != "$STAMP" ]; then
+	echo "== the libraries from scratch"
+	# (libplacebo and mpv are git checkouts under unversioned names: a new version needs a new clone; FFmpeg's and
+	# libass's trees were configured for the old prefix)
+	rm -rf $PREFIX $SRC/libplacebo $SRC/mpv /cache/bp-build
+	(cd $SRC/ffmpeg-$FFMPEG_VERSION 2>/dev/null && make distclean >/dev/null 2>&1) || true
+fi
 mkdir -p $SRC $PREFIX
 JOBS=$(nproc)
 
@@ -110,22 +135,24 @@ if [ ! -f $PREFIX/lib/libsmb2.so ]; then
 		-DBUILD_SHARED_LIBS=ON -DENABLE_EXAMPLES=OFF -DENABLE_LIBKRB5=OFF -DENABLE_GSSAPI=OFF >/dev/null
 	cmake --build build -j$JOBS >/dev/null && cmake --install build >/dev/null
 fi
+echo "$STAMP" > $PREFIX/.versions
 
 echo "== banana-player"
-rm -rf /tmp/bp-build
+# incremental, in the cache: a one-line change rebuilds one file
+BPB=/cache/bp-build
 # BP_WEB: libavformat from the FFmpeg above (its .pc files are in $PREFIX/lib/pkgconfig, on PKG_CONFIG_PATH)
 # -g: the copy kept in dist/symbols/ maps crash.log's frames to lines (the bundle's own is stripped)
-cmake -S /src -B /tmp/bp-build -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_FLAGS=-g -DBP_GLES=ON -DBP_NET=ON -DBP_WEB=ON -DBP_TOOLS=OFF \
+cmake -S /src -B $BPB -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_FLAGS=-g -DBP_GLES=ON -DBP_NET=ON -DBP_WEB=ON -DBP_TOOLS=OFF \
 	-DCMAKE_INSTALL_RPATH='$ORIGIN/../lib' -DCMAKE_BUILD_WITH_INSTALL_RPATH=ON >/dev/null
-cmake --build /tmp/bp-build -j$JOBS 2>&1 | grep -E "error|warning" || true
-/tmp/bp-build/core-test
+cmake --build $BPB -j$JOBS 2>&1 | grep -E "error|warning" || true
+$BPB/core-test
 
 echo "== bundle"
 VERSION=$(grep -oP 'project\(banana-player VERSION \K[0-9.]+' /src/CMakeLists.txt)
 OUT=/src/dist/ports
 B="$OUT/BananaPlayer"
 rm -rf "$OUT" && mkdir -p "$B/bin" "$B/lib" "$B/share/banana-player"
-cp /tmp/bp-build/banana-player "$B/bin/"
+cp $BPB/banana-player "$B/bin/"
 cp -r /src/assets/fonts "$B/share/banana-player/"
 # fontconfig's view of the fonts: the player's folder only (the launcher sets FONTCONFIG_FILE), its cache in
 # $XDG_CACHE_HOME (run-port: /data/home/.cache)
@@ -181,10 +208,11 @@ mkdir -p /src/dist/symbols && cp "$B/bin/banana-player" "/src/dist/symbols/banan
 strip --strip-unneeded "$B/bin/banana-player" "$B"/lib/*.so* 2>/dev/null || true
 
 cp /src/packaging/banana-player-port.sh "$OUT/Banana Player.sh"
+chmod +x "$OUT/Banana Player.sh" "$B/launch.sh" "$B/bin/banana-player"
+if [ "$QUICK" = 1 ]; then du -sh "$B"; echo "done (quick): dist/ports/BananaPlayer"; exit 0; fi
 # the shelf's picture: BananaOS looks for media/box/<entry's name>.png beside the entries
 mkdir -p "$OUT/media/box"
 python3 /src/packaging/icon/make-icon.py "$OUT/media/box/Banana Player.png" 16
-chmod +x "$OUT/Banana Player.sh" "$B/launch.sh" "$B/bin/banana-player"
 
 echo "bundled libraries:"; ls "$B/lib" | sed 's/^/  /'
 du -sh "$B"

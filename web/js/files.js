@@ -212,6 +212,8 @@ export function Files() {
 		${head}
 		${!showSel && html`<div class="toolbar">
 			<button class=${'btn' + (wide ? '' : ' icon')} aria-label=${wide ? undefined : 'New folder'} title="New folder" onClick=${() => newFolderIn(path, () => load(true))}><${Icon} n="plus" k=${2} />${wide && 'New folder'}</button>
+			<button class=${'btn' + (wide ? '' : ' icon')} aria-label=${wide ? undefined : 'Upload files'} title="Upload files" onClick=${() => pickUpload('files')}><${Icon} n="note" k=${2} />${wide && 'Upload files'}</button>
+			${!isIOS && html`<button class=${'btn' + (wide ? '' : ' icon')} aria-label=${wide ? undefined : 'Upload a folder'} title="Upload a folder" onClick=${() => pickUpload('dir')}><${Icon} n="folder" k=${2} />${wide && 'Upload folder'}</button>`}
 			<button class="btn" onClick=${() => setSelMode(true)}><${Icon} n="box-on" k=${2} />Select</button>
 			${desk ? html`<label class="find"><${Icon} n="search" k=${2} /><input class="field" data-slash="1" value=${filter} placeholder="Filter this folder" aria-label="Filter this folder" autocomplete="off" onInput=${e => setFilter(e.target.value)} onKeyDown=${e => { if (e.key === 'Escape') { setFilter(''); e.target.blur(); } }} /><span class="key">/</span></label>` : html`<span class="grow"></span>`}
 			${canHide && html`<button class="btn icon" aria-label="More for this folder" aria-haspopup="dialog" onClick=${e => openSheet(folderName, 'folder', [{ label: 'Show hidden folders', icon: 'eye', on: !!showHidden, sub: showHidden ? 'On: the folders hidden on the handheld are listed, dimmed' : 'Off: the folders hidden on the handheld are left out', fn: () => setShowHidden(!showHidden) }], { anchor: e.currentTarget })}><${MoreDots} /></button>`}
@@ -220,7 +222,7 @@ export function Files() {
 			<${Icon} n="up" k=${2} /><span>Drop files or folders here · they go to <b>${folderName}</b></span></div>`}
 		${err ? html`<${Empty} icon="alert" title="Couldn't open this folder" sub=${err} button="Try again" onClick=${() => load(false)} />` :
 			!data ? (slow ? html`<${Skeleton} />` : null) :
-			all.length === 0 ? html`<${Empty} icon="folder" title="This folder is empty" sub=${touchOnly ? 'Upload music, videos or photos from this device.' : 'Drop files here, or use the upload key.'} button=${pick ? undefined : 'Upload'} onClick=${() => pickUpload('files')} />` :
+			all.length === 0 ? html`<${Empty} icon="folder" title="This folder is empty" sub=${touchOnly ? 'Upload music, videos or photos from this device.' : 'Drop files or folders here, or use Upload files.'} button=${pick ? undefined : 'Upload'} onClick=${() => pickUpload('files')} />` :
 			items.length === 0 ? html`<p class="note pad">Nothing here has “${filter.trim()}” in its name.</p>` : html`
 			<div class="box surface listbox"><ul class="flist">${!showSel && crumbs.length > 1 && html`<li class="frow uprow"><button class="main-btn" onClick=${goUp}><span class="tile xs"><${Icon} n="up" k=${2} /></span><span class="grow"><div class="fn ell" aria-label="Up a folder">..</div></span></button></li>`}${items.map(it => { const p = full(it.name), on = sel.has(p), now = p === nowPath, playable = !it.dir && (it.kind === 'audio' || it.kind === 'video'); return html`<li class=${'frow' + (on ? ' sel' : '') + (s.fresh[p] ? ' fresh' : '') + (it.hidden ? ' hiddenf' : '') + (now && !showSel ? ' cur nowp' : '')} key=${it.name}>
 				<button class="chk" aria-label=${(on ? 'Deselect ' : 'Select ') + it.name} aria-pressed=${on} onClick=${() => toggle(p)}><span class=${'check' + (on ? ' on' : '')}>${on && html`<${Icon} n="check" k=${2} />`}</span></button>
@@ -269,7 +271,8 @@ export function Lightbox() {
 }
 
 /* ================= uploads: the round key (bottom right) and its sheet =================
-   Idle in a folder: the yellow key; a tap offers Files or Folder. Sending: a dark key with the count and a ring of the
+   Only while there's something to show: picking files and folders is the toolbar's Upload files / Upload folder and
+   the drop zone. Sending: a dark key with the count and a ring of the
    bytes sent (a red stretch for what failed); done: a green ring and a tick, back to the arrow after 2.5 s. A tap while
    it sends shows each file (a sheet on a phone, a popover elsewhere). Shown in Files, and anywhere while uploads run
    or failed; never over the player or a selection. */
@@ -284,22 +287,16 @@ function upStats() {
 }
 function pickUpload(kind) { const i = document.getElementById(kind === 'dir' ? 'up-dir' : 'up-files'); if (i) i.click(); }
 export function UploadFab({ down }) {
-	const s = store, st = upStats(), [picking, setPicking] = useState(false);
+	const s = store, st = upStats(), picking = false;
 	const state = st.running ? (st.failed ? 'error' : 'busy') : st.failed ? 'error' : s.upDone ? 'done' : 'idle';
-	useEffect(() => { if (state !== 'idle') setPicking(false); }, [state]);
-	useEffect(() => { if (!picking) return; const k = e => { if (e.key === 'Escape') setPicking(false); }; addEventListener('keydown', k); return () => removeEventListener('keydown', k); }, [picking]);
-	const onFiles = s.route.page === 'files' && !!s.route.path && !down;
 	if (!down && (s.route.page === 'playing' || s.selecting || s.pick)) return null;
-	if (state === 'idle' && !onFiles) return null;
+	if (state === 'idle') return null;
 	const C = 2 * Math.PI * 35, yel = st.frac, red = st.failedB / st.total;
 	const at = Math.min(st.done + st.failed + 1, st.n), cnt = at + '/' + st.n;
 	const label = state === 'idle' ? (picking ? 'Close' : 'Upload') : state === 'done' ? 'Uploads done' : !st.running ? plural(st.failed, 'upload', 'uploads') + ' failed. Show uploads' : `Uploading ${at} of ${st.n}, ${Math.floor(st.frac * 100)}%. Show uploads`;
-	const tap = e => { if (state === 'idle') setPicking(!picking); else if (state === 'done') clearDone(); else openUploads(e.currentTarget); };
+	const tap = e => { if (state === 'done') clearDone(); else openUploads(e.currentTarget); };
 	const q = Math.floor(st.frac * 4) * 25;
-	return html`${picking && html`<div class="fabcatch" onClick=${() => setPicking(false)}></div>
-			<div class="fabpick" role="menu" aria-label="Upload">
-				<button class="btn" role="menuitem" onClick=${() => { setPicking(false); pickUpload('files'); }}><${Icon} n="note" k=${2} />Files</button>
-				${!isIOS && html`<button class="btn" role="menuitem" onClick=${() => { setPicking(false); pickUpload('dir'); }}><${Icon} n="folder" k=${2} />Folder</button>`}</div>`}
+	return html`
 		<div class=${'fabwrap ' + state + (picking ? ' picking' : '')}>
 			${state !== 'idle' && html`<svg class="ring" viewBox="0 0 80 80" aria-hidden="true"><circle cx="40" cy="40" r="35" fill="none" stroke="var(--e-track)" stroke-width="4" />
 				<circle class="arc" cx="40" cy="40" r="35" fill="none" stroke=${state === 'done' ? 'var(--green)' : 'var(--yellow)'} stroke-width="4" stroke-linecap="round" stroke-dasharray=${C} stroke-dashoffset=${C * (1 - (state === 'done' ? 1 : yel))} transform="rotate(-90 40 40)" />

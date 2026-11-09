@@ -443,9 +443,9 @@ handheld, carries on at 1:27"):
 
 **Files** lists the card's folders:
 
-- **Upload** with the round yellow key at the bottom right: it offers **Files** or **Folder** (no Folder on iPhone or
-  iPad), or drag them onto the page (a tablet or a computer). While files go up, the key shows how many (**5/12**) and a
-  ring fills by the bytes sent; a failed file shows red on the ring and a red badge. A tap on it lists each file:
+- **Upload files** and **Upload folder** in the folder's toolbar (no Upload folder on iPhone or iPad), or drag files
+  and folders onto the page (a tablet or a computer). While files go up, a round key at the bottom right shows how
+  many (**5/12**) and a ring fills by the bytes sent; a failed file shows red on the ring and a red badge. A tap on it lists each file:
   cancel one, **Retry** a failed one, **Pause** (what's on its way starts again from the beginning), **Cancel all**.
   When all are up, the key ticks and a note says where they went, with **Show**. Uploads carry on while you move
   between pages, and the key stays on every page (not over the player) while they run or failed.
