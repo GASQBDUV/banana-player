@@ -2,6 +2,7 @@
 #include "aspect.h"
 #include "battery.h"
 #include "browser.h"
+#include "crashlog.h"
 #include "eq.h"
 #include "format.h"
 #include "ftplist.h"
@@ -2462,8 +2463,47 @@ static void testWeb()
 	}
 }
 
+static void testCrashLog()
+{
+	namespace cl = bp::crashlog;
+	char t[48];
+	CHECK_EQ(std::string(t, cl::formatTime(t, sizeof t, 0, 0)), std::string("1970-01-01 00:00:00 +0000"));
+	CHECK_EQ(std::string(t, cl::formatTime(t, sizeof t, 1794225792, 7 * 3600)), std::string("2026-11-09 19:03:12 +0700"));
+	CHECK_EQ(std::string(t, cl::formatTime(t, sizeof t, 951782400, -5 * 3600 - 1800)), std::string("2000-02-28 18:30:00 -0530"));
+	CHECK_EQ(std::string(t, cl::formatTime(t, 10, 0, 0)), std::string("1970-01-01"));	// never past the buffer
+
+	std::string a = "=== crash A ===\nline\n\n", b = "=== crash B ===\nx\n\n", c = "=== crash C ===\nyy\n\n";
+	std::string all = a + b + c;
+	CHECK_EQ(cl::trimmed(all, all.size()), all);
+	CHECK_EQ(cl::trimmed(all, all.size() - 1), b + c);
+	CHECK_EQ(cl::trimmed(all, c.size()), c);
+	CHECK_EQ(cl::trimmed(all, c.size() - 1), std::string());
+	// a mark inside a line isn't an entry's start
+	CHECK_EQ(cl::trimmed("=== crash A ===\nsaid === crash B\n", 20), std::string());
+
+	char dir[] = "/tmp/bp-crash-XXXXXX";
+	if (!mkdtemp(dir)) { failures++; return; }
+	std::string path = std::string(dir) + "/crash.log";
+	std::string big;
+	for (int i = 0; big.size() < 200 * 1024; i++)
+		big += "=== crash " + std::to_string(i) + " ===\n" + std::string(900, 'x') + "\n\n";
+	{ std::ofstream(path, std::ios::binary) << big; }
+	CHECK_EQ(cl::trimFile(path, cl::CAP - cl::ENTRY_MAX, cl::KEEP), true);
+	std::ifstream in(path, std::ios::binary);
+	std::string kept((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+	CHECK_EQ(kept.size() <= cl::KEEP && kept.size() > cl::KEEP - 1024, true);
+	CHECK_EQ(kept.rfind(cl::MARK, 0), (size_t)0);
+	CHECK_EQ(big.compare(big.size() - kept.size(), kept.size(), kept), 0);	// the newest part
+	CHECK_EQ(cl::trimFile(path, cl::CAP - cl::ENTRY_MAX, cl::KEEP), false);	// under the limit: left alone
+	struct stat st;
+	CHECK_EQ(stat((path + ".tmp").c_str(), &st) != 0, true);
+	unlink(path.c_str());
+	rmdir(dir);
+}
+
 int main()
 {
+	testCrashLog();
 	testWeb();
 	testChapters();
 	testSpeed();

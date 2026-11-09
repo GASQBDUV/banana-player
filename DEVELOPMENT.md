@@ -128,6 +128,48 @@ docker run --rm -v "$PWD":/src:ro debian:trixie bash -c "apt-get update -qq && \
   cmake -S /src -B /tmp/b -DCMAKE_CXX_FLAGS='-Wall -Wextra' && cmake --build /tmp/b -j && /tmp/b/core-test"
 ```
 
+### Crash log
+
+A crash (SIGSEGV, SIGBUS, SIGILL, SIGFPE, SIGABRT, an uncaught exception) appends a record to `crash.log` in the state
+folder (`home/.config/banana-player/crash.log` on the card) and a `crash: … see …/crash.log` line to log.txt, then the
+process dies as it would have (exit status 139 or 134). `src/crashlog.cpp`'s handler runs on its own stack (the main
+thread's overflow too) and makes only async-signal-safe calls; what can be is formatted at the start. A record:
+
+```
+=== crash 2026-11-09 00:32:13 +0000 ===
+version 0.5.1 (a87be23), binary base 0xaaaaaefa0000
+signal: SIGSEGV (11), code 1 SEGV_MAPERR, address 0x0, pc 0xaaaaaefa47f4
+uptime: 312 s
+thread: vo (tid 10330)
+playing: /roms/videos/Sintel.mkv
+backtrace:
+  …/BananaPlayer/bin/banana-player(+0x3df8) [0xaaaaaefa3df8]
+  linux-vdso.so.1(__kernel_rt_sigreturn+0x0) [0xffff977ff8c0]
+  …/BananaPlayer/bin/banana-player(+0x47f4) [0xaaaaaefa47f4]
+  ...
+```
+
+The frames above `__kernel_rt_sigreturn` are the handler's own; the one below it is where it crashed. Its size stays
+bounded: a record is at most 16 KB (64 frames, 200 characters a line), the handler never writes past 64 KB, and each
+start keeps only the newest 32 KB (whole records) once the file is over 48 KB, so the next record always fits. It's the
+only file it makes (a trim writes `crash.log.tmp`, renamed over it). A free-space check isn't needed: 64 KB at most.
+
+**Symbolizing.** The bundle's player is stripped; `build-bundle.sh` builds it with `-g` and keeps the unstripped copy in
+`dist/symbols/banana-player-<version>` (outside the zip: keep it with each release you hand out). A frame in the player
+reads `banana-player(+0xOFFSET)`, the offset in the file, which addr2line takes as it is (in the arm64 Docker image, or
+any binutils that reads aarch64 ELF):
+
+```sh
+docker run --rm -v "$PWD/dist/symbols":/s:ro debian:bookworm bash -c "apt-get update -qq && apt-get install -y -qq binutils >/dev/null && \
+  addr2line -Cfipe /s/banana-player-0.5.1 0x3df8 0x47f4"
+```
+
+A frame shown as `banana-player(symbol+0x…) [0xADDR]` instead: give addr2line `0xADDR` minus the record's `binary
+base`. The addresses are return addresses, so a line can be the one after the call. Frames in the bundled libraries
+(`libmpv.so.2(+0x…)`) need those libraries unstripped, from `.cache/bundle`'s build. Test with `BP_CRASH_TEST=segv`
+(also `abort`, `throw`, `overflow`), which crashes 1.5 s after the start. On a Mac the frames come as `atos` reads them:
+`atos -o build/banana-player -l <binary base> <address>`.
+
 ### FTP backend and bp-net
 
 `net_ftp.cpp` is FTP/FTPS on libcurl's multi interface, polled in our own loop so a wait can be cancelled (`netwait.h`'s

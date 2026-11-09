@@ -2,6 +2,7 @@
 //
 //   banana-player [--press A,X,Down,...] [--windowed] [--aspect fit|fill|stretch] [--lang eng,en] [--state-dir DIR] [--font TTF] [-v] FILE
 
+#include "crashlog.h"
 #include "format.h"
 #include "input.h"
 #include "player.h"
@@ -173,6 +174,8 @@ int main(int argc, char** argv)
 		else if (file.empty()) file = a;
 		else { usage(); return 2; }
 	}
+	// a crash's record in <state>/crash.log, kept across runs (log.txt keeps two)
+	bp::crashlog::install(opts.stateDir, BP_VERSION, BP_COMMIT);
 	// no file, or a folder: the browser picks them (in that folder)
 	std::string startFolder;
 	{
@@ -508,8 +511,18 @@ int main(int argc, char** argv)
 		// (8 s at the start, not 2: the first launch after the handheld starts is slow, every shader compiled afresh, and
 		// mpv's first picture of the top panel can come after 2 s, then nothing drew it again for a while: black)
 		Uint32 freshUntil = SDL_GetTicks() + 8000, refreshedAt = 0;
+		std::string crashContext;
+		const char* crashTest = getenv("BP_CRASH_TEST");
+		Uint32 crashAt = SDL_GetTicks() + 1500;
 		while (running)
 		{
+			// what plays, for a crash's record
+			if (player.currentPath() != crashContext)
+			{
+				crashContext = player.currentPath();
+				bp::crashlog::setContext(crashContext.c_str());
+			}
+			if (crashTest && SDL_GetTicks() >= crashAt) bp::crashlog::testCrash(crashTest);
 			SDL_Event e;
 			bool got = SDL_WaitEventTimeout(&e, ui.animating() ? 16 : ui.typing() ? 50 : held != Button::None || player.loading() ? 20 : SDL_GetTicks() < freshUntil || levelUntil ? 50 : 250);
 			while (got)

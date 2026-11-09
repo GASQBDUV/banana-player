@@ -85,7 +85,8 @@ Every button has a touch equivalent on the bottom screen. Every control, setting
 ## Something wrong?
 
 Plug the SD card into a computer and attach `home/.config/banana-player/log.txt` to an
-[issue](https://github.com/tonywei92/banana-player/issues). To uninstall, delete `Banana Player.sh`, the
+[issue](https://github.com/tonywei92/banana-player/issues), and `crash.log` beside it if there is one (it keeps a
+record of every crash). To uninstall, delete `Banana Player.sh`, the
 `BananaPlayer` folder and `media/box/Banana Player.png` from `roms/ports`.
 
 Want to build it or help out? See [DEVELOPMENT.md](DEVELOPMENT.md).

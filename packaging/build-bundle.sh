@@ -5,7 +5,7 @@
 #   packaging/build-bundle.sh            (on the host: runs itself in Docker)
 #
 # Out: dist/ports/BananaPlayer/ (bin, lib, share) and dist/ports/Banana Player.sh, ready for roms/ports on the card;
-# dist/BananaPlayer-<version>-aarch64.zip with both.
+# dist/BananaPlayer-<version>-aarch64.zip with both; dist/symbols/banana-player-<version>, the player unstripped (for crash.log).
 #
 # Bundled, built from source with only what playing needs: FFmpeg (decoders and demuxers), libplacebo, libass and
 # libmpv, and the few libraries they pull in; libsmb2 (network folders over SMB). Taken from BananaOS instead (not
@@ -114,7 +114,8 @@ fi
 echo "== banana-player"
 rm -rf /tmp/bp-build
 # BP_WEB: libavformat from the FFmpeg above (its .pc files are in $PREFIX/lib/pkgconfig, on PKG_CONFIG_PATH)
-cmake -S /src -B /tmp/bp-build -DCMAKE_BUILD_TYPE=Release -DBP_GLES=ON -DBP_NET=ON -DBP_WEB=ON -DBP_TOOLS=OFF \
+# -g: the copy kept in dist/symbols/ maps crash.log's frames to lines (the bundle's own is stripped)
+cmake -S /src -B /tmp/bp-build -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_FLAGS=-g -DBP_GLES=ON -DBP_NET=ON -DBP_WEB=ON -DBP_TOOLS=OFF \
 	-DCMAKE_INSTALL_RPATH='$ORIGIN/../lib' -DCMAKE_BUILD_WITH_INSTALL_RPATH=ON >/dev/null
 cmake --build /tmp/bp-build -j$JOBS 2>&1 | grep -E "error|warning" || true
 /tmp/bp-build/core-test
@@ -175,6 +176,8 @@ while [ ${#queue[@]} -gt 0 ]; do
 done
 # each bundled library finds its neighbours first
 for l in "$B"/lib/*.so*; do patchelf --set-rpath '$ORIGIN' "$l"; done
+# the unstripped player, outside the zip: for addr2line on a crash.log (DEVELOPMENT.md, "Crash log")
+mkdir -p /src/dist/symbols && cp "$B/bin/banana-player" "/src/dist/symbols/banana-player-$VERSION"
 strip --strip-unneeded "$B/bin/banana-player" "$B"/lib/*.so* 2>/dev/null || true
 
 cp /src/packaging/banana-player-port.sh "$OUT/Banana Player.sh"
