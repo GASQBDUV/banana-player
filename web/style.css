@@ -249,7 +249,6 @@ select.sel { background: var(--btn); color: var(--cream); border: var(--bw) soli
 .upbtn { width: 36px; height: 36px; margin-left: -8px; margin-right: 2px; color: var(--dim); flex: none; }
 @media (hover: hover) { .upbtn:hover { color: var(--cream); } }
 .uprow .tile { color: var(--dim); }
-.uprow .fn { color: var(--dim); }
 .grip { width: 36px; height: 52px; display: flex; align-items: center; justify-content: center; color: #57545e; cursor: grab; touch-action: none; flex: none; border-radius: 8px; }
 @media (hover: hover) { .grip:hover { color: var(--dim-btn); } }
 .sortable-ghost { opacity: .35; }

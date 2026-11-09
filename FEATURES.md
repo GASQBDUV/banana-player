@@ -454,7 +454,7 @@ handheld, carries on at 1:27"):
 - **Select** several files and folders to do any of these at once (or a long press on a row; on a computer, the **Select**
   button, or the box that fades in over a row's icon after a moment's hover). A band of actions floats at the bottom. Rename works on one item at a
   time.
-- **Up a folder** (the arrow beside the folder path, and on a phone the first row, **..**) goes to the parent folder;
+- **Up a folder** (the first row, **..**, and the arrow beside the folder path) goes to the parent folder;
   on a computer **Backspace** or **Alt+Up** does too. A place's top has none.
 - On a computer, **Filter this folder** narrows the list as you type (**/** goes there).
 - Uploads and new names are limited to music, video, photo and subtitle files, and images for covers. A folder can be
