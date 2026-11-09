@@ -185,7 +185,7 @@ namespace bp
 		void showIdle(bool on);
 		// the top panel while a web page plays the music instead: the paused picture dimmed, and why (a paused
 		// visualizer looks frozen otherwise)
-		void showElsewhere(bool on);
+		void showElsewhere(bool on, bool playing = true);
 		// the top panel's output made with nothing playing: mpv 0.40 makes force-window's only as it goes idle, and
 		// it's idle from the start, before force-window could be set (it needs the render context): black, logo and
 		// level cards unseen, till a file had played. An empty load fails at once and sends it through idle again

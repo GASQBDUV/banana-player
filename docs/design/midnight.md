@@ -33,7 +33,7 @@ Hard-coded copies to change too: `drawDialogRow` compares an ink to `CREAM` (kee
 |---|---|---|---|
 | idle title "Banana Player", logo swirl, volume/L2-R2 card fill, "Playing in your browser" | `#FFD23F` | `&H3FD2FF&` | `&H29B4F0&` |
 | card text | `#E8E2D3` | `&HD3E2E8&` | `&HE2EDF1&` |
-| idle subtitle ("Pick a video…", "Press A to play here") | `#8F8A80` | `&H808A8F&` | `&H7C868A&` |
+| idle subtitle ("Pick a video…", "Hold A to play here") | `#8F8A80` | `&H808A8F&` | `&H7C868A&` |
 | card body (volume, chapters, titles' plate), browser-play backdrop | `#0B0A0D` | `&H0D0A0B&` | `&H1C1617&` |
 | card bar track | `#26242E` | `&H2E2426&` | `&H464323&` |
 | logo's dark square (the `.` cells, if drawn) | `#121116` | `&H161112&` | |

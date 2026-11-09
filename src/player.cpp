@@ -1466,7 +1466,7 @@ namespace bp
 		mpv_command_async(mpv, 0, cmd);
 	}
 
-	void Player::showElsewhere(bool on)
+	void Player::showElsewhere(bool on, bool playing)
 	{
 		if (!on)
 		{
@@ -1475,8 +1475,8 @@ namespace bp
 			return;
 		}
 		std::string ev = "{\\an7\\pos(0,0)\\bord0\\shad0\\1c" + ass(TOP_CARD) + "\\1a&H00&\\p1}m 0 0 l 960 0 960 720 0 720{\\p0}\n";
-		ev += "{\\an5\\pos(480,320)\\bord0\\shad0\\fnPixelify Sans\\fs56\\1c" + ass(TOP_TITLE) + "}Playing in your browser\n";
-		ev += "{\\an5\\pos(480,400)\\bord0\\shad0\\fnInter\\fs30\\1c" + ass(TOP_SUB) + "}Press A to play here instead";
+		ev += "{\\an5\\pos(480,320)\\bord0\\shad0\\fnPixelify Sans\\fs56\\1c" + ass(TOP_TITLE) + "}" + (playing ? "Playing" : "Paused") + " in your browser\n";
+		ev += "{\\an5\\pos(480,400)\\bord0\\shad0\\fnInter\\fs30\\1c" + ass(TOP_SUB) + "}Hold A to play here";
 		const char* cmd[] = {"osd-overlay", "6", "ass-events", ev.c_str(), "960", "720", "5", "no", "no", nullptr};
 		mpv_command_async(mpv, 0, cmd);
 	}

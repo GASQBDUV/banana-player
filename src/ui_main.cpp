@@ -34,7 +34,7 @@ namespace bp
 	{
 		if (!predicting(p)) return p.position;
 		const BrowserPos& b = browserPos;
-		double t = b.t + (b.playing ? (SDL_GetTicks() - b.at) / 1000.0 : 0);
+		double t = b.t + (pagePlaying() ? (SDL_GetTicks() - b.at) / 1000.0 : 0);
 		return std::clamp(t, 0.0, p.duration);
 	}
 
@@ -50,6 +50,39 @@ namespace bp
 	void Ui::noteSeek(const Player& p, double t)
 	{
 		if (predicting(p)) browserPos = {browserPos.path, std::clamp(t, 0.0, p.duration), SDL_GetTicks(), browserPos.playing};
+	}
+
+	bool Ui::pagePlaying() const
+	{
+		if (browserWant >= 0 && SDL_GetTicks() - browserWantAt < WANT_MS) return browserWant == 1;
+		return browserPos.playing;
+	}
+
+	void Ui::toggleBrowser(Player& p)
+	{
+		// from the wish still pending, so quick presses each flip what the last one asked
+		bool play = !pagePlaying();
+		// the prediction goes on (or stops) from here at once, not when the page's word comes back
+		if (predicting(p)) browserPos = {browserPos.path, shownPosition(p), SDL_GetTicks(), browserPos.playing};
+		browserWant = play;
+		browserWantAt = SDL_GetTicks();
+		browserToggleSend = true;
+	}
+
+	void Ui::takeOver(Player& p)
+	{
+		browserWant = -1;
+		if (!p.paused) return;
+		resumeFromBrowser(p);
+		p.togglePause();
+		p.osd("Playing on the handheld");
+	}
+
+	void Ui::release(Button b, Player& p)
+	{
+		if (b != Button::A || !playHoldAt || playHoldTouch) return;
+		playHoldAt = 0;	// let go before PLAY_HOLD_MS (tick() takes over at it, and clears this)
+		if (pageDrives(p)) toggleBrowser(p);
 	}
 
 	void Ui::resumeFromBrowser(Player& p)
@@ -346,7 +379,7 @@ namespace bp
 		}
 		else
 		{
-			std::string status = p.loading() ? "Loading" + std::string(SDL_GetTicks() / 400 % 4, '.') : predicting(p) && browserPos.playing ? "Playing in your browser"
+			std::string status = p.loading() ? "Loading" + std::string(SDL_GetTicks() / 400 % 4, '.') : predicting(p) ? (pagePlaying() ? "Playing in your browser" : "Paused in your browser")
 				: p.paused ? "Paused" : "Playing";
 			if (p.source().shuffled) status += " \xC2\xB7 Shuffle";
 			if (std::fabs(p.speed - 1) > 1e-6) status += " \xC2\xB7 " + speedLabel(p.speed);
@@ -354,7 +387,7 @@ namespace bp
 			int x = 24;
 			if (!p.loading())
 			{
-				drawGlyphMid(p.paused && !(predicting(p) && browserPos.playing) ? G_PAUSE : G_PLAY, 32, STATUS_Y, ACCENT);
+				drawGlyphMid(p.paused && !(predicting(p) && pagePlaying()) ? G_PAUSE : G_PLAY, 32, STATUS_Y, ACCENT);
 				x = 52;
 			}
 			drawTextMid(status, 1, ACCENT, x, STATUS_Y, 330);
@@ -433,7 +466,14 @@ namespace bp
 				case Button::L: label = "Prev"; g = &G_PREV; off = p.index() == 0; break;
 				// Like and Add work on a file that didn't open too (it's still a file)
 				case Button::L3: label = likedNow(p) ? "Liked" : "Like"; g = likedNow(p) ? &G_HEART : &G_HEART_O; off = !actions; break;
-				case Button::A: label = p.paused || err ? "Play" : "Pause"; g = p.paused || err ? &G_PLAY : &G_PAUSE; break;
+				case Button::A:
+				{
+					// a page plays it: the page's play and pause (a hold plays here)
+					bool still = err || (pageDrives(p) ? !pagePlaying() : p.paused);
+					label = playHoldAt ? "Hold..." : still ? "Play" : "Pause";
+					g = still ? &G_PLAY : &G_PAUSE;
+					break;
+				}
 				case Button::None: label = "Add"; g = addFlashUntil && SDL_GetTicks() < addFlashUntil ? &G_CHECK : &G_PL_ADD; off = !actions; break;
 				case Button::R: label = "Next"; g = &G_NEXT; off = p.index() + 1 >= p.count(); break;
 				// music: loop, Sound (or chapters), the Display popup; a video: audio, subtitles, picture size
@@ -450,7 +490,13 @@ namespace bp
 				}
 				// a file that didn't open: only what leads elsewhere (the next file, the menu), and Like / Add
 				if (err && which != Button::L && which != Button::R && which != Button::Start && which != Button::L3 && which != Button::None) off = true;
-				drawBox(b, pressedBtn == r * 5 + c && !off ? PRESSED : BUTTON, R_BUTTON);
+				drawBox(b, (pressedBtn == r * 5 + c || (which == Button::A && playHoldAt)) && !off ? PRESSED : BUTTON, R_BUTTON);
+				if (which == Button::A && playHoldAt)
+				{
+					// the hold that plays it here, filling as it goes (as the lock's)
+					double f = std::min(1.0, (SDL_GetTicks() - playHoldAt) / (double)PLAY_HOLD_MS);
+					fillRound({b.x + 6, b.y + b.h - 7, (int)((b.w - 12) * f), 4}, ACCENT, 2);
+				}
 				const char* key = hotkeys ? GRID[r][c].hint : nullptr;
 				if (which == Button::X && !p.playingAudio())
 				{
@@ -494,7 +540,8 @@ namespace bp
 					drawTextMid("Playlist", 0, off ? DIM : DIM_ON, b.x + b.w / 2, b.y + b.h * 4 / 5 - 2, b.w - 6, 2);
 				}
 				// the button it stands for, while the buttons work here (Button hotkeys); else the name alone, centred
-				else drawButton(b, g, label, key, off, 1);
+				// speed lit while it isn't 1x, so a changed speed is seen at a glance (video and song alike)
+				else drawButton(b, g, label, key, off, 1, which == Button::Up && !off && std::fabs(p.speed - 1) > 1e-6);
 			}
 
 		const Track* a = p.selected(TrackType::Audio);

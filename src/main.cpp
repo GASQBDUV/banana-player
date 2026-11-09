@@ -122,7 +122,8 @@ static void usage()
 		"                        each, then quit: buttons (A,B,X,Y,L,R,L2,R2,Up,Down,Left,Right,Start,Select), taps\n"
 		"                        (tap:X:Y, dtap:X:Y a double-tap) and drags (drag:X1:Y1:X2:Y2) on the bottom panel's 640x480, and info\n"
 		"                        (prints the Media info page), hold:X:Y (a finger held 1.1 s), prop:NAME\n"
-		"                        (prints one of mpv's properties), BUTTON*N (N presses 80 ms apart)\n"
+		"                        (prints one of mpv's properties), BUTTON*N (N presses 80 ms apart),\n"
+		"                        BUTTON~MS (held MS ms, then let go)\n"
 		"buttons: A play/pause, LEFT -5 s, RIGHT +10 s, L/R previous/next video, UP/DOWN speed, X audio,\n"
 		"         Y subtitles, SELECT aspect, START settings, B twice quits\n"
 		"keyboard: Enter, arrows, PgUp/PgDn (or Q/E), X, Y, Tab, Esc twice\n");
@@ -163,7 +164,10 @@ int main(int argc, char** argv)
 				// BUTTON*N: N presses 80 ms apart (a burst, faster than the steps' 0.8 s)
 				std::string::size_type star = step.find('*');
 				bool burst = star != std::string::npos && buttonFromName(step.substr(0, star)) != Button::None && atoi(step.c_str() + star + 1) > 0;
-				bool ok = burst || buttonFromName(step) != Button::None || step == "info" || step == "page" || step == "update" || step == "web" || step == "F" || step == "rows" || step == "screenshot" || step.rfind("prop:", 0) == 0 || step.rfind("shot:", 0) == 0 ||
+				// BUTTON~MS: held MS ms, then let go
+				std::string::size_type tilde = step.find('~');
+				bool held = tilde != std::string::npos && buttonFromName(step.substr(0, tilde)) != Button::None && atoi(step.c_str() + tilde + 1) > 0;
+				bool ok = burst || held || buttonFromName(step) != Button::None || step == "info" || step == "page" || step == "update" || step == "web" || step == "F" || step == "rows" || step == "screenshot" || step.rfind("prop:", 0) == 0 || step.rfind("shot:", 0) == 0 ||
 					(sscanf(step.c_str(), "tap:%f:%f%n", &v[0], &v[1], &n) == 2 && n == (int)step.size()) ||
 					(sscanf(step.c_str(), "dtap:%f:%f%n", &v[0], &v[1], &n) == 2 && n == (int)step.size()) ||
 					(sscanf(step.c_str(), "hold:%f:%f%n", &v[0], &v[1], &n) == 2 && n == (int)step.size()) ||
@@ -376,7 +380,7 @@ int main(int argc, char** argv)
 		WebSnapshot webLast;
 		bool webForce = true;	// publish at the next turn whatever changed (a browser came, the handheld woke)
 		Uint32 webPublishedAt = 0;
-		bool elsewhereShown = false;	// the top panel's "Playing in your browser"
+		int elsewhereShown = 0;	// the top panel's "Playing in your browser"
 #endif
 		Uint32 bottomId = bottom ? SDL_GetWindowID(bottom) : 0;
 
@@ -552,7 +556,7 @@ int main(int argc, char** argv)
 				}
 				else if (e.type == evMpv) mpvPending = false;
 				else if (e.type == SDL_CONTROLLERDEVICEADDED || e.type == SDL_CONTROLLERDEVICEREMOVED) handlePadHotplug(e);
-				else if (scripted && (e.type == SDL_KEYDOWN || e.type == SDL_CONTROLLERBUTTONDOWN || e.type == evTouch ||
+				else if (scripted && (e.type == SDL_KEYDOWN || e.type == SDL_KEYUP || e.type == SDL_CONTROLLERBUTTONDOWN || e.type == SDL_CONTROLLERBUTTONUP || e.type == evTouch ||
 							 (e.type >= SDL_MOUSEMOTION && e.type <= SDL_MOUSEWHEEL) || (e.type >= SDL_FINGERDOWN && e.type <= SDL_FINGERMOTION) || e.type == SDL_CONTROLLERAXISMOTION))
 				{
 					// a test run takes only its own steps: the windows can take the keyboard's focus while someone
@@ -589,7 +593,11 @@ int main(int argc, char** argv)
 					}
 				}
 				else if (e.type == SDL_KEYDOWN && e.key.keysym.sym == SDLK_F12 && !e.key.repeat) screenshot();
-				else if (e.type == SDL_CONTROLLERBUTTONUP) held = Button::None;
+				else if (e.type == SDL_CONTROLLERBUTTONUP || e.type == SDL_KEYUP)
+				{
+					if (e.type == SDL_CONTROLLERBUTTONUP) held = Button::None;
+					if (Button b = buttonReleased(e); b != Button::None && haveUi) ui.release(b, player);
+				}
 				// F + START: out at once, from anywhere (the place is kept as the loop ends)
 				else if (e.type == SDL_CONTROLLERBUTTONDOWN && fHeld && buttonFromEvent(e) == Button::Start) running = false;
 				else if (Button b = buttonFromEvent(e); b != Button::None)
@@ -784,6 +792,7 @@ int main(int argc, char** argv)
 				burstLeft--;
 				burstAt = SDL_GetTicks() + 80;
 				if (ui.press(burstButton, player)) leave();
+				ui.release(burstButton, player);
 			}
 			if (scripted && (!waitFrom || SDL_GetTicks() - waitFrom > 3000) && running)
 			{
@@ -823,6 +832,7 @@ int main(int argc, char** argv)
 							for (int i = 0; i < 11; i++)
 							{
 								SDL_Delay(100);
+								ui.tick(player);	// (the Play button's hold is timed there)
 								ui.draw(player);
 							}
 							at(Pointer::Up, v[0], v[1]);
@@ -890,8 +900,30 @@ int main(int argc, char** argv)
 							burstLeft = atoi(step.c_str() + step.find('*') + 1) - 1;
 							burstAt = SDL_GetTicks() + 80;
 							if (ui.press(burstButton, player)) leave();
+							ui.release(burstButton, player);
 						}
-						else if (ui.press(buttonFromName(step), player)) leave();
+						else if (step.find('~') != std::string::npos)
+						{
+							// BUTTON~MS: held that long (the loop's tick() and drawing go on meanwhile, as they time a
+							// hold), then let go
+							Button b = buttonFromName(step.substr(0, step.find('~')));
+							Uint32 until = SDL_GetTicks() + atoi(step.c_str() + step.find('~') + 1);
+							if (ui.press(b, player)) leave();
+							while (SDL_GetTicks() < until)
+							{
+								SDL_Delay(30);
+								player.pollEvents();
+								ui.tick(player);
+								ui.draw(player);
+							}
+							ui.release(b, player);
+						}
+						else
+						{
+							Button b = buttonFromName(step);
+							if (ui.press(b, player)) leave();
+							ui.release(b, player);
+						}
 						// (no wait for mpv's answer here: a loop that doesn't draw holds mpv up as it switches files, and
 						// the timings would be the harness's; the state line can lag a step)
 						player.pollEvents();
@@ -935,7 +967,8 @@ int main(int argc, char** argv)
 			// dashboard too
 			{
 				bool elsewhere = webServer && webServer->running() && ui.browserPlaying && player.playing() && player.paused;
-				if (elsewhere != elsewhereShown) { player.showElsewhere(elsewhere); elsewhereShown = elsewhere; }
+				int shown = elsewhere ? (ui.pagePlaying() ? 2 : 1) : 0;
+				if (shown != elsewhereShown) { player.showElsewhere(elsewhere, shown == 2); elsewhereShown = shown; }
 			}
 			// the web dashboard's live state: made only while a browser watches, sent when something but the clock
 			// changed (or the clock drifted), at most 4 times a second
@@ -961,6 +994,14 @@ int main(int argc, char** argv)
 					webServer->notify("handheld-skip", d);
 					fprintf(stderr, "web: handheld-skip %+d\n", ui.browserSkip);
 					ui.browserSkip = 0;
+				}
+				// A (or Play) pressed here while a page plays: the page plays or pauses. The state wanted, not a flip: any
+				// number of presses between two passes, or an event seen twice, leave the page as the last press asked
+				if (ui.browserToggleSend)
+				{
+					ui.browserToggleSend = false;
+					webServer->notify("handheld-toggle", ui.browserWant == 1 ? "{\"play\":1}" : "{\"play\":0}");
+					fprintf(stderr, "web: handheld-toggle play=%d\n", ui.browserWant == 1);
 				}
 				// a seek made here while a page plays the file (-5 s, +10 s, the bar): the page goes there too
 				if (ui.browserPlaying && player.paused && player.loaded && !player.loading()

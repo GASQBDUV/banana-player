@@ -1,5 +1,5 @@
 import { TAB_ID, set, store } from './store.js';
-import { B, browserNext, el, handheldTookOver, updateMediaSession } from './browser-player.js';
+import { B, browserNext, el, handheldToggle, handheldTookOver, updateMediaSession } from './browser-player.js';
 import { markUsed } from './plshared.js';
 import { C, connFail, goDown, signOutHere } from './connection.js';
 import { markTrack } from './toasts.js';
@@ -45,6 +45,8 @@ export function openSSE() {
 	// Prev / Next pressed on the handheld while this page plays: this page's list moves on (as its own buttons do), by
 	// as many as were pressed (n); pressed fast, browserNext sums them and loads only the last
 	on('handheld-skip', d => { if (B.active && B.meta && B.parked == null && (d.dir === 1 || d.dir === -1)) { markTrack(d.dir); browserNext(false, d.dir, d.n || 1, true); } });
+	// A (or its Play) on the handheld while this page plays: this page plays or pauses ({play}: the state wanted)
+	on('handheld-toggle', d => handheldToggle(d.play === 1));
 	// the handheld seeked while this page plays its file: here too
 	on('handheld-seek', d => { if (B.active && B.meta && B.parked == null && typeof d.t === 'number' && store.snap && store.snap.path === B.meta.p && Math.abs(el.currentTime - d.t) > .5) el.currentTime = d.t; });
 	es.onerror = () => {

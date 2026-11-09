@@ -156,7 +156,7 @@ Like a song or a video to keep it in **Liked**, a playlist of its own. Photos an
 | **LEFT / RIGHT** | Back 5 seconds / forward 10 seconds (hold to keep going; there's no on-screen button for these: drag the bar) |
 | **L / R** | Previous / next file in the folder |
 | **L2 / R2** | Previous / next chapter (**F + L2** is still the screenshot) |
-| **UP / DOWN** | Faster / slower (0.5x, 1x, 1.5x, 2x, 2.5x) |
+| **UP / DOWN** | Faster / slower (0.5x, 1x, 1.5x, 2x, 2.5x); the speed button turns yellow when it isn't 1x |
 | **X** | Video: audio and subtitles (one page, two tabs: **Y** / **X** or **L / R** switch them) · Music: No loop → Loop all → Loop one |
 | **Y** | Video: chapters · Music: chapters, for a song or audiobook that has them (on other songs it does nothing) |
 | **SELECT** | Video: Fit → Fill → Stretch · Music: the Display popup (what's shown, and the visualizer's style) |
@@ -432,7 +432,10 @@ handheld, carries on at 1:27"):
 - **In this browser**: plays the file on the phone or computer, and pauses the handheld. Here there's no equalizer,
   effects or handheld volume (a volume slider for the browser instead), and the chapters are the browser's own.
   Not on iPhone or iPad yet (it says **Not on iPhone or iPad yet**): there the dashboard is the handheld's remote.
-- While the browser plays, the handheld shows **Playing in your browser** and its bar runs on with the browser's time.
+- While the browser plays, the handheld shows **Playing in your browser** (or **Paused in your browser**) and its bar
+  runs on with the browser's time. **A** (or a tap on **Play**/**Pause**) on the handheld plays and pauses the browser;
+  the handheld stays quiet. **Hold A** (or hold the Play button) for 0.6 s to play it on the handheld instead, from where
+  the browser was: the button fills as you hold, the top screen says **Playing on the handheld**, and the browser stops.
   **L / R** on the handheld move the browser's list on, however fast they're pressed: every press counts, and both end
   on the same file.
 - Switching the target while something plays carries on from the same place.

@@ -159,6 +159,15 @@ export function playParked() {
 	el.play().catch(() => {});
 	notify();
 }
+// A pressed on the handheld while this page plays: play or pause here, as asked (the state, not a flip: a press the
+// handheld sends twice can't undo itself). Already so, or the browser refusing to play: it hears where this page is
+export function handheldToggle(play) {
+	if (!B.active || !B.meta || B.leaving) return;
+	if (B.parked != null) { if (play && store.conn === 'ok') playParked(); return; }
+	if (play && el.paused) el.play().catch(() => sendPos());
+	else if (!play && !el.paused) el.pause();
+	else sendPos();
+}
 export function setBrowserVol(v) { B.vol = v; el.volume = v / 100; lsSet('bpVol', v); notify(); }
 function bPos() { return B.parked != null ? B.parked : el.currentTime || 0; }
 function bDur() { return isFinite(el.duration) && el.duration ? el.duration : (B.meta && B.meta.duration) || 0; }

@@ -12,6 +12,7 @@ namespace bp
 
 	// a button pressed (repeats included), from a pad or, on a computer, the keyboard; None for anything else
 	Button buttonFromEvent(const SDL_Event& e);
+	Button buttonReleased(const SDL_Event& e);	// a key or pad button let go
 
 	// "A", "Down", "Select"... (any case) for scripted runs; None for anything else
 	Button buttonFromName(const std::string& name);

@@ -44,13 +44,16 @@ namespace bp
 
 		// true when the player should leave
 		bool press(Button b, Player& p);
+		// a button let go (keys and the pad; the scripted steps right after their press): only A cares, for its hold
+		// while a page plays the file
+		void release(Button b, Player& p);
 		// a held button that repeats here (seeking, moving in a list, photo to photo)
 		bool repeats(Button b, const Player& p) const;
 		// called each turn of the loop: a flicked photo glides on
 		void tick(Player& p);
 		// something moves by itself (a flick, a playlist's rows scrolling under a dragged one): the loop should come
 		// round often
-		bool animating() const { return flickAt != 0 || plDrag.on || stripT0 != 0 || likePopAt != 0 || addFlashUntil != 0; }
+		bool animating() const { return playHoldAt != 0 || flickAt != 0 || plDrag.on || stripT0 != 0 || likePopAt != 0 || addFlashUntil != 0; }
 		// the playlist edited in the browser, written now (its edits are written a second after they stop): before
 		// quitting, or stopping what plays
 		void flushPlaylist(Player& p) { plFlush(p); }
@@ -191,6 +194,19 @@ namespace bp
 		// a page plays, and the handheld's L/R are its (even while the copy here still opens the page's last file, when
 		// predicting() can't say yet: stepped here, that copy would start sounding and the page would stop)
 		bool pageDrives(const Player& p) const;
+		// A (or the Play button) while a page drives: a short press plays or pauses the page (main sends
+		// handheld-toggle {play}, the state wanted, not a blind flip: a press seen twice, or two presses in one pass of
+		// main's loop, can't end up the wrong way round); held PLAY_HOLD_MS it plays here instead (takeOver). The wish
+		// stands for the label and the prediction till the page says it (browser-pos) or WANT_MS passes
+		static constexpr Uint32 PLAY_HOLD_MS = 600, WANT_MS = 2500;
+		Uint32 playHoldAt = 0;
+		bool playHoldTouch = false;	// the hold is a finger's on the Play button (else A's)
+		int browserWant = -1;	// 1 play, 0 pause, -1 none pending
+		Uint32 browserWantAt = 0;
+		bool browserToggleSend = false;	// for main: send handheld-toggle with browserWant
+		bool pagePlaying() const;	// the page plays, as last said or as just asked
+		void toggleBrowser(Player& p);
+		void takeOver(Player& p);
 		// the page's last word (browser-play, browser-pos, stop): its tab and a number that only grows; an older one
 		// arriving late (two requests can overtake each other) is dropped, so an older file never opens after a newer
 		std::string browserTab;
@@ -885,6 +901,7 @@ namespace bp
 			BUSY_CANCEL = 536, PICK_ROW = 900;
 		// Main's header squares, the Playing tab's rows (PLAY_ROW + i)
 		static constexpr int ADD_BTN = 503, LIKE_BTN = 504, PLAY_ROW = 550;
+		static constexpr int PLAY_GRID = 2;	// the grid's Play/Pause (A's place)
 		// Sound's touch buttons, apart from the grid's and the photo's; its dialogs' rows from DLG_ROW, the Display
 		// popup's chips from CHIP_BTN (row * 8 + chip)
 		static constexpr int SOUND_TAB0 = 510, SOUND_TAB1 = 511, EQ_SWITCH = 520, EQ_PREV = 521, EQ_NEXT = 522, EQ_NAME_ZONE = 523,

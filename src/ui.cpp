@@ -349,7 +349,12 @@ namespace bp
 			return false;
 		switch (b)
 		{
-		case Button::A: if (p.paused) resumeFromBrowser(p); p.togglePause(); break;
+		case Button::A:
+			// a page plays it: the page's play/pause as A lets go (release()), here only once held (tick())
+			if (pageDrives(p)) { if (!playHoldAt) { playHoldAt = SDL_GetTicks(); playHoldTouch = false; } break; }
+			if (p.paused) resumeFromBrowser(p);
+			p.togglePause();
+			break;
 		case Button::B:
 			if (quitArmed && SDL_GetTicks() - quitArmed < QUIT_WINDOW_MS) return true;
 			quitArmed = SDL_GetTicks();
@@ -408,6 +413,16 @@ namespace bp
 			eqWebDirtyAt = 0;
 			p.commitEq();
 		}
+		// A or the Play button held while a page plays the file: here instead, once, as the hold reaches its length (not
+		// as it lets go). Gone off the player (B, the menu), or the page gone: nothing
+		if (playHoldAt && (page != Page::Main || inMenu || !pageDrives(p))) playHoldAt = 0;
+		if (playHoldAt && SDL_GetTicks() - playHoldAt >= PLAY_HOLD_MS)
+		{
+			playHoldAt = 0;
+			if (playHoldTouch) { pressedBtn = -1; swallowTouch = true; }	// the finger's lift presses nothing
+			takeOver(p);
+		}
+		if (browserWant >= 0 && SDL_GetTicks() - browserWantAt >= WANT_MS) browserWant = -1;
 		// the hand-off from a browser: its position, once the file it opened knows its length (5 s at most)
 		if (!seekPath.empty())
 		{
@@ -716,6 +731,12 @@ namespace bp
 			if (pt.kind != Pointer::Up) return false;
 			int id = pressedBtn;
 			pressedBtn = -1;
+			if (id == PLAY_GRID && page == Page::Main && !inMenu && ((playHoldTouch && playHoldAt) || pageDrives(p)))
+			{
+				playHoldAt = 0;
+				if (buttonRect(id).hit(x, y) && pageDrives(p)) toggleBrowser(p);
+				return false;
+			}
 			// let go off the button: nothing (a finger that slid away changed its mind)
 			Rect r = id >= PHOTO_BTN && id < PHOTO_BTN + PHOTO_BTNS ? photoBtn(id - PHOTO_BTN, p) : buttonRect(id);
 			return r.hit(x, y) && act(id, p);
@@ -878,6 +899,12 @@ namespace bp
 		}
 		for (int id : {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, QUIT_BTN, SCREEN_BTN, INFO_BTN, LOCK_BTN})
 			if (buttonRect(id).hit(x, y)) pressedBtn = id;
+		// Play while a page plays it: held, it plays here (tick() times it); let go sooner, the page's play/pause
+		if (pressedBtn == PLAY_GRID && page == Page::Main && !inMenu && p.error.empty() && pageDrives(p))
+		{
+			playHoldAt = SDL_GetTicks();
+			playHoldTouch = true;
+		}
 		return false;
 	}
 
@@ -887,11 +914,13 @@ namespace bp
 		const Track* s = p.selected(TrackType::Sub);
 		char buf[256];
 		snprintf(buf, sizeof buf, "%d %d %d %d %ld %ld %d %d %lld %lld %zu %d %d %d %.2f %d %d %d %d|", (int)page, cursor, scroll,
-			p.paused + setGroup * 2 + 2, (long)std::floor(shownPosition(p)) * 2 + (predicting(p) && browserPos.playing), (long)p.duration, (int)p.aspect, p.loaded, a ? (long long)a->id : 0LL,
+			p.paused + setGroup * 2 + 2, (long)std::floor(shownPosition(p)) * 2 + (predicting(p) && pagePlaying()), (long)p.duration, (int)p.aspect, p.loaded, a ? (long long)a->id : 0LL,
 			s ? (long long)s->id : 0LL, p.tracks.size(), dragging, (int)(dragFraction * 1000), quitArmed != 0, p.speed,
 			p.index(), p.count(), pressedBtn + touchLocked * 100 + (lockHoldAt != 0) * 1000, listTouch * 1000 + browseVersion + (clearArmed != 0) * 100000 + (int)p.history().items().size() * 1000000);
 		std::string photo = "|tab" + std::to_string(browseTab) + (netLoading ? "L" : "");
 		if (touchLocked && lockHoldAt) photo += "|hold" + std::to_string((SDL_GetTicks() - lockHoldAt) / 100);
+		if (playHoldAt) photo += "|phold" + std::to_string((SDL_GetTicks() - playHoldAt) / 50);
+		if (pageDrives(p)) photo += pagePlaying() ? "|pageplay" : "|pagepause";
 		if (p.playingPhoto())
 		{
 			const Player::PhotoView& v = p.photo();

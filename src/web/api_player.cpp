@@ -772,6 +772,8 @@ namespace bp
 				if (staleBrowserWord(u, tab, seq) || (!u.browserFile.empty() && real != u.browserFile))
 					return std::string("{\"ok\":true,\"stale\":true}");
 				u.browserPos = {real, t, SDL_GetTicks(), playing};
+				// what A asked of it, done: its word counts again (till then, an older word can't undo the press)
+				if (u.browserWant == (int)playing) u.browserWant = -1;
 				return std::string("{\"ok\":true}");
 			}, 2000, status);
 			answer(res, body, status);

@@ -61,3 +61,16 @@ There were four races, and any one of them was enough.
   handheld. The page ended on `12 Track.mp3` with no navigation pending, and the handheld on 12/25.
 - **Not verified:** the handheld itself, Safari or WebKit, and a slow network where the probe takes seconds. The old
   build was not run against the same burst; the causes above come from reading the code.
+
+## Later: A plays and pauses the page
+
+A (or a tap on Play/Pause) while a page drives (`pageDrives()`) no longer takes the file over: it acts as A lets go,
+and main sends `handheld-toggle {play}` — the state wanted, flipped from the last press still unanswered
+(`Ui::browserWant`, 2.5 s), not a blind toggle, so presses in one pass of the loop or an event seen twice can't end
+the wrong way round. The page plays or pauses its element and reports by `browser-pos`, which settles the wish. Held
+600 ms (`PLAY_HOLD_MS`, timed in `Ui::tick`, fires once, the Play button fills meanwhile) it plays here as A did
+before (`takeOver`). Tested with a fake page (python, login plus SSE) and `A`, `A*3`, `A~800`, `tap` and `hold` on
+the Play button: the copy stayed paused through the toggles, `A*3` ended paused, the hold played here from the
+predicted place and the page got `handheld-play`. Not verified: the handheld, Safari (a `play()` from an SSE event
+may need the page's earlier gesture; refused, the page re-reports paused). A page paused while hidden closes its SSE
+(as before), so A there takes the file over at once, as no page drives any more.

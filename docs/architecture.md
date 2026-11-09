@@ -131,6 +131,8 @@ Moved out of `CLAUDE.md`, which keeps the one-line rules and the map; the reason
   `wakeHeld`): opened paused, the handheld's ALSA output stayed silent once played while the picture ran on. The
   page's position (`/api/browser-pos`, on play/pause/seek and every 10 s) is never applied to the paused copy; the
   bottom panel shows `Ui::shownPosition()` (extrapolated), and seeks made there count from it and go to the page.
+  A (or the Play button) while a page drives plays/pauses the page (`handheld-toggle {play}`, the state wanted,
+  `Ui::browserWant`), acting as it lets go; held 600 ms (`PLAY_HOLD_MS`, `Ui::tick`) it plays here (`takeOver`).
   **The page's layout** (`web/style.css`, `docs/design/midnight.md`'s palette): phone (tab bar, floating mini player,
   the full player with its panel as a sheet), tablet from 700 px (icon rail, player bar), computer from 1100 px
   (sidebar with playlists and the handheld's card); `Q_WIDE`/`Q_DESK` in `web/js/store.js` match the CSS's media queries (a phone

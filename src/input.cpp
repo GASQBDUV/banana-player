@@ -55,6 +55,13 @@ namespace bp
 		return Button::None;
 	}
 
+	Button buttonReleased(const SDL_Event& e)
+	{
+		if (e.type == SDL_KEYUP) return fromKey(e.key.keysym.sym);
+		if (e.type == SDL_CONTROLLERBUTTONUP) return fromPad(e.cbutton.button);
+		return Button::None;
+	}
+
 	Button buttonFromName(const std::string& name)
 	{
 		static const char* names[] = {"none", "a", "b", "x", "y", "l", "r", "up", "down", "left", "right", "start", "select", "l3", "l2", "r2"};
