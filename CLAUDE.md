@@ -117,7 +117,7 @@ tools/make-sprite.py                                 # regenerates web/sprite.sv
   (`tools/make-sprite.py`); web-only glyphs are inline in `index.html`. `web/style.css` copies `theme.h` by hand.
 - **Playing in the browser:** the handheld holds a paused copy of the page's item (the Session's `HhLoad` with
   `hold`), never moved per report (only the session's Seek/SetOutput seek it); its first play there does `ao-reload`;
-  iPhone/iPad play in the page is off (`NO_HERE`). `store.target` is derived from the Session's `pref`.
+  iPhone/iPad play in the page too (`NO_HERE` false since 0.5.5). `store.target` is derived from the Session's `pref`.
 - **Tracks in the browser** (docs/notes/2026-11-11-browser-tracks.md): `/api/subs` (WebVTT), `/api/ass` (the whole ASS
   script for JASSUB, vendored in `web/vendor/jassub/`, loaded only when a styled track is chosen) and `/api/fonts` +
   `/api/font` (Matroska font attachments) in `subs.*`; a non-default audio track is a Direct Stream (`remux.*`:

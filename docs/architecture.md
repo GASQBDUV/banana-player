@@ -146,7 +146,7 @@ Moved out of `CLAUDE.md`, which keeps the one-line rules and the map; the reason
   **History in `web/js/router.js`:** each entry carries the load's id (`bpDoc`), how many of ours lie behind (`bpIdx`) and
   whether it came from a tap (`bpOk`); the player's chevron goes back only when `canGoBack()` (Safari skips, going
   back, an entry left by a step without a tap, and an entry from an earlier load reloads the page), else it replaces
-  (`replaceHash`). iPhone/iPad: playing in the page is off (`NO_HERE`). Overscroll is blocked on the y axis only: a
+  (`replaceHash`). iPhone/iPad play in the page too since 0.5.5 (`NO_HERE` false). Overscroll is blocked on the y axis only: a
   sideways block kills the two-finger swipe Back in Chrome.
 - **Updater** (`updater.*`, Ports installs; a Store install, under `/data/store`, is the Store's): a thread runs
   BananaOS's `curl` against GitHub's `/releases/latest` (`update.cpp` parses it), downloads the zip and its

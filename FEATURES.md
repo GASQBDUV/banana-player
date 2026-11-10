@@ -469,7 +469,7 @@ handheld, carries on at 1:27"):
   up next.
 - **In this browser**: plays the file on the phone or computer, and pauses the handheld. Here there's no equalizer,
   effects or handheld volume (a volume slider for the browser instead), and the chapters are the browser's own.
-  Not on iPhone or iPad yet (it says **Not on iPhone or iPad yet**): there the dashboard is the handheld's remote.
+  Also on iPhone and iPad.
 - While the browser plays, the handheld shows **Playing in your browser** (or **Paused in your browser**) and its bar
   runs on with the browser's time. **A** (or a tap on **Play**/**Pause**) on the handheld plays and pauses the browser;
   the handheld stays quiet. **Hold A** (or hold the Play button) for 0.6 s to play it on the handheld instead, from where

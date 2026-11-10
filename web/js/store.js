@@ -19,9 +19,9 @@ export const TAB_ID = (() => {
 })();
 
 /* ================= store ================= */
-// iPhone and iPad (every browser there is Safari underneath): playing in the page is off for now. Safari's history
-// and audio session broke it in ways not yet pinned down; the handheld plays, the page is the remote
-export const NO_HERE = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+// Playing in the page was off on iPhone and iPad (Safari's history and audio session broke it once); on again for
+// testing there. true turns it off everywhere (the handheld plays, the page is the remote)
+export const NO_HERE = false;
 export const NO_HERE_WHY = 'Not on iPhone or iPad yet';
 // the layouts (as style.css): a phone (also one on its side: short and touch), a tablet (700 px up), a computer (1100 up)
 export const Q_WIDE = '(min-width: 700px) and (min-height: 521px), (min-width: 700px) and (hover: hover)';

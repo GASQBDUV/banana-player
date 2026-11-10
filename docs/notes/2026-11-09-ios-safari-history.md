@@ -21,8 +21,7 @@ On iPhone, after scanning the QR code (the page opens straight on the player, wi
 Chrome's two-finger swipe Back was killed by `overscroll-behavior: none/contain` on the x axis. Keep overscroll
 blocking on the y axis only.
 
-Playing in the browser is off on iPhone and iPad for now (`NO_HERE`), pending a proper Safari debug (also on the
-roadmap).
+Playing in the browser was off on iPhone and iPad (`NO_HERE`) until 0.5.5, when the owner tested it there and it worked.
 
 ## Testing
 
