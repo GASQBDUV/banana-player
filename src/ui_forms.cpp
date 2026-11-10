@@ -120,7 +120,9 @@ namespace bp
 		{
 			// the port follows the type, unless one was typed
 			bool usual = form.port <= 0 || form.port == defaultPort(form.type);
+			bool wasDlna = form.type == NetType::Dlna;
 			form.type = form.type == NetType::Smb ? NetType::Ftp : form.type == NetType::Ftp ? NetType::Dlna : NetType::Smb;
+			if (wasDlna) form.guest = false;	// back to SMB as a new form starts it: with an account (DLNA set guest)
 			if (usual) form.port = defaultPort(form.type);
 			if (form.type == NetType::Dlna)
 			{

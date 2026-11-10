@@ -4,7 +4,7 @@
 # XML-special characters in titles, and HTTP Range reads of a 5 MiB random file (saved as /tmp/mock.bin, its md5 printed).
 # The folder Quirks has what servers get wrong: "Alien", "Alien", "Alien (2)"; titles with extensions the player knows
 # (.m2ts, .m4b); items with no res@size whose server drops HEAD, ignores Range (200, the whole file) or answers HEAD after
-# 20 s (for cancel-open); an item redirected to file://; a folder whose id is gone. Browsing an id that isn't there is a SOAP fault, UPnP error 701.
+# 20 s (for cancel-open); an item redirected to file://; a folder whose id is gone; Renumbered, whose id changes on GET /refresh (a library refresh). Browsing an id that isn't there is a SOAP fault, UPnP error 701.
 #   python3 tools/mock-dlna.py [port]            then:   build/bp-net ls dlna://http://127.0.0.1:8765/desc.xml - - /
 import http.server, socketserver, os, re, sys, hashlib
 from xml.sax.saxutils import escape
@@ -22,9 +22,14 @@ TREE={ '0':[('c','1','Filmer'),('c','2','Musik & Ljud'),('c','3','Många'),('c',
       ('i','54','Audiobook.m4b',"audio/mp4"),('i','55','No HEAD',"video/mp4",'nohead'),('i','56','No Range',"video/mp4",'norange'),
       ('i','57','Slow HEAD',"video/mp4",'slowhead'),('i','58','To a file',"video/mp4",'redir'),('c','99','Gone after a refresh')]}
 NOSIZE={'nohead','norange','slowhead'}
+GEN=[1]
+def tree(oid):
+    if oid=='0': return TREE['0']+[('c',f'gen{GEN[0]}','Renumbered')]
+    if oid==f'gen{GEN[0]}': return [('i','60','Inside',"video/mp4")]
+    return TREE.get(oid)
 DESC=f'''<?xml version="1.0"?><root xmlns="urn:schemas-upnp-org:device-1-0"><device><deviceType>urn:schemas-upnp-org:device:MediaServer:1</deviceType><friendlyName>Mock</friendlyName><serviceList><service><serviceType>urn:schemas-upnp-org:service:ContentDirectory:1</serviceType><controlURL>/cd/control</controlURL></service></serviceList></device></root>'''
 def didl(oid,start,count):
-    kids=TREE.get(oid,[]); total=len(kids); part=kids[start:start+count]; out=''
+    kids=tree(oid) or []; total=len(kids); part=kids[start:start+count]; out=''
     for k in part:
         if k[0]=='c': out+=f'<container id="{k[1]}" parentID="{oid}" restricted="1"><dc:title>{escape(k[2])}</dc:title><upnp:class>object.container</upnp:class></container>'
         else:
@@ -38,6 +43,8 @@ class H(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path.startswith('/desc.xml'):
             b=DESC.encode(); self.send_response(200); self.send_header('Content-Length',str(len(b))); self.end_headers(); self.wfile.write(b); return
+        if self.path.startswith('/refresh'):
+            GEN[0]+=1; self.send_response(200); self.send_header('Content-Length','0'); self.end_headers(); return
         if self.path.startswith('/redir/'):
             self.send_response(302); self.send_header('Location','file:///etc/passwd'); self.send_header('Content-Length','0'); self.end_headers(); return
         if self.path.startswith('/norange/'):
@@ -62,7 +69,7 @@ class H(http.server.BaseHTTPRequestHandler):
     def do_POST(self):
         l=int(self.headers['Content-Length']); body=self.rfile.read(l).decode()
         oid=re.search(r'<ObjectID>(.*?)</ObjectID>',body).group(1); st=int(re.search(r'<StartingIndex>(\d+)',body).group(1)); rc=int(re.search(r'<RequestedCount>(\d+)',body).group(1))
-        if oid not in TREE:
+        if tree(oid) is None:
             f='<?xml version="1.0"?><s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"><s:Body><s:Fault><faultcode>s:Client</faultcode><faultstring>UPnPError</faultstring><detail><UPnPError xmlns="urn:schemas-upnp-org:control-1-0"><errorCode>701</errorCode><errorDescription>No such object</errorDescription></UPnPError></detail></s:Fault></s:Body></s:Envelope>'.encode()
             self.send_response(500); self.send_header('Content-Type','text/xml'); self.send_header('Content-Length',str(len(f))); self.end_headers(); self.wfile.write(f); return
         d,nr,tot=didl(oid,st,min(rc,100) or 100)

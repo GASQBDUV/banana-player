@@ -674,7 +674,7 @@ namespace bp
 				NetResult r;
 				r.detail = what + ": UPnP error " + std::to_string(code) + (desc.empty() ? "" : " (" + desc + ")");
 				if (code == 701 || code == 710) { r.error = NetError::NotFound; r.detail = what + ": no such folder (UPnP error " + std::to_string(code) + ")"; }
-				else if (code == 401 || code == 606) r.error = NetError::NoAccess;
+				else if (code == 606) r.error = NetError::NoAccess;	// "Action not authorized" (UPnP's 401 is "Invalid Action")
 				else r.error = NetError::Other;
 				return r;
 			}
@@ -843,6 +843,12 @@ namespace bp
 				out = it->second.second;
 				return true;
 			}
+			void dropPrefix(const std::string& prefix)
+			{
+				std::lock_guard<std::mutex> g(lock);
+				for (auto it = folders.begin(); it != folders.end();)
+					it = it->first.compare(0, prefix.size(), prefix) == 0 ? folders.erase(it) : std::next(it);
+			}
 			void put(const std::string& key, const std::vector<Item>& v)
 			{
 				std::lock_guard<std::mutex> g(lock);
@@ -882,6 +888,15 @@ namespace bp
 				std::vector<Item> items;
 				result = children(dir, items);
 				if (!result.ok()) return nullptr;
+				bool found = false;
+				for (const Item& it : items) found = found || (!it.dir && it.title == name);
+				if (!found)
+				{
+					// a listing kept from before the library changed (renamed, added): asked of the server again
+					forgetListings();
+					result = children(dir, items, true);
+					if (!result.ok()) return nullptr;
+				}
 				for (const Item& it : items)
 				{
 					if (it.dir || it.title != name) continue;
@@ -901,8 +916,26 @@ namespace bp
 			DlnaSession s;
 			std::map<std::string, std::vector<Item>> listed;	// a folder's path -> its entries (as named for the player)
 
-			// a folder's entries, titled so each is one path; walked from the root, each level once
+			void forgetListings()
+			{
+				listed.clear();
+				SharedListings::get().dropPrefix(s.server.host + "|" + std::to_string(s.server.port) + "|");
+			}
+
+			// a folder's entries, titled so each is one path. The folders on the way are kept (by id), and a server
+			// renumbers them when its library is refreshed (Plex, minidlna's rescan): an id it no longer knows (UPnP
+			// 701) or a name no longer there is walked once more from the root with nothing kept
 			NetResult children(const std::string& path, std::vector<Item>& out, bool fresh = false)
+			{
+				bool kept = false;
+				NetResult r = walk(path, out, fresh, kept);
+				if (r.error != NetError::NotFound || !kept) return r;
+				forgetListings();
+				return walk(path, out, fresh, kept);
+			}
+
+			// kept: set when a level came from a kept listing
+			NetResult walk(const std::string& path, std::vector<Item>& out, bool fresh, bool& kept)
 			{
 				const std::string keyBase = s.server.host + "|" + std::to_string(s.server.port) + "|";
 				std::vector<std::string> segs;
@@ -922,7 +955,7 @@ namespace bp
 					if (it == listed.end())
 					{
 						std::vector<Item> named;
-						if (!(last && fresh) && SharedListings::get().find(keyBase + at, named)) it = listed.emplace(at, named).first;
+						if (!(last && fresh) && SharedListings::get().find(keyBase + at, named)) { it = listed.emplace(at, named).first; kept = true; }
 						else
 						{
 							std::vector<Item> raw;
@@ -933,6 +966,7 @@ namespace bp
 							it = listed.emplace(at, named).first;
 						}
 					}
+					else if (!(last && fresh)) kept = true;
 					if (k == segs.size()) { out = it->second; return NetResult(); }
 					const Item* next = nullptr;
 					for (const Item& e : it->second)
