@@ -184,12 +184,18 @@ own). Not covered: FTPS against a real server, MLSD against a real server (the t
 ### DLNA backend
 
 `net_dlna.cpp` makes a DLNA/UPnP media server (Plex, Jellyfin, a NAS...) a network folder. The server is found by SSDP
-(an M-SEARCH sent to the host's port 1900 and to the multicast group; a description URL in the Server field skips
-that) and its ContentDirectory service is browsed with SOAP `Browse` (`BrowseDirectChildren`, DIDL-Lite answers,
+(an M-SEARCH sent to the host's port 1900 and to the multicast group; every answer from that address is kept and the
+MediaServers are tried first, since a PC or NAS may also answer for a router's or a renderer's root device; a
+description URL in the Server field skips that, and only its host part is looked up by name) and its ContentDirectory service is browsed with SOAP `Browse` (`BrowseDirectChildren`, DIDL-Lite answers,
 read by a small XML reader in the file). DLNA names things by object id and the player's paths are names, so a path
 is walked from container "0" by title: two entries of one title get " (2)", and a title with no extension gets one from
-the file's MIME type (the browser tells media by extension). A file is an item's HTTP `<res>`, read with Range requests
-in 1 MiB blocks, with one retry on a dropped connection. A folder is asked for in one request (Plex takes seconds to
+the file's MIME type unless `isMediaFile()` already knows its extension (the browser tells media by extension); a
+" (N)" name that is itself taken counts on. A file is an item's HTTP `<res>`, read with Range requests
+in 1 MiB blocks, with one retry on a dropped connection. An item with no `res@size` gets its length from HEAD, else
+(HEAD refused or dropped) from a `Range: bytes=0-0` probe's Content-Range, or the Content-Length of a 200 that ignored
+the Range; that wait is on the backend's canceller, so `cancelOpens()` reaches it. A SOAP fault (HTTP 500) is read for
+its UPnP error: 701/710 is "no such folder" (an id gone with a library refresh), not the server going away. curl
+follows redirects but speaks only http and https (item URLs come from the server). A folder is asked for in one request (Plex takes seconds to
 build a list whatever its length), and the listings are shared by every backend of the process for ten minutes, so
 mpv's backend finds the file picked in the browser without listing its folder again. There is no sign-in. Tested on
 Plex, and on Sonos (browsing only); `tools/mock-dlna.py` is a stand-in. Not covered: Jellyfin, minidlna, Windows

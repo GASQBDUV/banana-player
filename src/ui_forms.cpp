@@ -69,6 +69,15 @@ namespace bp
 		NetServer s = form;
 		s.host = trimmed(s.host);
 		if (s.port <= 0) s.port = defaultPort(s.type);
+		if (s.type == NetType::Dlna)
+		{
+			// no shares, folders or sign-in on a media server: nothing left over from another type is kept
+			s.share.clear();
+			s.folder.clear();
+			s.user.clear();
+			s.secret.clear();
+			s.guest = true;
+		}
 		return s;
 	}
 
@@ -113,6 +122,16 @@ namespace bp
 			bool usual = form.port <= 0 || form.port == defaultPort(form.type);
 			form.type = form.type == NetType::Smb ? NetType::Ftp : form.type == NetType::Ftp ? NetType::Dlna : NetType::Smb;
 			if (usual) form.port = defaultPort(form.type);
+			if (form.type == NetType::Dlna)
+			{
+				// the rows are hidden for DLNA: what was typed for SMB or FTP would stay there, unseen
+				form.share.clear();
+				form.folder.clear();
+				form.user.clear();
+				form.guest = true;
+				formPassword.clear();
+				formPasswordTyped = false;
+			}
 		}
 		else if (id == FORM_SIGNIN) form.guest = !form.guest;
 		else if (id == FORM_FTPS) form.ftps = !form.ftps;
@@ -161,7 +180,8 @@ namespace bp
 		}
 		if (!netStore) return;
 		s.lastUsed = (long long)time(nullptr);	// the top of the list: the one just made
-		std::string id = netStore->put(s, formPassword, !formId.empty() && !formPasswordTyped);
+		bool dlna = s.type == NetType::Dlna;
+		std::string id = netStore->put(s, dlna ? std::string() : formPassword, !dlna && !formId.empty() && !formPasswordTyped);
 		if (netWorker) netWorker->forget(id);	// its kept connection was for what it was
 		enterFolder(NETROOT, p);
 		for (size_t i = 0; i < browsePaths.size(); i++)

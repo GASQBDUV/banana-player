@@ -13,6 +13,7 @@
 // the browser tells media by its extension.
 #include "net.h"
 #include "netwait.h"
+#include "playlist.h"
 #include <algorithm>
 #include <arpa/inet.h>
 #include <cstdio>
@@ -340,6 +341,14 @@ namespace bp
 			curl_easy_setopt(c, CURLOPT_NOSIGNAL, 1L);
 			curl_easy_setopt(c, CURLOPT_FOLLOWLOCATION, 1L);
 			curl_easy_setopt(c, CURLOPT_MAXREDIRS, 5L);
+			// item URLs come from the server: nothing but HTTP, redirects included (no file://, ftp://...)
+#if LIBCURL_VERSION_NUM >= 0x075500
+			curl_easy_setopt(c, CURLOPT_PROTOCOLS_STR, "http,https");
+			curl_easy_setopt(c, CURLOPT_REDIR_PROTOCOLS_STR, "http,https");
+#else
+			curl_easy_setopt(c, CURLOPT_PROTOCOLS, (long)(CURLPROTO_HTTP | CURLPROTO_HTTPS));
+			curl_easy_setopt(c, CURLOPT_REDIR_PROTOCOLS, (long)(CURLPROTO_HTTP | CURLPROTO_HTTPS));
+#endif
 			curl_easy_setopt(c, CURLOPT_CONNECTTIMEOUT_MS, (long)timeoutMs);
 			curl_easy_setopt(c, CURLOPT_LOW_SPEED_LIMIT, 1L);	// nothing at all for the timeout: give up
 			curl_easy_setopt(c, CURLOPT_LOW_SPEED_TIME, (long)std::max(1, timeoutMs / 1000));
@@ -373,6 +382,7 @@ namespace bp
 		{
 			std::string location;
 			std::string ip;
+			bool mediaServer = false;	// its ST says MediaServer (else a root device: a router, a renderer...)
 		};
 
 		bool resolveV4(const std::string& host, std::string& ip)
@@ -398,7 +408,9 @@ namespace bp
 		}
 
 		// M-SEARCH for media servers: to wantIp's port 1900 (if given) and to the multicast group; the answers within
-		// timeoutMs. wantIp "": all of them. Returns the LOCATIONs (one per server address, first answer)
+		// timeoutMs. wantIp "": all media servers. With an address, every device there answers (a PC or a NAS may have
+		// a router's or a renderer's root device too, and answer for it first): all are kept, the MediaServers first,
+		// and the wait ends at the first MediaServer
 		std::vector<Found> ssdpSearch(const std::string& wantIp, int timeoutMs, Canceller& waiter)
 		{
 			std::vector<Found> found;
@@ -444,13 +456,16 @@ namespace bp
 				inet_ntop(AF_INET, &from.sin_addr, ip, sizeof ip);
 				if (!wantIp.empty() && wantIp != ip && hostOfUrl(loc) != wantIp) continue;
 				std::string st = lower(headerValue("\n" + reply, "st"));
-				if (wantIp.empty() && st.find("mediaserver") == std::string::npos) continue;
+				bool media = st.find("urn:schemas-upnp-org:device:mediaserver:") == 0;
+				if (wantIp.empty() && !media) continue;
 				bool dup = false;
-				for (const Found& f : found) dup = dup || f.location == loc;
-				if (!dup) found.push_back({ loc, ip });
-				if (!wantIp.empty() && !found.empty()) break;
+				for (Found& f : found)
+					if (f.location == loc) { dup = true; f.mediaServer = f.mediaServer || media; }
+				if (!dup) found.push_back({ loc, ip, media });
+				if (!wantIp.empty() && media) break;
 			}
 			close(fd);
+			std::stable_partition(found.begin(), found.end(), [](const Found& f) { return f.mediaServer; });
 			return found;
 		}
 
@@ -488,17 +503,6 @@ namespace bp
 			return "";
 		}
 
-		bool hasMediaExtension(const std::string& name)
-		{
-			size_t dot = name.rfind('.');
-			if (dot == std::string::npos || name.size() - dot > 6) return false;
-			std::string e = lower(name.substr(dot));
-			static const char* known[] = { ".mp4", ".mkv", ".avi", ".mpg", ".mpeg", ".ts", ".mov", ".wmv", ".webm", ".flv", ".3gp", ".m4v", ".mp3", ".flac", ".m4a",
-				".aac", ".ogg", ".oga", ".wav", ".wma", ".opus", ".jpg", ".jpeg", ".png", ".gif", ".bmp", ".mka", ".ape", ".wv" };
-			for (const char* k : known)
-				if (e == k) return true;
-			return false;
-		}
 
 		std::string cleanName(std::string s)
 		{
@@ -626,6 +630,7 @@ namespace bp
 						if (!waiter.sleep(400)) return cancelled("Browsing " + id);
 					}
 					if (!r.ok()) return r;
+					if (reply.status == 500) return soapFault(reply.body, "Browse " + id);
 					if (reply.status != 200) return statusFailure(reply.status, "Browse " + id);
 					XNode env;
 					if (!XmlParser(reply.body).parse(env))
@@ -658,6 +663,22 @@ namespace bp
 			}
 
 		private:
+			// a SOAP fault comes as HTTP 500 and is the server's answer, not the server going away: its UPnP error says
+			// what. 701 "No such object": an id gone with a library refresh
+			static NetResult soapFault(const std::string& body, const std::string& what)
+			{
+				XNode env;
+				if (!XmlParser(body).parse(env) || findText(env, "errorCode").empty()) return statusFailure(500, what);
+				int code = atoi(trim(findText(env, "errorCode")).c_str());
+				std::string desc = trim(findText(env, "errorDescription"));
+				NetResult r;
+				r.detail = what + ": UPnP error " + std::to_string(code) + (desc.empty() ? "" : " (" + desc + ")");
+				if (code == 701 || code == 710) { r.error = NetError::NotFound; r.detail = what + ": no such folder (UPnP error " + std::to_string(code) + ")"; }
+				else if (code == 401 || code == 606) r.error = NetError::NoAccess;
+				else r.error = NetError::Other;
+				return r;
+			}
+
 			static std::string findText(const XNode& n, const char* name)
 			{
 				std::vector<const XNode*> v;
@@ -711,22 +732,27 @@ namespace bp
 			}
 			~DlnaFile() override { if (curl) curl_easy_cleanup(curl); }
 
-			NetResult prepare()
+			// the length, when the listing had none. On the backend's canceller (opener), which cancelOpens() reaches:
+			// the file isn't the backend's yet while it is opened
+			NetResult prepare(Canceller& opener)
 			{
 				if (total >= 0) return NetResult();
-				Busy busy(waiter);
+				Busy busy(opener);
 				Reply reply;
-				NetResult r = httpRequest(curl, waiter, timeoutMs, url, headers(), nullptr, "HEAD", reply);
-				if (!r.ok()) return last = r;
-				if (reply.status == 200 && reply.contentLength >= 0) { total = reply.contentLength; return NetResult(); }
-				// no HEAD: the first byte, and the total from Content-Range
+				NetResult r = httpRequest(curl, opener, timeoutMs, url, headers(), nullptr, "HEAD", reply);
+				if (r.error == NetError::Cancelled || r.error == NetError::NotFound) return last = r;	// (NotFound: no connection at all)
+				if (r.ok() && reply.status == 200 && reply.contentLength >= 0) { total = reply.contentLength; return NetResult(); }
+				// no HEAD (refused, or the connection dropped by servers that don't do it): the first byte, and the
+				// total from Content-Range
 				reply = Reply();
 				std::vector<std::string> h = headers();
 				h.push_back("Range: bytes=0-0");
-				r = httpRequest(curl, waiter, timeoutMs, url, h, nullptr, nullptr, reply, 16);
+				r = httpRequest(curl, opener, timeoutMs, url, h, nullptr, nullptr, reply, 16);
 				if (!r.ok()) return last = r;
 				size_t slash = reply.contentRange.rfind('/');
 				if (reply.status == 206 && slash != std::string::npos) { total = atoll(reply.contentRange.c_str() + slash + 1); return NetResult(); }
+				// the Range ignored: the whole file was on its way, and its Content-Length is the length
+				if (reply.status == 200 && reply.contentLength >= 0) { total = reply.contentLength; return NetResult(); }
 				if (reply.status >= 400) return last = statusFailure(reply.status, "Opening " + url);
 				last.error = NetError::Other;
 				last.detail = "The server doesn't say how long the file is";
@@ -860,7 +886,7 @@ namespace bp
 				{
 					if (it.dir || it.title != name) continue;
 					auto f = std::make_unique<DlnaFile>(s.server, it.url, it.size, s.timeoutMs);
-					result = f->prepare();
+					result = f->prepare(s.waiter);
 					if (!result.ok()) return nullptr;
 					return f;
 				}
@@ -927,14 +953,15 @@ namespace bp
 			static std::vector<Item> name(std::vector<Item> raw)
 			{
 				std::vector<Item> dirs, files;
-				std::map<std::string, int> used;
+				std::set<std::string> used;
 				for (Item& it : raw)
 				{
 					std::string base = cleanName(it.title), ext;
-					if (!it.dir && !hasMediaExtension(base)) ext = extensionFor(it);
+					if (!it.dir && !isMediaFile(base)) ext = extensionFor(it);	// the browser's own list (playlist.cpp)
 					std::string candidate = base + ext;
-					int& n = used[lower(candidate)];
-					if (n++ > 0) candidate = base + " (" + std::to_string(n) + ")" + ext;
+					// "Alien", "Alien", "Alien (2)": the second is "Alien (3)", each name once ("used" holds every name given)
+					for (int n = 2; used.count(lower(candidate)); n++) candidate = base + " (" + std::to_string(n) + ")" + ext;
+					used.insert(lower(candidate));
 					it.title = candidate;
 					(it.dir ? dirs : files).push_back(std::move(it));
 				}

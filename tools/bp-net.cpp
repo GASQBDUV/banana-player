@@ -67,7 +67,7 @@ static int report(const NetResult& r)
 
 static void usage()
 {
-	fprintf(stderr, "usage: bp-net ls|size|cat|loop|cancel-ls|cancel-cat <host[:port]> <user|-guest> <password|-> <path> [args]\n");
+	fprintf(stderr, "usage: bp-net ls|size|cat|loop|cancel-ls|cancel-cat|cancel-open <host[:port]> <user|-guest> <password|-> <path> [args]\n");
 	exit(2);
 }
 
@@ -125,6 +125,18 @@ int main(int argc, char** argv)
 	}
 
 	NetResult r;
+	if (cmd == "cancel-open")
+	{
+		// the backend's cancel() while open() waits on the server (what Next and quitting do, cancelOpens())
+		if (argc < 7) usage();
+		int ms = atoi(argv[6]);
+		std::thread canceller([&b, ms] { std::this_thread::sleep_for(std::chrono::milliseconds(ms)); b->cancel(); });
+		std::unique_ptr<NetFile> f = b->open(path, r);
+		canceller.join();
+		printf("%s in %lld ms\n", f ? "opened" : errorName(r.error), (long long)(nowMs() - t0));
+		if (!r.ok()) printf("error %s: %s\n", errorName(r.error), r.detail.c_str());
+		return r.error == NetError::Cancelled ? 0 : 1;
+	}
 	std::unique_ptr<NetFile> f = b->open(path, r);
 	if (!f) return report(r);
 	if (cmd == "size")
