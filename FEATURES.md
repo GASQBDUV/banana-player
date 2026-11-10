@@ -489,6 +489,19 @@ handheld, carries on at 1:27"):
   **On handheld · in the background**, and its controls still drive it.
 - Switching the target while something plays carries on from the same place.
 - A file the browser can't play (AVI, AC3 or DTS sound, WMA, APE and so on) says **Plays on the handheld only**.
+- **Tracks** in the browser (a video's audio and subtitles), as Plex does it: the video stays the file itself (Direct
+  Play) whenever it can.
+  - **Audio:** every track of the file is listed. Safari switches in the file itself. Other browsers play the file's
+    default track as it is (**Direct Play**); another one comes as a **Direct Stream**: the handheld sends the video and
+    that track copied into a stream, never converted, so the picture blinks for about a second as it switches, a seek
+    takes a moment, and **Details** says **Direct Stream**. The default track again is the file again. A track the
+    browser can't play (DTS, TrueHD, PCM…, or AC-3 where the browser has no AC-3) says **Plays on the handheld only**
+    and offers **Play this one on the handheld**.
+  - **Subtitles:** the file's text tracks (SRT, WebVTT, MP4 text) and the files beside it (`.srt`, `.vtt`); the first
+    time an embedded one is chosen it's read out of the file (**Preparing subtitles… 40%**), then kept. Styled ones
+    (ASS/SSA, inside or beside the video) are drawn in the browser with their own look, positions, effects and the
+    fonts the file carries. Picture subtitles (PGS, VobSub) say **Shows on the handheld only**. **Size** and
+    **Position** set how plain subtitles look in this browser; styled ones keep theirs.
 - **Up next**, **Chapters**, **Tracks** (audio and subtitles), **Sound** (the volume, the equalizer's presets and its ten
   bands, the effects) and **Details**: on a phone three keys under the controls open them as a sheet; on a tablet
   they're a card under the player; on a computer a column beside it, while the controls are in the player bar.
@@ -553,8 +566,7 @@ button resumes the latest), and right under Liked in a computer's sidebar.
 
 Changes show up live on both sides: what you do on the handheld appears in the browser, and the other way round.
 
-Not yet: network folders in the browser, a grid of photo thumbnails, saving equalizer presets from the browser, and
-subtitles when playing in the browser.
+Not yet: network folders in the browser, a grid of photo thumbnails, and saving equalizer presets from the browser.
 
 ## Updates
 

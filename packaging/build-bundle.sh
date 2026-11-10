@@ -25,6 +25,8 @@ LIBPLACEBO_VERSION=v7.349.0
 LIBASS_VERSION=0.17.3
 MPV_VERSION=v0.40.0
 LIBSMB2_VERSION=6.2
+# FFmpeg's configure beyond the version: the mp4 muxer is the web dashboard's Direct Stream (src/web/remux.cpp)
+FFMPEG_CONFIG=mp4mux
 
 HERE="$(cd "$(dirname "$0")/.." && pwd)"
 
@@ -63,7 +65,7 @@ PREFIX=/cache/prefix
 export PKG_CONFIG_PATH=$PREFIX/lib/pkgconfig
 export LD_LIBRARY_PATH=$PREFIX/lib
 SRC=/cache/src
-STAMP="$FFMPEG_VERSION $LIBPLACEBO_VERSION $LIBASS_VERSION $MPV_VERSION $LIBSMB2_VERSION"
+STAMP="$FFMPEG_VERSION+$FFMPEG_CONFIG $LIBPLACEBO_VERSION $LIBASS_VERSION $MPV_VERSION $LIBSMB2_VERSION"
 if [ "$CLEAN" = 1 ] || [ "$(cat $PREFIX/.versions 2>/dev/null)" != "$STAMP" ]; then
 	echo "== the libraries from scratch"
 	# (libplacebo and mpv are git checkouts under unversioned names: a new version needs a new clone; FFmpeg's and
@@ -83,7 +85,7 @@ fetch https://ffmpeg.org/releases/ffmpeg-$FFMPEG_VERSION.tar.xz ffmpeg-$FFMPEG_V
 cd $SRC/ffmpeg-$FFMPEG_VERSION
 if [ ! -f $PREFIX/lib/libavcodec.so ]; then
 	./configure --prefix=$PREFIX --enable-shared --disable-static --disable-programs --disable-doc \
-		--disable-encoders --disable-muxers --disable-indevs --disable-outdevs --disable-network \
+		--disable-encoders --disable-muxers --enable-muxer=mp4 --disable-indevs --disable-outdevs --disable-network \
 		--disable-debug --enable-libdav1d --enable-zlib --enable-pic >/dev/null
 	make -j$JOBS >/dev/null && make install >/dev/null
 fi
@@ -172,6 +174,10 @@ cp /src/third_party/httplib/LICENSE "$L/cpp-httplib-LICENSE.txt"
 cp /src/third_party/qrcodegen/LICENSE "$L/qrcodegen-LICENSE.txt"
 cp /src/web/vendor/LICENSE-htm.txt "$L/htm-LICENSE.txt"
 cp /src/web/vendor/LICENSE-Sortable.txt "$L/Sortable-LICENSE.txt"
+# JASSUB (the browser's ASS subtitles): its wrapper's licence, and its WebAssembly build's (libass, FreeType, HarfBuzz,
+# FriBidi (LGPL-2.1+), ...); served as separate files, so they can be replaced
+cp /src/web/vendor/jassub/LICENSE.txt "$L/jassub-LICENSE.txt"
+cp /src/web/vendor/jassub/COPYRIGHT.txt "$L/jassub-COPYRIGHT.txt"
 cp /src/assets/fonts/licenses/PixelifySans-OFL.txt "$L/Pixelify-Sans-OFL.txt"
 cp /src/assets/fonts/licenses/Inter-LICENSE.txt "$L/Inter-LICENSE.txt"
 # the launcher (the Store's menu.launch, and what the Ports shelf's script runs), the version the Store reads

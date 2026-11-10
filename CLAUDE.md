@@ -108,6 +108,11 @@ tools/make-sprite.py                                 # regenerates web/sprite.sv
   (`tools/make-sprite.py`); web-only glyphs are inline in `index.html`. `web/style.css` copies `theme.h` by hand.
 - **Playing in the browser:** the paused copy on the handheld is never given the page's position; its first play there
   does `ao-reload`; iPhone/iPad play in the page is off (`NO_HERE`).
+- **Tracks in the browser** (docs/notes/2026-11-11-browser-tracks.md): `/api/subs` (WebVTT), `/api/ass` (the whole ASS
+  script for JASSUB, vendored in `web/vendor/jassub/`, loaded only when a styled track is chosen) and `/api/fonts` +
+  `/api/font` (Matroska font attachments) in `subs.*`; a non-default audio track is a Direct Stream (`remux.*`:
+  `/api/remux-start` → `{start}`, `/api/remux` fMP4 from that keyframe, one per tab). The page's clock is then
+  `B.remux.base + currentTime`: use `bPos()`/`seekTo()`, never `el.currentTime`. The bundle's FFmpeg needs the mp4 muxer.
 - **Leaving is not stopping** (docs/notes/2026-11-10-background-playback.md): `press`/`pointer` returning true is
   `main`'s `leave()`, a screen change (what plays goes on behind the browser, `Ui::bgPlay`); stopping is
   `stopPlaying()` (`takeStopPressed`, `takeStopRequest`, the end of the list), which changes screens only when

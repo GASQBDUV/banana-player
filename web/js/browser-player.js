@@ -34,7 +34,7 @@ const word = o => Object.assign(o, { tab: TAB_ID, seq: ++wordSeq });
 let posTimer = 0;
 function sendPos() {
 	if (!B.active || !B.meta || B.leaving || B.parked != null || store.conn !== 'ok' || !el.getAttribute('src')) return;
-	post('/api/browser-pos', word({ p: B.meta.p, t: (el.currentTime || 0).toFixed(1), playing: el.paused ? 0 : 1 })).catch(() => {});
+	post('/api/browser-pos', word({ p: B.meta.p, t: bPos().toFixed(1), playing: el.paused ? 0 : 1 })).catch(() => {});
 }
 for (const ev of ['play', 'pause', 'seeked']) el.addEventListener(ev, () => {
 	sendPos();
@@ -43,8 +43,16 @@ for (const ev of ['play', 'pause', 'seeked']) el.addEventListener(ev, () => {
 });
 el.addEventListener('emptied', () => { clearInterval(posTimer); posTimer = 0; });
 for (const ev of ['play', 'pause', 'loadedmetadata', 'durationchange', 'waiting', 'playing', 'seeked']) el.addEventListener(ev, () => { updateMediaSession(); notify(); });
-el.addEventListener('ended', () => { if (store.conn === 'ok') browserNext(true); else notify(); });
-el.addEventListener('error', () => { if (!B.active || !el.getAttribute('src')) return; B.error = true; notify(); const m = B.meta; toast("This browser can't play this file", m && { label: 'Play on handheld', fn: () => handoffToHandheld() }, 8000); });
+el.addEventListener('ended', () => {
+	// a Direct Stream cut short (the connection dropped while paused, say): on from where it stopped
+	if (B.remux && store.conn === 'ok' && bDur() && bPos() < bDur() - 2) { remuxAt(B.remux.a, bPos(), true); return; }
+	if (store.conn === 'ok') browserNext(true); else notify();
+});
+el.addEventListener('error', () => {
+	if (!B.active || !el.getAttribute('src')) return;
+	// the Direct Stream failed: back to the file as it is (its default sound)
+	if (B.remux) { const pos = bPos(); toast("Couldn't switch the audio track here"); directPlay(pos, true); return; }
+	B.error = true; notify(); const m = B.meta; toast("This browser can't play this file", m && { label: 'Play on handheld', fn: () => handoffToHandheld() }, 8000); });
 function announce() {
 	const p = B.meta.p;
 	if (B.announced === p && Date.now() - B.announcedAt < 1500) return;
@@ -85,6 +93,7 @@ export async function browserPlay(items, index, source, pos, auto, dir, nav, tok
 		const kind = kindOfName(it.p) === 'video' || (m && m.vcodec) ? 'video' : 'audio';
 		Object.assign(B, { shuffled: items === B.queue && B.shuffled, active: true, queue: items, index: i, source, error: false, leaving: false, parked: null, parkedPlaying: false,
 			meta: { p: it.p, title: titleFor(it.p, m && m.title), artist: m && m.artist || '', album: m && m.album || '', kind, chapters: m && m.chapters || [], duration: m && m.duration || 0, media: m } });
+		B.remux = null; clearTimeout(remuxTimer);
 		el.src = fileUrl(it.p);
 		subsForFile(m);
 		if (pos > 0) el.addEventListener('loadedmetadata', () => { el.currentTime = pos; }, { once: true });
@@ -107,12 +116,12 @@ export async function browserNext(auto, dir, steps, fromHandheld) {
 	const n = B.queue.length, pending = B.navTarget != null, from = pending ? B.navTarget : B.index;
 	// Previous as YouTube Music's (the handheld's too): RESTART_S or more in, back to the start; a burst of them from
 	// there (the handheld's n) is that and then the ones before. Before RESTART_S, the one before
-	if (dir < 0 && !auto && !pending && el.currentTime >= RESTART_S) {
-		if (steps === 1) { el.currentTime = 0; return; }
+	if (dir < 0 && !auto && !pending && bPos() >= RESTART_S) {
+		if (steps === 1) { seekTo(0); return; }
 		steps--;
 	}
 	let i = from + dir * steps;
-	if (auto && B.loop === 'one') { el.currentTime = 0; el.play(); return; }
+	if (auto && B.loop === 'one') { seekTo(0); el.play().catch(() => {}); return; }
 	if (i >= n)
 	{
 		if (B.loop === 'all') i = n ? i % n : 0;
@@ -138,7 +147,7 @@ export async function browserNext(auto, dir, steps, fromHandheld) {
 	if (auto) { el.pause(); toast('End of ' + (B.source && B.source.title || 'the list')); }
 	else toast(dir < 0 ? 'This is the first one' : 'This is the last one');
 }
-function unload() { el.pause(); el.removeAttribute('src'); clearSubs(); el.load(); }
+function unload() { el.pause(); B.remux = null; clearTimeout(remuxTimer); el.removeAttribute('src'); clearSubs(); el.load(); }
 // play pressed on the handheld while this page played: the sound is the handheld's now, and so is the switch (else it
 // still says "In this browser" over a page that's silent)
 export function handheldTookOver() {
@@ -169,8 +178,9 @@ export function playParked() {
 	if (!B.meta || B.parked == null) return;
 	const pos = B.parked;
 	Object.assign(B, { parked: null, parkedPlaying: false, error: false });
-	el.src = fileUrl(B.meta.p);
 	restoreSubs();
+	if (B.remux) { remuxAt(B.remux.a, pos, true); return; }
+	el.src = fileUrl(B.meta.p);
 	if (pos > 0) el.addEventListener('loadedmetadata', () => { el.currentTime = pos; }, { once: true });
 	el.play().catch(() => {});
 	notify();
@@ -202,15 +212,89 @@ export async function handheldOpen(d) {
 	else if (ok && store.target !== 'browser') chooseTarget('browser');
 }
 export function setBrowserVol(v) { B.vol = v; el.volume = v / 100; lsSet('bpVol', v); notify(); }
-function bPos() { return B.parked != null ? B.parked : el.currentTime || 0; }
-function bDur() { return isFinite(el.duration) && el.duration ? el.duration : (B.meta && B.meta.duration) || 0; }
+export function bPos() {
+	if (B.parked != null) return B.parked;
+	if (B.remux) return B.remux.pending != null ? B.remux.pending : B.remux.base + (el.currentTime || 0);
+	return el.currentTime || 0;
+}
+// (a Direct Stream doesn't know its own length: the file's)
+function bDur() { return !B.remux && isFinite(el.duration) && el.duration ? el.duration : (B.meta && B.meta.duration) || (isFinite(el.duration) && el.duration) || 0; }
+// to a place in the file, whichever way it plays: a Direct Stream can't seek, so it starts again from there
+export function seekTo(t) {
+	if (B.remux) {
+		// (a drag along the bar asks once, where it stops)
+		const r = B.remux;
+		if (r.pending == null) r.play = !el.paused;
+		r.pending = t; notify();
+		clearTimeout(remuxTimer); remuxTimer = setTimeout(() => remuxAt(r.a, t, r.play), 250);
+		return;
+	}
+	el.currentTime = t;
+}
+
+/* ---- audio tracks: Safari switches them in the element (audioTracks); elsewhere the server's Direct Stream copies
+   the video and the chosen track into a fragmented MP4 from a time on (/api/remux), and the original file is back for
+   the default track. The page counts the stream's time from where it starts (B.remux.base) ---- */
+let remuxTimer = 0;
+const VC = { h264: 'avc1.640028', hevc: 'hvc1.1.6.L120.90', vp9: 'vp09.00.40.08', av1: 'av01.0.08M.08' };
+const AC = { aac: 'mp4a.40.2', mp3: 'mp4a.69', opus: 'opus', flac: 'flac', ac3: 'ac-3', eac3: 'ec-3' };
+const typeOk = (v, a) => { try { return !!el.canPlayType('video/mp4; codecs="' + v + ', ' + a + '"') || !!(window.MediaSource && MediaSource.isTypeSupported('video/mp4; codecs="' + v + ', ' + a + '"')); } catch (e) { return false; } };
+// the track the browser plays from the file itself (Direct Play)
+export const directAudio = m => Math.max(0, (m && m.audio || []).findIndex(a => a.default));
+// '' when audio track i can play here by Direct Stream, else why not
+export function streamWhy(m, i) {
+	const a = m && m.audio && m.audio[i];
+	if (!a) return 'No such track';
+	if (!VC[m.vcodec] || !typeOk(VC[m.vcodec], 'mp4a.40.2') && !typeOk(VC[m.vcodec], 'opus')) return "This video can't be streamed to this browser";
+	if (!AC[a.codec] || !typeOk(VC[m.vcodec], AC[a.codec])) return 'Plays on the handheld only';
+	return '';
+}
+// Safari: the file's own tracks, switched in place
+export const nativeAudio = () => el.audioTracks && el.audioTracks.length > 1;
+export function playingAudio() {
+	const m = B.meta && B.meta.media;
+	if (nativeAudio()) return [...el.audioTracks].findIndex(t => t.enabled);
+	return B.remux ? B.remux.a : directAudio(m);
+}
+// the chosen track: in place (Safari), the file itself (its default track), else a Direct Stream from here
+export async function chooseAudio(i) {
+	const m = B.meta && B.meta.media; if (!m || B.parked != null) return;
+	if (nativeAudio()) { [...el.audioTracks].forEach((t, j) => t.enabled = j === i); notify(); return; }
+	if (i === playingAudio() && !B.switching) return;
+	if (i === directAudio(m)) { directPlay(bPos(), !el.paused); return; }
+	await remuxAt(i, bPos(), !el.paused);
+}
+function directPlay(pos, play) {
+	B.remux = null; B.switching = null; clearTimeout(remuxTimer);
+	el.src = fileUrl(B.meta.p);
+	if (pos > 0) el.addEventListener('loadedmetadata', () => { el.currentTime = pos; }, { once: true });
+	if (play) el.play().catch(() => {});
+	shiftSubs();
+	notify();
+}
+async function remuxAt(a, t, play) {
+	const p = B.meta && B.meta.p, tok = B.navTok;
+	if (!p) return;
+	B.switching = { a }; notify();
+	let r;
+	try { r = await get('/api/remux-start', { p, a, t: t.toFixed(2) }, { ms: 15000, quiet: true }); }
+	catch (e) { if (B.meta && B.meta.p === p && tok === B.navTok) { B.switching = null; if (B.remux) B.remux.pending = null; notify(); toast(e.status === 0 ? "Couldn't switch the audio track" : errMsg(e)); } return; }
+	if (!B.meta || B.meta.p !== p || tok !== B.navTok || (B.switching && B.switching.a !== a)) return;	// moved on meanwhile
+	B.remux = { a, base: r.start, pending: null };
+	B.switching = null;
+	el.src = '/api/remux?' + new URLSearchParams({ p, a, t: r.start.toFixed(3), tab: TAB_ID });
+	if (play) el.play().catch(() => {});
+	shiftSubs();
+	notify();
+}
 
 /* ---- subtitles in this browser: one <track> per text track, fetched as WebVTT when chosen ---- */
-export const SUBS = { file: '', list: [], chosen: -1, urls: {}, progress: null, failed: {}, seq: 0 };
+export const SUBS = { file: '', list: [], chosen: -1, urls: {}, progress: null, failed: {}, seq: 0, noAss: {}, ass: false };
 function clearSubs() {
+	assOff();
 	[...el.querySelectorAll('track')].forEach(t => t.remove());
 	Object.values(SUBS.urls).forEach(u => URL.revokeObjectURL(u));
-	Object.assign(SUBS, { file: '', list: [], chosen: -1, urls: {}, progress: null, failed: {}, seq: SUBS.seq + 1 });
+	Object.assign(SUBS, { file: '', list: [], chosen: -1, urls: {}, progress: null, failed: {}, seq: SUBS.seq + 1, noAss: {}, ass: false });
 }
 function subsForFile(m) {
 	clearSubs();
@@ -225,8 +309,12 @@ export async function chooseSub(i) {
 	const file = SUBS.file, seq = SUBS.seq;
 	SUBS.chosen = i; SUBS.progress = null; delete SUBS.failed[i];
 	[...el.textTracks].forEach(t => t.mode = 'disabled');
+	assOff();
 	notify();
 	if (i < 0) return;
+	const sx = SUBS.list.find(x => x.i === i);
+	// styled (ASS/SSA): drawn by libass in the page, in its own look; plain cues if that can't run here
+	if (sx && sx.styled && !SUBS.noAss[i] && assCan()) { if (await chooseAss(i, file, seq)) return; if (SUBS.seq !== seq || SUBS.chosen !== i) return; }
 	if (!SUBS.urls[i]) {
 		for (;;) {
 			let r, text;
@@ -254,15 +342,81 @@ export async function chooseSub(i) {
 	if (tr) { tr.track.mode = 'showing'; placeCues(); }
 	notify();
 }
+/* ---- styled subtitles (ASS/SSA) by JASSUB (libass in WebAssembly, web/vendor/jassub/), loaded the first time one is
+   chosen. It draws on a canvas over the picture (assBox, which goes where the video goes), with the file's own fonts
+   (its Matroska attachments) and Inter for what they lack ---- */
+export const assBox = document.createElement('div');
+assBox.className = 'assbox';
+document.getElementById('holder').appendChild(assBox);
+const ASS = { jas: null, mod: null };
+const abs = u => new URL(u, location.href).href;
+const assCan = () => typeof WebAssembly === 'object' && typeof Worker === 'function';
+function assOff() {
+	if (ASS.jas) { try { ASS.jas.destroy(); } catch (e) {} ASS.jas = null; }
+	assBox.textContent = '';
+	SUBS.ass = false;
+}
+// true: it shows; false: use the plain cues instead
+async function chooseAss(i, file, seq) {
+	const live = () => SUBS.seq === seq && SUBS.chosen === i;
+	let text = SUBS.assText && SUBS.assText[i];
+	if (text == null) {
+		for (;;) {
+			let r, t;
+			try { ({ r, text: t } = await fetchT('/api/ass?' + new URLSearchParams({ p: file, i }), {}, 60000)); } catch (e) { r = null; }
+			if (!live()) return true;
+			if (r && r.status === 202) {
+				let pr = 0; try { pr = JSON.parse(t).progress || 0; } catch (e) {}
+				SUBS.progress = pr; notify();
+				await new Promise(res => setTimeout(res, 1000));
+				if (!live()) return true;
+				continue;
+			}
+			SUBS.progress = null;
+			if (!r || !r.ok) { SUBS.noAss[i] = 1; return false; }
+			text = t; (SUBS.assText = SUBS.assText || {})[i] = t;
+			break;
+		}
+	}
+	let fonts = [];
+	try { const f = await get('/api/fonts', { p: file }, { ms: 8000, quiet: true }); fonts = (f.fonts || []).map(x => abs('/api/font?' + new URLSearchParams({ p: file, i: x.i }))); } catch (e) {}
+	if (!live()) return true;
+	try {
+		if (!ASS.mod) ASS.mod = (await import('../vendor/jassub/jassub.es.js')).default;
+		if (!live()) return true;
+		assOff();
+		const canvas = document.createElement('canvas');
+		assBox.appendChild(canvas);
+		ASS.jas = new ASS.mod({ video: el, canvas, subContent: text, fonts,
+			workerUrl: abs('/vendor/jassub/jassub-worker.js'), wasmUrl: abs('/vendor/jassub/jassub-worker.wasm'),
+			availableFonts: { inter: abs('/fonts/Inter-Regular.ttf') }, fallbackFont: 'inter', timeOffset: B.remux ? B.remux.base : 0, libassMemoryLimit: 48, libassGlyphLimit: 24 });
+		ASS.jas.addEventListener('error', () => { if (!live() || !SUBS.ass) return; console.log('jassub failed: plain cues'); SUBS.noAss[i] = 1; chooseSub(i); });
+		SUBS.ass = true;
+		notify();
+		return true;
+	} catch (e) {
+		console.log('jassub: ' + e);
+		assOff(); SUBS.noAss[i] = 1;
+		return false;
+	}
+}
+
 // the viewer's own look: size (a share of the picture's height) and how high the lines sit
 export const CUE_SIZES = [['s', 'Small', .8], ['m', 'Medium', 1], ['l', 'Large', 1.25], ['xl', 'Extra large', 1.5]];
 export const cueStyle = { size: lsGet('bpCueSize') || 'm', pos: lsGet('bpCuePos') || 'bottom' };
 function placeCues() {
+	const off = B.remux ? B.remux.base : 0;
 	for (const t of el.textTracks) {
 		if (t.mode !== 'showing' || !t.cues) continue;
-		for (const c of t.cues) { c.snapToLines = true; c.line = cueStyle.pos === 'raised' ? -4 : -2; }
+		for (const c of t.cues) {
+			c.snapToLines = true; c.line = cueStyle.pos === 'raised' ? -4 : -2;
+			// a Direct Stream's clock starts at its base: the file's times, moved back by it
+			if (c.bpS == null) { c.bpS = c.startTime; c.bpE = c.endTime; }
+			if (c.bpOff !== off) { c.bpOff = off; c.startTime = c.bpS - off; c.endTime = c.bpE - off; }
+		}
 	}
 }
+function shiftSubs() { placeCues(); if (ASS.jas) ASS.jas.timeOffset = B.remux ? B.remux.base : 0; }
 export function sizeCues() {
 	const f = (CUE_SIZES.find(x => x[0] === cueStyle.size) || CUE_SIZES[1])[2];
 	el.style.setProperty('--cue', Math.max(12, el.clientHeight * .045 * f).toFixed(1) + 'px');
@@ -314,7 +468,7 @@ export const ctl = {
 	toggle() { if (hereNow()) { if (B.parked != null) playParked(); else el.paused ? el.play().catch(() => {}) : el.pause(); } else cmd('toggle'); },
 	next() { markTrack(1); hereNow() ? (B.parked == null && browserNext(false, 1)) : cmd('next'); },
 	prev() { markTrack(-1); hereNow() ? (B.parked == null && browserNext(false, -1)) : cmd('prev'); },
-	seek(t) { if (hereNow()) { if (B.parked != null) { B.parked = t; notify(); } else el.currentTime = t; } else { cmd('seek', { t: t.toFixed(1) }); if (store.snap) { store.snap.position = t; store.snapAt = Date.now(); notify(); } } },
+	seek(t) { if (hereNow()) { if (B.parked != null) { B.parked = t; notify(); } else seekTo(t); } else { cmd('seek', { t: t.toFixed(1) }); if (store.snap) { store.snap.position = t; store.snapAt = Date.now(); notify(); } } },
 	seekRel(d) { if (hereNow()) ctl.seek(Math.max(0, Math.min(bDur(), bPos() + d))); else cmd('seekrel', { d }); },
 	chapterTo(i) { if (hereNow()) ctl.seek(B.meta.chapters[i].start); else cmd('chapterto', { i }); },
 	chapterStep(dir) { const v = view(); if (!v.chapters.length) return; const i = Math.max(0, Math.min(v.chapters.length - 1, v.chapter + dir)); ctl.chapterTo(i); },

@@ -14,12 +14,13 @@ namespace bp
 		std::string label, lang, codec;	// label as the handheld's trackLabel; lang as stored ("eng"), "" when unknown
 		std::string kind;				// "text" | "image" (picture subtitles: the handheld only)
 		bool external = false, isDefault = false, forced = false;
+		bool styled = false;			// ASS/SSA: the browser can draw it with libass (JASSUB) in its own look
 		int stream = -1;				// embedded: libavformat's stream index
 		std::string file;				// external: the real path
 	};
 
 	// the file's audio tracks, labelled as the handheld's menu does
-	struct AudioEntry { int i = 0; std::string label; bool isDefault = false; };
+	struct AudioEntry { int i = 0; std::string label, codec; int channels = 0, stream = -1; bool isDefault = false; };
 	std::vector<AudioEntry> listAudio(const MediaInfo& m);
 	std::vector<SubEntry> listSubtitles(const std::string& real, const MediaInfo& m);
 
@@ -33,4 +34,12 @@ namespace bp
 		std::string body, type;	// type: the content type
 	};
 	SubsAnswer subtitleVtt(const std::string& real, const SubEntry& sub);
+	// an ASS/SSA track as the whole script (header, styles, events) for JASSUB: an external file as it is, an embedded
+	// track read out of the file once (202 meanwhile, as subtitleVtt) and cached as .ass
+	SubsAnswer subtitleAss(const std::string& real, const SubEntry& sub);
+
+	// the fonts a file carries (Matroska attachments) for its ASS subtitles; i is libavformat's stream index
+	struct FontAttachment { int i = 0; std::string name, mime; size_t size = 0; };
+	std::vector<FontAttachment> listFonts(const std::string& real);
+	bool fontAttachment(const std::string& real, int i, std::string& bytes, std::string& mime);
 }

@@ -1,5 +1,5 @@
 import { html, useState, useEffect, useLayoutEffect, useRef, useMemo, useCallback } from '../vendor/htm-preact-standalone.module.js';
-import { B, CUE_SIZES, SUBS, browserPlay, chooseSub, continueHere, ctl, cueStyle, el, handoffToHandheld, playParked, probe1, probeOK, setBrowserVol, setCueStyle, setTarget, sizeCues, view } from './browser-player.js';
+import { B, CUE_SIZES, SUBS, assBox, browserPlay, chooseAudio, chooseSub, directAudio, nativeAudio, playingAudio, streamWhy, continueHere, ctl, cueStyle, el, handoffToHandheld, playParked, probe1, probeOK, setBrowserVol, setCueStyle, setTarget, sizeCues, view } from './browser-player.js';
 import { AppMenu, Art, Empty, MoreDots, Seek, coverUrl, openSheet, palOf, useHeld, useMedia, useTick } from './components.js';
 import { NO_HERE, NO_HERE_WHY, Q_DESK, Q_WIDE, lsGet, lsSet, notify, phoneNow, set, store, useStore } from './store.js';
 import { baseName, chapterTitle, dirName, fmtDate, fmtSize, fmtTime, isIOS, kindOfName, throttled, titleFor, touchOnly, userTap } from './util.js';
@@ -157,8 +157,8 @@ function Media({ v, off, immersive, onCollapse }) {
 	// the one media element shows in the slot. It goes back to #holder as the slot leaves, before Preact takes the slot
 	// out (a ref is let go first; an effect's cleanup comes after): a media element out of the document is paused
 	const slot = useCallback(n => {
-		if (n) { n.prepend(el); sizeCues(); }
-		else if (el.parentNode && el.parentNode.id !== 'holder') document.getElementById('holder').appendChild(el);
+		if (n) { n.prepend(el); el.after(assBox); sizeCues(); }
+		else if (el.parentNode && el.parentNode.id !== 'holder') { const h = document.getElementById('holder'); h.appendChild(el); h.appendChild(assBox); }
 	}, []);
 	const live = v.here && v.kind === 'video';
 	const fsEl = useFullscreen(), fs = !!fsEl && fsEl === box.current;
@@ -428,6 +428,7 @@ function DetailsTab({ v }) {
 		['Bitrate', kbps(m.bitrate)],
 		(vid || (m.audio || []).length > 1) && ['Audio tracks', m.audio ? '' + m.audio.length : ''],
 		vid && ['Subtitles', m.subs ? (m.subs.length ? '' + m.subs.length : 'None') : ''],
+		vid && v.here && B.meta && B.meta.p === p && ['Playing here', B.remux ? 'Direct Stream (the video and audio track ' + (B.remux.a + 1) + ' copied, not converted)' : 'Direct Play (the file as it is)'],
 		v.chapters.length > 0 && ['Chapters', '' + v.chapters.length],
 		['Size', row && row.size ? fmtSize(row.size) : m.size ? fmtSize(m.size) : ''],
 		['Modified', row && row.mtime ? fmtDate(row.mtime) : ''],
@@ -567,16 +568,24 @@ function SubStyle() {
 		<p class="note">How plain subtitles (SRT, VTT…) look. Styled ones (ASS) keep theirs.</p></div>`;
 }
 function BrowserAudio() {
+	useStore();
 	const m = B.meta && B.meta.media, list = m && m.audio || [];
-	const at = el.audioTracks, can = at && at.length > 1;
-	const playing = can ? [...at].findIndex(t => t.enabled) : Math.max(0, list.findIndex(a => a.default));
+	const native = nativeAudio(), playing = playingAudio(), def = directAudio(m);
 	const [want, setWant] = useState(-1);
 	if (!list.length) return html`<p class="note pad">${m ? 'This video has no sound.' : 'Loading…'}</p>`;
 	if (list.length === 1) return html`<div class="radios"><${TrackRow} on=${true} label=${list[0].label} tag="Playing here" /></div><p class="note pad">Only one audio track</p>`;
-	const pick = i => { if (can) { [...at].forEach((t, j) => t.enabled = j === i); notify(); } else setWant(i === playing ? -1 : i); };
-	return html`<div class="radios" role="radiogroup" aria-label="Audio track">${list.map((a, i) => html`<${TrackRow} on=${want >= 0 ? i === want : i === playing} label=${a.label} tag=${i === playing ? 'Playing here' : ''} onClick=${() => pick(i)} />`)}</div>
-		${!can && html`<div class="track-note"><p class="note">This browser plays the first audio track only.</p>
-			<button class="btn sm ${want >= 0 ? 'primary' : ''}" onClick=${() => handoffToHandheld(want >= 0 ? list[want].i + 1 : undefined)}><${Icon} n="card" k=${2} />${want >= 0 ? 'Play this one on the handheld' : 'Change it on the handheld'}</button></div>`}`;
+	// Safari switches in the file itself; elsewhere the default track is the file as it is (Direct Play) and the others
+	// come as a Direct Stream; one the browser can't play is the handheld's
+	const why = i => native || i === def ? '' : streamWhy(m, i);
+	const switching = B.switching && B.switching.a;
+	const pick = i => { if (why(i)) { setWant(want === i ? -1 : i); return; } setWant(-1); chooseAudio(i); };
+	const subOf = (a, i) => why(i) ? why(i) : switching === i ? 'Switching…' : native ? '' : i === def ? 'Direct Play' : 'Direct Stream';
+	const blocked = want >= 0 && why(want);
+	return html`<div class="radios" role="radiogroup" aria-label="Audio track">${list.map((a, i) => html`<${TrackRow} on=${want >= 0 ? i === want : switching != null ? i === switching : i === playing}
+			label=${a.label} sub=${subOf(a, i)} tag=${i === playing && switching == null ? 'Playing here' : ''} onClick=${() => pick(i)} />`)}</div>
+		${blocked && html`<div class="track-note"><p class="note">${list[want].label}: ${why(want)}.</p>
+			<button class="btn sm primary" onClick=${() => handoffToHandheld(list[want].i + 1)}><${Icon} n="card" k=${2} />Play this one on the handheld</button></div>`}
+		${!native && B.remux && html`<p class="note pad">Direct Stream: the handheld sends the video and this audio track as they are, without converting them. Seeking takes a moment.</p>`}`;
 }
 function BrowserSubs() {
 	useStore();
@@ -586,15 +595,16 @@ function BrowserSubs() {
 	const failed = Object.values(SUBS.failed)[0];
 	return html`${list.length ? html`<div class="radios" role="radiogroup" aria-label="Subtitles">
 			<${TrackRow} on=${cur < 0} label="Off" onClick=${() => pick(-1)} />
-			${text.map(x => html`<${TrackRow} on=${x.i === cur} label=${x.label} sub=${x.i === cur && SUBS.progress != null ? 'Preparing subtitles… ' + Math.round(SUBS.progress * 100) + '%' : x.external ? 'From a file beside the video' : ''} onClick=${() => pick(x.i)} />`)}
-			${pics.map(x => html`<${TrackRow} on=${false} disabled=${true} label=${x.label} sub="Picture subtitles show on the handheld only" />`)}</div>`
+			${text.map(x => html`<${TrackRow} on=${x.i === cur} label=${x.label} sub=${x.i === cur && SUBS.progress != null ? 'Preparing subtitles… ' + Math.round(SUBS.progress * 100) + '%'
+				: [x.styled ? (SUBS.noAss[x.i] ? 'Styled (ASS), shown plain here' : 'Styled (ASS)') : '', x.external ? 'From a file beside the video' : ''].filter(Boolean).join(' · ')} onClick=${() => pick(x.i)} />`)}
+			${pics.map(x => html`<${TrackRow} on=${false} disabled=${true} label=${x.label} sub="Shows on the handheld only (picture subtitles)" />`)}</div>`
 		: html`<p class="note pad">${B.meta && B.meta.media ? 'No subtitles in this file' : 'Loading…'}</p>`}
 		${failed && html`<p class="note pad err" role="alert">${failed}</p>`}
 		${pics.length > 0 && html`<div class="track-note"><button class="btn sm" onClick=${() => handoffToHandheld()}><${Icon} n="card" k=${2} />Watch on handheld</button></div>`}
 		<div class="substyle here">
 			<div class="ss-row"><div class="ss-lab" id="cue-size">Size</div><div class="chips" role="radiogroup" aria-labelledby="cue-size">${CUE_SIZES.map(([k, l]) => html`<button class="chipbtn" role="radio" aria-checked=${cueStyle.size === k} onClick=${() => setCueStyle('size', k)}>${l}</button>`)}</div></div>
 			<div class="ss-row"><div class="ss-lab" id="cue-pos">Position</div><div class="chips" role="radiogroup" aria-labelledby="cue-pos">${[['bottom', 'Bottom'], ['raised', 'Raised']].map(([k, l]) => html`<button class="chipbtn" role="radio" aria-checked=${cueStyle.pos === k} onClick=${() => setCueStyle('pos', k)}>${l}</button>`)}</div></div>
-			<p class="note">How subtitles look in this browser, on this device.</p></div>`;
+			<p class="note">${SUBS.ass ? 'These subtitles are styled (ASS): they keep their own look. Size and position apply to plain ones (SRT, VTT…).' : 'How subtitles look in this browser, on this device.'}</p></div>`;
 }
 
 /* ---- sound: equalizer and effects ---- */

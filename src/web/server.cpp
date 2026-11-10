@@ -125,6 +125,7 @@ namespace bp
 			if (ext == ".txt") return "text/plain; charset=utf-8";
 			if (ext == ".png") return "image/png";
 			if (ext == ".json") return "application/json";
+			if (ext == ".wasm") return "application/wasm";
 			return "application/octet-stream";
 		}
 

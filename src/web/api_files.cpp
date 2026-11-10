@@ -7,6 +7,7 @@
 #include "tracks.h"
 #include "playlist.h"
 #include "web/probe.h"
+#include "web/remux.h"
 #include "web/subs.h"
 #include "webmedia.h"
 #include "webpath.h"
@@ -20,7 +21,9 @@
 #include <cstring>
 #include <dirent.h>
 #include <fcntl.h>
+#include <map>
 #include <memory>
+#include <mutex>
 #include <random>
 #include <sys/stat.h>
 #include <sys/statvfs.h>
@@ -563,12 +566,13 @@ namespace bp
 			optNum("width", m.width); optNum("height", m.height); optNum("fps", m.fps);
 			optNum("videoBitrate", (double)m.videoBitrate); optStr("pixFmt", m.pixFmt);
 			w.key("audio").arr();
-			for (auto& a : listAudio(m)) w.obj().key("i").num(a.i).key("label").str(a.label).key("default").boolean(a.isDefault).end();
+			for (auto& a : listAudio(m))
+				w.obj().key("i").num(a.i).key("label").str(a.label).key("default").boolean(a.isDefault).key("codec").str(a.codec).key("channels").num(a.channels).end();
 			w.end().key("subs").arr();
 			auto subs = listSubtitles(real, m);
 			for (auto& s : subs)
 				w.obj().key("i").num(s.i).key("label").str(s.label).key("lang").str(s.lang).key("codec").str(s.codec)
-					.key("kind").str(s.kind).key("external").boolean(s.external).end();
+					.key("kind").str(s.kind).key("external").boolean(s.external).key("styled").boolean(s.styled).end();
 			w.end();
 			// the subtitle to start with: the one the handheld remembers (resume.tsv's last language), else a forced
 			// track, else none. Only a text one can show
@@ -616,6 +620,110 @@ namespace bp
 			if (a.status == 200) res.set_content(a.body, a.type);
 			else WebServer::json(res, a.body, a.status);
 			res.status = a.status;
+		});
+
+		// an ASS/SSA track as the whole script, for JASSUB: 200 the text, 202 {"progress"} while an embedded one is read
+		// out of the file, 415 not an ASS track
+		svr.Get("/api/ass", [&ws](const httplib::Request& req, httplib::Response& res) {
+			std::string real;
+			if (!ws.resolve(req.get_param_value("p"), real, false, res)) return;
+			MediaInfo m;
+			if (!probeMedia(real, m)) return WebServer::fail(res, 422, "not a media file");
+			auto subs = listSubtitles(real, m);
+			std::string is = req.get_param_value("i");
+			int i = is.empty() || is.find_first_not_of("0123456789") != std::string::npos ? -1 : atoi(is.c_str());
+			if (i < 0 || i >= (int)subs.size()) return WebServer::fail(res, 404, "no such subtitle track");
+			SubsAnswer a = subtitleAss(real, subs[i]);
+			res.set_header("Cache-Control", "no-store");
+			if (a.status == 200) res.set_content(a.body, a.type);
+			else WebServer::json(res, a.body, a.status);
+			res.status = a.status;
+		});
+
+		// the fonts inside the file (Matroska attachments) for its ASS subtitles: {fonts: [{i, name, size}]}; one of
+		// them by /api/font?p=&i=
+		svr.Get("/api/fonts", [&ws](const httplib::Request& req, httplib::Response& res) {
+			std::string real;
+			if (!ws.resolve(req.get_param_value("p"), real, false, res)) return;
+			JsonWriter w;
+			w.obj().key("fonts").arr();
+			for (auto& f : listFonts(real)) w.obj().key("i").num(f.i).key("name").str(f.name).key("size").num((double)f.size).end();
+			w.end().end();
+			WebServer::json(res, w.out());
+		});
+		svr.Get("/api/font", [&ws](const httplib::Request& req, httplib::Response& res) {
+			std::string real, bytes, mime;
+			if (!ws.resolve(req.get_param_value("p"), real, false, res)) return;
+			std::string is = req.get_param_value("i");
+			int i = is.empty() || is.find_first_not_of("0123456789") != std::string::npos ? -1 : atoi(is.c_str());
+			if (!fontAttachment(real, i, bytes, mime)) return WebServer::fail(res, 404, "no such font");
+			res.set_header("Cache-Control", "private, max-age=3600");
+			res.set_content(bytes, mime);
+		});
+
+		// Direct Stream: the video with audio track a (the /api/media audio list's i), copied into fragmented MP4 from
+		// the keyframe at or before t. /api/remux-start says where that is ({start}) or why it can't ({error}, 422);
+		// /api/remux streams it, one per page tab (tab=): a newer one ends the older
+		auto remuxArgs = [&ws](const httplib::Request& req, httplib::Response& res, std::string& real, int& stream, double& t) {
+			if (!ws.resolve(req.get_param_value("p"), real, false, res)) return false;
+			MediaInfo m;
+			if (!probeMedia(real, m))
+			{
+				WebServer::fail(res, 422, "not a media file");
+				return false;
+			}
+			std::string as = req.get_param_value("a");
+			int a = as.empty() || as.find_first_not_of("0123456789") != std::string::npos ? -1 : atoi(as.c_str());
+			if (a < 0 || a >= (int)m.audio.size())
+			{
+				WebServer::fail(res, 404, "no such audio track");
+				return false;
+			}
+			stream = m.audio[a].index;
+			t = std::max(0.0, atof(req.get_param_value("t").c_str()));
+			if (!(t < 1e7)) t = 0;
+			return true;
+		};
+		svr.Get("/api/remux-start", [remuxArgs](const httplib::Request& req, httplib::Response& res) {
+			std::string real, why;
+			int stream = -1;
+			double t = 0, start = 0;
+			if (!remuxArgs(req, res, real, stream, t)) return;
+			if (!remuxStart(real, stream, t, start, why)) return WebServer::fail(res, 422, why);
+			JsonWriter w;
+			w.obj().key("start").num(start).end();
+			WebServer::json(res, w.out());
+		});
+		svr.Get("/api/remux", [remuxArgs](const httplib::Request& req, httplib::Response& res) {
+			std::string real;
+			int stream = -1;
+			double t = 0;
+			if (!remuxArgs(req, res, real, stream, t)) return;
+			// one stream per tab: the newest wins (a seek, a switch of track)
+			static std::mutex lock;
+			static std::map<std::string, std::shared_ptr<std::atomic<bool>>>* byTab = new std::map<std::string, std::shared_ptr<std::atomic<bool>>>;
+			auto stop = std::make_shared<std::atomic<bool>>(false);
+			std::string tab = req.get_param_value("tab").substr(0, 64);
+			{
+				std::lock_guard<std::mutex> g(lock);
+				auto& cur = (*byTab)[tab];
+				if (cur) *cur = true;
+				cur = stop;
+			}
+			res.set_header("Cache-Control", "no-store");
+			res.set_chunked_content_provider("video/mp4",
+				[real, stream, t, stop](size_t, httplib::DataSink& sink) {
+					std::string err;
+					remuxRun(real, stream, t, [&sink](const uint8_t* b, size_t n) { return sink.write((const char*)b, n); },
+						[stop] { return stop->load(); }, err);
+					sink.done();
+					return true;
+				},
+				[tab, stop](bool) {
+					std::lock_guard<std::mutex> g(lock);
+					auto it = byTab->find(tab);
+					if (it != byTab->end() && it->second == stop) byTab->erase(it);
+				});
 		});
 
 		svr.Get("/api/file", [&ws](const httplib::Request& req, httplib::Response& res) {

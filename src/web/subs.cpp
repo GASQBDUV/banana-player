@@ -6,6 +6,7 @@
 #include "webmedia.h"
 #include <algorithm>
 #include <condition_variable>
+#include <cstring>
 #include <cstdio>
 #include <deque>
 #include <dirent.h>
@@ -258,11 +259,91 @@ namespace bp
 			return true;
 		}
 
+		std::string assTime(double t)
+		{
+			if (t < 0) t = 0;
+			long long cs = (long long)(t * 100 + 0.5);
+			char b[32];
+			snprintf(b, sizeof b, "%lld:%02lld:%02lld.%02lld", cs / 360000, cs / 6000 % 60, cs / 100 % 60, cs % 100);
+			return b;
+		}
+
+		// an ASS/SSA track as a whole script, as libass (JASSUB, in the browser) reads it: the header the container
+		// keeps (Script Info, styles) and a Dialogue line per packet. Packets are copied, not decoded: Matroska keeps
+		// them as "ReadOrder,Layer,Style,Name,MarginL,MarginR,MarginV,Effect,Text"
+		bool extractAss(const std::string& path, int index, std::string& out, std::string& err, const std::function<void(double)>& progress)
+		{
+			AVFormatContext* f = nullptr;
+			if (avformat_open_input(&f, path.c_str(), nullptr, nullptr) < 0)
+			{
+				err = "can't open the file";
+				return false;
+			}
+			struct Closer { AVFormatContext*& f; ~Closer() { avformat_close_input(&f); } } closer{f};
+			if (index < 0 || index >= (int)f->nb_streams || f->streams[index]->codecpar->codec_type != AVMEDIA_TYPE_SUBTITLE)
+			{
+				err = "no such subtitle track";
+				return false;
+			}
+			AVStream* st = f->streams[index];
+			std::string header = st->codecpar->extradata ? std::string((const char*)st->codecpar->extradata, st->codecpar->extradata_size) : "";
+			while (!header.empty() && header.back() == '\0') header.pop_back();
+			if (header.find("[Script Info]") == std::string::npos) header = "[Script Info]\nScriptType: v4.00+\n\n" + header;
+			if (header.find("[Events]") == std::string::npos)
+				header += "\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n";
+			if (header.back() != '\n') header += '\n';
+			for (unsigned i = 0; i < f->nb_streams; i++)
+				if ((int)i != index) f->streams[i]->discard = AVDISCARD_ALL;
+			struct stat sb;
+			double total = stat(path.c_str(), &sb) == 0 && sb.st_size > 0 ? (double)sb.st_size : 0;
+			struct Line { long long order; double start; std::string text; };
+			std::vector<Line> lines;
+			AVPacket* pkt = av_packet_alloc();
+			int lastPct = -1;
+			while (av_read_frame(f, pkt) >= 0)
+			{
+				if (total > 0)
+				{
+					int pct = (int)(100.0 * avio_tell(f->pb) / total);
+					if (pct != lastPct)
+					{
+						lastPct = pct;
+						progress(std::min(1.0, pct / 100.0));
+					}
+				}
+				if (pkt->stream_index == index && pkt->size > 0 && pkt->pts != AV_NOPTS_VALUE)
+				{
+					std::string d((const char*)pkt->data, pkt->size);
+					while (!d.empty() && (d.back() == '\0' || d.back() == '\n' || d.back() == '\r')) d.pop_back();
+					double start = pkt->pts * av_q2d(st->time_base), end = start + (pkt->duration > 0 ? pkt->duration * av_q2d(st->time_base) : 3);
+					if (d.compare(0, 9, "Dialogue:") == 0) lines.push_back({(long long)lines.size(), start, d});
+					else
+					{
+						// ReadOrder, then Layer, then the rest from Style on
+						size_t c1 = d.find(','), c2 = c1 == std::string::npos ? c1 : d.find(',', c1 + 1);
+						if (c2 != std::string::npos)
+						{
+							long long order = atoll(d.substr(0, c1).c_str());
+							lines.push_back({order, start, "Dialogue: " + d.substr(c1 + 1, c2 - c1 - 1) + "," + assTime(start) + "," + assTime(end) + "," + d.substr(c2 + 1)});
+						}
+					}
+				}
+				av_packet_unref(pkt);
+			}
+			av_packet_free(&pkt);
+			// the file's order (ReadOrder) is libass's order for lines that overlap
+			std::stable_sort(lines.begin(), lines.end(), [](const Line& a, const Line& b) { return a.order < b.order; });
+			out = header;
+			for (auto& l : lines) out += l.text + "\n";
+			return true;
+		}
+
 		// ---- the worker: one extraction at a time -----------------------------------------------------------------
 		struct Job
 		{
 			std::string path, cacheFile;
 			int index = 0;
+			bool ass = false;	// the whole ASS script, not WebVTT
 			double progress = 0;
 			bool done = false, failed = false;
 			std::string error;
@@ -300,10 +381,11 @@ namespace bp
 					job = w.jobs[key];
 				}
 				std::string vtt, err;
-				bool ok = extract(job.path, job.index, vtt, err, [&](double p) {
+				auto prog = [&](double p) {
 					std::lock_guard<std::mutex> g(w.m);
 					w.jobs[key].progress = p;
-				});
+				};
+				bool ok = job.ass ? extractAss(job.path, job.index, vtt, err, prog) : extract(job.path, job.index, vtt, err, prog);
 				if (ok)
 				{
 					std::string dir = dirName(job.cacheFile);
@@ -361,6 +443,9 @@ namespace bp
 			e.i = n;
 			e.label = trackLabel(t, ++n);
 			e.isDefault = anyDefault ? a.isDefault : e.i == 0;
+			e.codec = a.codec;
+			e.channels = a.channels;
+			e.stream = a.index;
 			out.push_back(e);
 		}
 		return out;
@@ -384,6 +469,7 @@ namespace bp
 			e.lang = s.lang;
 			e.codec = s.codec;
 			e.kind = textCodec(s.codec) ? "text" : "image";
+			e.styled = s.codec == "ass" || s.codec == "ssa";
 			e.isDefault = s.isDefault;
 			e.forced = s.forced;
 			e.stream = s.index;
@@ -418,11 +504,80 @@ namespace bp
 			e.lang = t.lang;
 			e.codec = t.codec;
 			e.kind = text ? "text" : "image";
+			e.styled = ext == "ass" || ext == "ssa";
 			e.external = true;
 			e.file = dirName(real) + "/" + name;
 			out.push_back(e);
 		}
 		return out;
+	}
+
+	namespace
+	{
+		// an embedded track out of the cache, else queued for the worker (202 with its progress meanwhile)
+		SubsAnswer embedded(const std::string& real, const SubEntry& sub, bool ass)
+		{
+			SubsAnswer a;
+			a.type = "application/json; charset=utf-8";
+			auto failWith = [&](int status, const std::string& msg) {
+				a.status = status;
+				JsonWriter w;
+				w.obj().key("error").str(msg).end();
+				a.body = w.out();
+				return a;
+			};
+			const std::string ext = ass ? ".ass" : ".vtt", type = ass ? "text/plain; charset=utf-8" : cueTypeOf("");
+			struct stat st;
+			if (stat(real.c_str(), &st) != 0) return failWith(404, "not found");
+			std::string key = real + '\n' + std::to_string((long long)st.st_mtime) + '\n' + std::to_string((long long)st.st_size) + '\n' + std::to_string(sub.stream) + ext;
+			std::string cacheFile = cacheDir() + "/subs/" + hashOf(key) + ext;
+			std::string cached;
+			if (readFile(cacheFile, cached, (size_t)64 << 20))
+			{
+				utimes(cacheFile.c_str(), nullptr);	// most recent for the LRU
+				a.status = 200;
+				a.body = cached;
+				a.type = type;
+				return a;
+			}
+
+			Worker& w = worker();
+			std::lock_guard<std::mutex> g(w.m);
+			auto it = w.jobs.find(key);
+			if (it != w.jobs.end() && it->second.failed)
+			{
+				std::string err = it->second.error;
+				w.jobs.erase(it);	// the next request tries again
+				return failWith(500, err.empty() ? "couldn't read the subtitles" : err);
+			}
+			if (it != w.jobs.end() && it->second.done)
+			{
+				// finished but the cache file isn't there (trimmed since): run it again
+				w.jobs.erase(it);
+				it = w.jobs.end();
+			}
+			if (it == w.jobs.end())
+			{
+				Job j;
+				j.path = real;
+				j.index = sub.stream;
+				j.ass = ass;
+				j.cacheFile = cacheFile;
+				w.jobs[key] = j;
+				w.queue.push_back(key);
+				if (!w.running)
+				{
+					w.running = true;
+					std::thread(runWorker).detach();
+				}
+				it = w.jobs.find(key);
+			}
+			JsonWriter jw;
+			jw.obj().key("progress").num(it->second.progress).end();
+			a.status = 202;
+			a.body = jw.out();
+			return a;
+		}
 	}
 
 	SubsAnswer subtitleVtt(const std::string& real, const SubEntry& sub)
@@ -457,54 +612,94 @@ namespace bp
 			return a;
 		}
 
-		struct stat st;
-		if (stat(real.c_str(), &st) != 0) return failWith(404, "not found");
-		std::string key = real + '\n' + std::to_string((long long)st.st_mtime) + '\n' + std::to_string((long long)st.st_size) + '\n' + std::to_string(sub.stream);
-		std::string cacheFile = cacheDir() + "/subs/" + hashOf(key) + ".vtt";
-		std::string cached;
-		if (readFile(cacheFile, cached, (size_t)64 << 20))
+		return embedded(real, sub, false);
+	}
+
+	SubsAnswer subtitleAss(const std::string& real, const SubEntry& sub)
+	{
+		SubsAnswer a;
+		a.type = "application/json; charset=utf-8";
+		if (!sub.styled)
 		{
-			utimes(cacheFile.c_str(), nullptr);	// most recent for the LRU
-			a.status = 200;
-			a.body = cached;
-			a.type = cueTypeOf("");
+			a.status = 415;
+			a.body = JsonWriter().obj().key("error").str("Not an ASS track").end().out();
 			return a;
 		}
-
-		Worker& w = worker();
-		std::lock_guard<std::mutex> g(w.m);
-		auto it = w.jobs.find(key);
-		if (it != w.jobs.end() && it->second.failed)
+		if (sub.external)
 		{
-			std::string err = it->second.error;
-			w.jobs.erase(it);	// the next request tries again
-			return failWith(500, err.empty() ? "couldn't read the subtitles" : err);
-		}
-		if (it != w.jobs.end() && it->second.done)
-		{
-			// finished but the cache file isn't there (trimmed since): run it again
-			w.jobs.erase(it);
-			it = w.jobs.end();
-		}
-		if (it == w.jobs.end())
-		{
-			Job j;
-			j.path = real;
-			j.index = sub.stream;
-			j.cacheFile = cacheFile;
-			w.jobs[key] = j;
-			w.queue.push_back(key);
-			if (!w.running)
+			if (!readFile(sub.file, a.body, (size_t)16 << 20))
 			{
-				w.running = true;
-				std::thread(runWorker).detach();
+				a.status = 404;
+				a.body = JsonWriter().obj().key("error").str("can't read the subtitle file").end().out();
+				return a;
 			}
-			it = w.jobs.find(key);
+			a.status = 200;
+			a.type = "text/plain; charset=utf-8";
+			return a;
 		}
-		JsonWriter jw;
-		jw.obj().key("progress").num(it->second.progress).end();
-		a.status = 202;
-		a.body = jw.out();
-		return a;
+		return embedded(real, sub, true);
+	}
+
+	namespace
+	{
+		bool isFont(AVStream* s)
+		{
+			if (s->codecpar->codec_type != AVMEDIA_TYPE_ATTACHMENT || !s->codecpar->extradata_size) return false;
+			std::string mime = lower(s->metadata ? (av_dict_get(s->metadata, "mimetype", nullptr, 0) ? av_dict_get(s->metadata, "mimetype", nullptr, 0)->value : "") : "");
+			std::string name = lower(s->metadata && av_dict_get(s->metadata, "filename", nullptr, 0) ? av_dict_get(s->metadata, "filename", nullptr, 0)->value : "");
+			auto ends = [&](const char* e) { size_t n = strlen(e); return name.size() >= n && name.compare(name.size() - n, n, e) == 0; };
+			return mime.find("font") != std::string::npos || mime.find("truetype") != std::string::npos || mime.find("opentype") != std::string::npos ||
+				ends(".ttf") || ends(".otf") || ends(".ttc") || ends(".woff") || ends(".woff2");
+		}
+
+		// attachments are in Matroska's header: opening is enough
+		AVFormatContext* openHeader(const std::string& real)
+		{
+			AVFormatContext* f = nullptr;
+			AVDictionary* o = nullptr;
+			av_dict_set(&o, "probesize", "1048576", 0);
+			int r = avformat_open_input(&f, real.c_str(), nullptr, &o);
+			av_dict_free(&o);
+			return r < 0 ? nullptr : f;
+		}
+	}
+
+	std::vector<FontAttachment> listFonts(const std::string& real)
+	{
+		std::vector<FontAttachment> out;
+		AVFormatContext* f = openHeader(real);
+		if (!f) return out;
+		for (unsigned i = 0; i < f->nb_streams; i++)
+		{
+			AVStream* s = f->streams[i];
+			if (!isFont(s)) continue;
+			FontAttachment a;
+			a.i = (int)i;
+			AVDictionaryEntry* n = av_dict_get(s->metadata, "filename", nullptr, 0);
+			AVDictionaryEntry* m = av_dict_get(s->metadata, "mimetype", nullptr, 0);
+			a.name = n && n->value ? n->value : "";
+			a.mime = m && m->value ? m->value : "";
+			a.size = (size_t)s->codecpar->extradata_size;
+			out.push_back(a);
+		}
+		avformat_close_input(&f);
+		return out;
+	}
+
+	bool fontAttachment(const std::string& real, int i, std::string& bytes, std::string& mime)
+	{
+		AVFormatContext* f = openHeader(real);
+		if (!f) return false;
+		bool ok = i >= 0 && i < (int)f->nb_streams && isFont(f->streams[i]);
+		if (ok)
+		{
+			AVStream* s = f->streams[i];
+			bytes.assign((const char*)s->codecpar->extradata, s->codecpar->extradata_size);
+			// a font's own signature decides the type (Matroska's mimetypes are all over the place)
+			mime = bytes.compare(0, 4, "OTTO") == 0 ? "font/otf" : bytes.compare(0, 4, "ttcf") == 0 ? "font/collection"
+				: bytes.compare(0, 4, "wOFF") == 0 ? "font/woff" : bytes.compare(0, 4, "wOF2") == 0 ? "font/woff2" : "font/ttf";
+		}
+		avformat_close_input(&f);
+		return ok;
 	}
 }

@@ -1,5 +1,5 @@
 import { TAB_ID, set, store } from './store.js';
-import { B, browserNext, el, handheldOpen, handheldToggle, handheldTookOver, updateMediaSession } from './browser-player.js';
+import { B, bPos, browserNext, el, handheldOpen, handheldToggle, handheldTookOver, seekTo, updateMediaSession } from './browser-player.js';
 import { markUsed } from './plshared.js';
 import { C, connFail, goDown, signOutHere } from './connection.js';
 import { markTrack } from './toasts.js';
@@ -53,7 +53,7 @@ export function openSSE() {
 	// a song or video picked on the handheld while this page is the sound: it plays here (or, one it can't, is refused)
 	on('handheld-open', d => handheldOpen(d));
 	// the handheld seeked while this page plays its file: here too
-	on('handheld-seek', d => { if (B.active && B.meta && B.parked == null && typeof d.t === 'number' && store.snap && store.snap.path === B.meta.p && Math.abs(el.currentTime - d.t) > .5) el.currentTime = d.t; });
+	on('handheld-seek', d => { if (B.active && B.meta && B.parked == null && typeof d.t === 'number' && store.snap && store.snap.path === B.meta.p && Math.abs(bPos() - d.t) > .5) seekTo(d.t); });
 	es.onerror = () => {
 		if (es !== me || store.conn !== 'ok') return;
 		if (heard) return connFail();
