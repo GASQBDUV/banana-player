@@ -54,7 +54,7 @@ namespace bp
 		void tick(Player& p);
 		// something moves by itself (a flick, a playlist's rows scrolling under a dragged one): the loop should come
 		// round often
-		bool animating() const { return playHoldAt != 0 || flickAt != 0 || plDrag.on || stripT0 != 0 || likePopAt != 0 || addFlashUntil != 0 || landFlashUntil != 0; }
+		bool animating() const { return playHoldAt != 0 || flickAt != 0 || plDrag.on || stripT0 != 0 || likePopAt != 0 || addFlashUntil != 0 || landFlashUntil != 0 || listPulseAt != 0; }
 		// the header's playing mark moves (something plays behind the browser, the bottom panel lit): the loop comes
 		// round a few times a second for its frames
 		bool markMoving() const { return markAnim && panel.on(); }
@@ -78,7 +78,8 @@ namespace bp
 		// the player shown (a pick, Now playing, SELECT, a photo...): where it was opened from is kept, for the way back
 		void showPlayer()
 		{
-			if (!onPlayer) playerBack = {true, page, inMenu, menuTab, setGroup, cursor, scroll, menuReturnDir, menuReturnCursor, menuReturnScroll};
+			if (!onPlayer) playerBack = {true, page, inMenu, menuTab, setGroup, cursor, scroll, menuReturnDir, menuReturnCursor, menuReturnScroll, browseDir, browseTab};
+			if (!onPlayer) listPulseArm = true;	// (a playlist's song: the List key glows twice, drawMain)
 			onPlayer = true;
 			page = Page::Main;
 			inMenu = false;
@@ -684,6 +685,7 @@ namespace bp
 		int playOnScroll = 0;
 		// Show in folder from the Playing tab: what plays closed, then its folder shown (showBrowser)
 		std::string showAfterLeave;
+		bool showSourceAfterLeave = false;	// List (Y) on a playlist's song: the player left for that playlist's page
 		// Like: toggled (the heart, START's Playing tab, L3), the heart's pop and the top panel's card
 		void likeNow(Player& p);
 		void likeCard(Player& p, bool liked, const std::string& title);
@@ -1026,6 +1028,8 @@ namespace bp
 			int menuTab = 0, setGroup = -1, cursor = 0, scroll = 0;
 			std::string menuReturnDir;
 			int menuReturnCursor = 0, menuReturnScroll = 0;
+			std::string browseDir;	// the folder or playlist page it was opened from (a playlist's play moves the list's)
+			int browseTab = 0;
 		} playerBack;
 		// back to what plays (SELECT on a browse page, the bar, Now playing, B at Home): the player. False: nothing plays
 		bool goNowPlaying(Player& p);
@@ -1050,6 +1054,12 @@ namespace bp
 		int rowChip(int i) const;	// the chip of the browser's row i (0 none)
 		// back from the player: the playing file's row (and the bar's edge) lit a moment
 		Uint32 landFlashUntil = 0;
+		// the player opened on a playlist's first song: its List key (the way to the playlist) glows a subtle yellow
+		// twice
+		bool listPulseArm = false;
+		std::string listPulsedFor;	// the playlist it glowed for (cleared when something else plays)
+		Uint32 listPulseAt = 0;
+		static constexpr Uint32 LIST_PULSE_MS = 1400;
 		bool markAnim = false;	// drawBattery drew the playing mark moving
 		int markW(const Player& p) const;	// its room in the header (0 none)
 		bool markLive(const Player& p) const;	// it moves: what plays plays (a page's: as the page does)

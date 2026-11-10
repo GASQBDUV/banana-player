@@ -52,14 +52,23 @@ namespace bp
 		PlayerBack b = playerBack;
 		playerBack = PlayerBack();
 		bool menuGone = b.inMenu && b.menuTab == TAB_PLAYING && !(p.playing() && !p.playingPhoto());
-		if (!b.set || !showAfterLeave.empty() || b.page == Page::Main || menuGone)
+		bool toSource = showSourceAfterLeave;
+		showSourceAfterLeave = false;
+		if (!b.set || !showAfterLeave.empty() || b.page == Page::Main || menuGone || toSource)
 		{
+			if (toSource) inMenu = false;
 			showBrowser(p, lastPlayed, from, index);
 			return;
 		}
 		// the page as it was left: nothing of the browser's was touched meanwhile but the cursor and the scroll, which
 		// the player's pages share (and the menu's way back, which START over the player set again)
 		onPlayer = false;
+		// (the list it was on: back in it if a play moved it, a playlist's page say; the cursor and scroll as below)
+		if (b.page == Page::Browse && b.browseDir != browseDir && (b.browseDir == HOMEDIR || pseudoDir(b.browseDir) || exists(b.browseDir)))
+		{
+			setSection(b.browseTab);
+			enterFolder(b.browseDir, p);
+		}
 		page = b.page;
 		inMenu = b.inMenu;
 		menuTab = b.menuTab;
@@ -74,6 +83,15 @@ namespace bp
 		touchLocked = false;	// the lock is the video's
 		if (bgPlay) landFlashUntil = SDL_GetTicks() + 900;	// the mini bar's edge lit a moment: it's still playing
 		dropTouch();
+		// back in the folder of what played: the cursor on it (the photo last viewed, the song or video Next moved on to)
+		if (page == Page::Browse && !inMenu && !lastPlayed.empty())
+			for (size_t i = 0; i < browsePaths.size(); i++)
+				if (browsePaths[i] == lastPlayed)
+				{
+					cursor = (int)i;
+					fitList();
+					break;
+				}
 		fprintf(stderr, "ui: back from the player to %s\n", page == Page::Browse && !inMenu ? (atHome() ? "Home" : browseDir.empty() ? "Files" : browseDir.c_str())
 			: inMenu ? "the menu" : "a page");
 	}

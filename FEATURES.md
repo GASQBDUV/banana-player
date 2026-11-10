@@ -222,7 +222,12 @@ Like a song or a video to keep it in **Liked**, a playlist of its own. Photos an
 - **<** is at the top left of every page and does what **B** does: in the file list it goes up a folder (on Home with
   nothing playing: tap twice to quit), on a page or in the menu it goes back.
 
-**Up next** (**Y**, or the **List** key) lists what plays from (a folder, a playlist, Recent's folder, a selection
+**List** (**Y**) on a playlist's song opens that playlist's own page (its order, its edits), the cursor on the song,
+what plays going on behind; the first time a playlist's song opens, the List key glows a soft yellow twice to say so.
+**B** from the player always goes back to where you opened it from (a folder, a playlist, Home, Settings…); back in
+the folder of what played (or the photo last viewed), the cursor is on it.
+
+Otherwise **Up next** (**Y**, or the **List** key) lists what plays from (a folder, a playlist, Recent's folder, a selection
 from the web) in its own order: Shuffle never reorders it. The one playing is marked **Now** (**Paused**, or **Browser**
 when a web page plays it), with each file's length where it's known; the page opens scrolled to it. **A** (or a tap)
 plays that row as picking it from its list would (Shuffle and Loop stay as they are; with Shuffle on, a new order from

@@ -394,7 +394,16 @@ namespace bp
 		case Button::B: return true;
 		// the play mode (a song or a video)
 		case Button::X: musicKey(b, p); break;
-		case Button::Y: openUpNext(p); break;
+		// List: a playlist's song opens that playlist's own page (its edits, its order), what plays going on behind;
+		// a folder, Recent or a selection: Up next
+		case Button::Y:
+			if (p.source().kind == SourceKind::Playlist && !p.source().id.empty() && !p.playingPhoto())
+			{
+				showSourceAfterLeave = true;
+				return true;
+			}
+			openUpNext(p);
+			break;
 		// the menu opens on what plays (Like, Add to playlist...): Settings is a tab along
 		case Button::Start: openMainMenu(p, playingTabShown(p) ? TAB_PLAYING : TAB_SETTINGS); break;
 		// the stick pressed in (the RG DS Plus): Like, at once (over a photo it turns it, above)
@@ -473,6 +482,7 @@ namespace bp
 			if (miniBarShown(p)) openNowMenu(p);
 		}
 		if (landFlashUntil && SDL_GetTicks() >= landFlashUntil) landFlashUntil = 0;
+		if (listPulseAt && SDL_GetTicks() - listPulseAt >= LIST_PULSE_MS) listPulseAt = 0;
 		// Home's Recent: listed again when what plays changes (the next song started by itself: its card comes first)
 		if (page == Page::Browse && !inMenu && atHome() && !homeTouch && !ctxOpen && p.currentPath() != homeListedFor)
 			enterFolder(HOMEDIR, p);
@@ -1089,7 +1099,7 @@ namespace bp
 		// frame while it moves), what was stopped for a photo
 		{
 			char bb[160];
-			snprintf(bb, sizeof bb, "|bg%d %d %d %d %d %d %d %d %.0f", bgPlay, miniBarShown(p), chipKind, landFlashUntil != 0, playHoldMini,
+			snprintf(bb, sizeof bb, "|bg%d %d %d %d %d %d %d %d %.0f", bgPlay, miniBarShown(p), chipKind, landFlashUntil != 0 ? 1 : listPulseAt ? 2 + (int)((SDL_GetTicks() - listPulseAt) / 33) : 0, playHoldMini,
 				markW(p), markW(p) && markLive(p) && panel.on() ? (int)(SDL_GetTicks() / 166) : -1, p.loading(), 0.0);
 			photo += bb + chipPath + "|" + p.currentPath();
 		}

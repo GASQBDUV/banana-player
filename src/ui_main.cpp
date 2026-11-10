@@ -358,6 +358,18 @@ namespace bp
 
 	void Ui::drawMain(const Player& p)
 	{
+		if (listPulseArm)
+		{
+			listPulseArm = false;
+			// (once per playlist: the first of its songs opened; another row of it, or the player opened again, not)
+			bool pl = p.playing() && !p.playingPhoto() && p.source().kind == SourceKind::Playlist;
+			if (pl && p.source().id != listPulsedFor)
+			{
+				listPulseAt = SDL_GetTicks();
+				fprintf(stderr, "ui: the List key glows (a playlist's first song)\n");
+			}
+			if (p.playing() && !p.playingPhoto()) listPulsedFor = pl ? p.source().id : std::string();
+		}
 		if (p.playingPhoto()) { drawPhoto(p); return; }
 		std::string name = p.currentPath().substr(p.currentPath().rfind('/') + 1);
 		bool err = !p.error.empty();
@@ -510,6 +522,14 @@ namespace bp
 				bool fast = which == Button::Up && !off && std::fabs(p.speed - 1) > 1e-6;
 				bool down = (pressedBtn == r * 5 + c || (which == Button::A && playHoldAt)) && !off;
 				drawBox(b, down ? PRESSED : fast ? ACCENT : BUTTON, R_BUTTON);
+				if (which == Button::Y && listPulseAt && !down)
+				{
+					// two soft yellow swells (sin²), over the key's own ground
+					double t = (SDL_GetTicks() - listPulseAt) / (double)(LIST_PULSE_MS / 2), sw = std::sin(M_PI * t);
+					SDL_Color glow = ACCENT;
+					glow.a = (Uint8)std::lround(90 * sw * sw);
+					if (glow.a) fillRound({b.x + 2, b.y + 2, b.w - 4, b.h - 6}, glow, R_BUTTON - 2);
+				}
 				if (which == Button::A && playHoldAt)
 				{
 					// the hold that plays it here, filling as it goes (as the lock's)
