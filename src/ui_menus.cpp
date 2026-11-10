@@ -979,6 +979,7 @@ namespace bp
 			case PR_STOP:
 				g = &G_STOP;
 				label = "Stop";
+				note.clear();	// (the default note is Info's)
 				ink = DANGER;
 				break;
 			case PR_SHOW:
