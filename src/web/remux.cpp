@@ -273,13 +273,16 @@ namespace bp
 			{
 				if (vOff == AV_NOPTS_VALUE)
 				{
-					// nothing before the first keyframe: it's where remuxStart said it starts
-					if (!(pkt->flags & AV_PKT_FLAG_KEY) || decodeTs(pkt, iv, AV_NOPTS_VALUE) == AV_NOPTS_VALUE)
+					// nothing before remuxStart's keyframe (t is its decode time): the page counts the stream's clock from
+					// t, for the subtitles and the bar. Matroska seeks by presentation time, which is later than that
+					// with B-frames, so the seek lands a whole GOP early, and the stream ran ~6 s behind the subtitles
+					int64_t d0 = (pkt->flags & AV_PKT_FLAG_KEY) ? decodeTs(pkt, iv, AV_NOPTS_VALUE) : AV_NOPTS_VALUE;
+					if (d0 == AV_NOPTS_VALUE || (t > 0.05 && d0 * av_q2d(iv->time_base) - in.startTime < t - 0.005))
 					{
 						av_packet_unref(pkt);
 						continue;
 					}
-					vOff = decodeTs(pkt, iv, AV_NOPTS_VALUE);
+					vOff = d0;
 					aOff = av_rescale_q(vOff, iv->time_base, ia->time_base);
 				}
 				// decode times always rising and never after the frame shows: a packet that breaks this is refused by

@@ -34,6 +34,13 @@ handheld, without ever converting anything (the RK3568 decodes in software; tran
      decoder (VideoToolbox) failed at once with -12909 ("Couldn't switch the audio track here" on 10-bit x265 anime).
      The log line counts any packet still dropped; a browser that can't play the stream posts `/api/remux-failed`,
      logged as `remux: the browser couldn't play …` with its MediaError and user agent.
+   - **The stream starts exactly at `{start}`** (the keyframe's decode time): `remuxRun` drops every keyframe before
+     it. Matroska seeks by presentation time, later than the decode time with B-frames, so seeking to `{start}` landed
+     on the keyframe before; the stream began a GOP early (~6 s on x265 anime) while the page counted from `{start}`:
+     picture and sound ran behind the subtitles, the bar and the handheld's position. The page keeps one clock,
+     `bPos()` = `base + currentTime`, for everything (cues, JASSUB's `timeOffset`, bar, chapters, browser-pos, Media
+     Session); keeping the file's timestamps in the MP4 instead would rely on Chrome and Safari agreeing on a
+     non-zero start in progressive fMP4 (duration, seekable, `currentTime` from 0 or not), which the offset avoids.
    - Offered only when the browser says it plays the pair in MP4 (`canPlayType`/`MediaSource.isTypeSupported`): video
      H.264, HEVC, VP9, AV1; audio AAC, MP3, Opus, FLAC, AC-3, E-AC-3. DTS, TrueHD, PCM and the rest are **Plays on the
      handheld only**, with **Play this one on the handheld**.
