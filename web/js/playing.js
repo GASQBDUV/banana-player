@@ -596,7 +596,7 @@ function UpNext({ v }) {
 	return html`<section aria-label="Queue"><div class="band queue-band"><span class="kicker ell" style="max-width:70%">${src ? 'From ' + src : 'Up next'}</span><span class="rule"></span><span class="num">${pad(idx + 1)} / ${pad(items.length)}</span></div>
 		<div class="upnext list-lines" ref=${box}>
 		${items.map((it, i) => html`<button class="line ${i === idx ? 'cur' : ''} ${i < idx ? 'past' : ''}" onClick=${() => play(i)} aria-current=${i === idx ? 'true' : undefined}>
-			<span class="tile sm"><${Art} seed=${it.p} kind=${kindOfName(it.p)} k=${1} /></span>
+			<span class="tile sm"><${Art} src=${kindOfName(it.p) === 'audio' ? coverUrl(it.p) : ''} seed=${it.p} kind=${kindOfName(it.p)} k=${1} /></span>
 			<span class="tt"><span class="ell" style="display:block">${i === idx && v.title ? v.title : it.title}</span>${i === idx && html`<span class="m"><span class="chip y tiny"><${Icon} n="play" k=${1} />Now</span></span>`}</span>
 			${it.duration > 0 && html`<span class="tm">${fmtTime(it.duration)}</span>`}</button>`)}</div></section>`;
 }

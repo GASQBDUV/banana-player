@@ -91,7 +91,7 @@ export const coverUrl = p => p ? '/api/cover?p=' + encodeURIComponent(p) : '';
 export function Art({ src, seed, kind, k }) {
 	const [st, setSt] = useState('');
 	useEffect(() => setSt(''), [src]);
-	return html`<${GenCover} seed=${seed} kind=${kind} k=${k} />${src && st !== 'bad' && html`<img class=${'cvimg' + (st === 'ok' ? ' on' : '')} src=${src} alt="" decoding="async" onLoad=${() => setSt('ok')} onError=${() => setSt('bad')} />`}`;
+	return html`<${GenCover} seed=${seed} kind=${kind} k=${k} />${src && st !== 'bad' && html`<img class=${'cvimg' + (st === 'ok' ? ' on' : '')} src=${src} alt="" decoding="async" loading="lazy" onLoad=${() => setSt('ok')} onError=${() => setSt('bad')} />`}`;
 }
 // a playlist's cover: Liked's heart on dark gold; else a 2×2 mosaic
 export function PlArt({ p, k }) {
