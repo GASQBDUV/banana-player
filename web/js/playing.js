@@ -568,7 +568,7 @@ function ChaptersCard({ v }) {
 			<span class="n">${String(i + 1).padStart(2, '0')}</span><span class="tt ell">${chapterTitle(c, i)}</span><span class="tm">${fmtTime(c.start)}</span></button>`)}</div></section>`;
 }
 
-// the queue, scrolled so the one playing is near the top
+// the queue, scrolled so the one playing is near the top when it's out of sight
 function UpNext({ v }) {
 	const s = store, sn = s.snap;
 	const [items, setItems] = useState(null), [idx, setIdx] = useState(0);
@@ -582,7 +582,12 @@ function UpNext({ v }) {
 	}, [key]);
 	useLayoutEffect(() => {
 		const b = box.current, c = b && b.querySelector('.cur'), sc = b && b.closest('.tabbody');
-		if (c && sc) sc.scrollTop = Math.max(0, sc.scrollTop + c.getBoundingClientRect().top - sc.getBoundingClientRect().top - 8 - (c.offsetHeight || 0));
+		if (!c || !sc) return;
+		// only when the one playing is out of sight (opened on a long queue, or the list moved on past the view): a tap
+		// on a row you can see leaves the list where it is
+		const r = c.getBoundingClientRect(), v2 = sc.getBoundingClientRect();
+		if (r.top >= v2.top && r.bottom <= v2.bottom) return;
+		sc.scrollTop = Math.max(0, sc.scrollTop + r.top - v2.top - 8 - (c.offsetHeight || 0));
 	}, [idx, items]);
 	if (items === null) return html`<div class="skel" aria-hidden="true"></div>`;
 	if (items.length < 2) return html`<p class="note pad">Nothing else is queued. Play a folder or a playlist to fill it.</p>`;
@@ -597,7 +602,7 @@ function UpNext({ v }) {
 		<div class="upnext list-lines" ref=${box}>
 		${items.map((it, i) => html`<button class="line ${i === idx ? 'cur' : ''} ${i < idx ? 'past' : ''}" onClick=${() => play(i)} aria-current=${i === idx ? 'true' : undefined}>
 			<span class="tile sm"><${Art} src=${kindOfName(it.p) === 'audio' ? coverUrl(it.p) : ''} seed=${it.p} kind=${kindOfName(it.p)} k=${1} /></span>
-			<span class="tt"><span class="ell" style="display:block">${i === idx && v.title ? v.title : it.title}</span>${i === idx && html`<span class="m"><span class="chip y tiny"><${Icon} n="play" k=${1} />Now</span></span>`}</span>
+			<span class="tt"><span class="ell" style="display:block">${it.title}</span>${i === idx && html`<span class="m"><span class="chip y tiny"><${Icon} n="play" k=${1} />Now</span></span>`}</span>
 			${it.duration > 0 && html`<span class="tm">${fmtTime(it.duration)}</span>`}</button>`)}</div></section>`;
 }
 

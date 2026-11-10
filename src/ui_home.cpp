@@ -650,7 +650,7 @@ namespace bp
 	{
 		static const char* ROW[] = {"", "Playing", "Paused", "In browser", "Stopped"};
 		static const char* CARD[] = {"", "Now", "Paused", "Browser", "Stopped"};
-		const Glyph* g = kind == 1 ? &G_PLAY : kind == 2 ? &G_PAUSE : kind == 3 ? &G_WEB : nullptr;
+		const Glyph* g = kind == 1 ? &G_PLAY : kind == 2 ? &G_PAUSE : kind == 3 ? &G_LAPTOP : nullptr;
 		std::string t = (card ? CARD : ROW)[std::clamp(kind, 0, 4)];
 		int tw = (int)std::lround(textWidth(t, 0) / sx), gw = g ? glyphW(*g, 1) + 5 : 0;
 		int w = 8 + gw + tw + 8;
@@ -718,8 +718,8 @@ namespace bp
 		int sx0 = x0 + tw + 12;
 		if (held)
 		{
-			drawGlyphMid(G_WEB, sx0 + glyphW(G_WEB, 1) / 2, mid, ACCENT, 1);
-			sx0 += glyphW(G_WEB, 1) + 6;
+			drawGlyphMid(G_LAPTOP, sx0 + glyphW(G_LAPTOP, 1) / 2, mid, ACCENT, 1);
+			sx0 += glyphW(G_LAPTOP, 1) + 6;
 		}
 		if (keyX - 14 - sx0 > 20) drawTextMid(sub, 0, subInk, sx0, mid, keyX - 14 - sx0);
 	}

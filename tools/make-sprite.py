@@ -7,8 +7,6 @@ src = (root / "src" / "ui_glyphs.h").read_text()
 
 # G_WEB isn't in ui_glyphs.h until the handheld side lands; the spec fixes its cells
 extra = {
-	# "In this browser": a laptop (the web app's own; the handheld has no use for it)
-	"LAPTOP": [".#########.", ".#.......#.", ".#.......#.", ".#.......#.", ".#.......#.", ".#########.", "###########"],
 	# the web player's fullscreen button: corners out (enter) and in (leave)
 	"FULLSCREEN": ["###...###", "#.......#", "#.......#", ".........", ".........", ".........", "#.......#", "#.......#", "###...###"],
 	"FULLSCREEN_EXIT": ["..#...#..", "..#...#..", "###...###", ".........", ".........", ".........", "###...###", "..#...#..", "..#...#.."],

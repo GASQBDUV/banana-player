@@ -110,6 +110,9 @@ GLYPH(G_CHAPTERS, "###.#######", "###.#######", "...........", "###.#####..", "#
 		"#########")
 	GLYPH(G_GRIP, "#########", ".........", "#########", ".........", "#########")
 	GLYPH(G_MOVE, "...#...", "..###..", ".#####.", "...#...", "...#...", "...#...", ".#####.", "..###..", "...#...")
+	// playing in a browser (a phone's or computer's): a laptop, as the web app's "This browser"; the globe is the
+	// dashboard itself
+	GLYPH(G_LAPTOP, ".#########.", ".#.......#.", ".#.......#.", ".#.......#.", ".#.......#.", ".#########.", "###########")
 	// the web dashboard: a globe (Settings' tile, its page, the header's indicator, the quick settings)
 	GLYPH(G_WEB, "..#####..", ".#..#..#.", "#..#.#..#", "#########", "#..#.#..#", "#########", "#..#.#..#", ".#..#..#.",
 		"..#####..")
