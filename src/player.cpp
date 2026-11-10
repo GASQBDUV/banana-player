@@ -121,7 +121,13 @@ namespace bp
 		opt("resume-playback", "no");		// resume.tsv instead: each of position, audio and subtitles can be off
 		// tests: what reaches the speakers, recorded (BP_AO_PCM=file: mpv's pcm output, untimed, as raw 44.1 kHz s16
 		// stereo, appended so an output reopened keeps what came before)
-		if (const char* pcm = getenv("BP_AO_PCM"))
+		if (o.photosOnly)
+		{
+			// no sound device opened: the first mpv has ALSA's; an animated photo's sound (a clip as GIF) never mattered
+			opt("ao", "null");
+			opt("aid", "no");
+		}
+		else if (const char* pcm = getenv("BP_AO_PCM"))
 		{
 			opt("ao", "pcm");
 			opt("ao-pcm-file", pcm);
@@ -496,6 +502,16 @@ namespace bp
 		// sound starts later or earlier than its picture needs it (without, out of step for seconds). Back on at the
 		// first PLAYBACK_RESTART: after a seek (a resume too) the trim keeps the sound in step
 		if (!strcmp(start, "none") && isAviFile(path)) fileOpts += ",initial-audio-sync=no";
+		// a video's picture: always on (one under a photo decodes on, unseen: hideVideo); the file's own option, so a
+		// vid set as a property by an older build never reaches the next file
+		if (!isAudio && !isPhoto) fileOpts += ",vid=auto";
+		else if (isAudio && vidOff)
+		{
+			// a song after a video hidden under a photo: its art or graph needs the picture back (the video still
+			// playing gets it a moment, under the photo)
+			prop("vid", "auto");
+			vidOff = false;
+		}
 
 		// (a graph takes the song's first audio track itself: no track to choose)
 		wantAid = graph.empty() && settings.rememberAudio && e && e->aid > 0 ? e->aid : 0;
@@ -852,9 +868,9 @@ namespace bp
 		return rc && (mpv_render_context_update(rc) & MPV_RENDER_UPDATE_FRAME);
 	}
 
-	int Player::render(int w, int h)
+	int Player::render(int w, int h, unsigned target)
 	{
-		mpv_opengl_fbo fbo{0, w, h, 0};
+		mpv_opengl_fbo fbo{(int)target, w, h, 0};
 		int flip = 1;
 		mpv_render_param params[] = {
 			{MPV_RENDER_PARAM_OPENGL_FBO, &fbo},
@@ -1164,6 +1180,22 @@ namespace bp
 		const char* cmd[] = {"ao-reload", nullptr};
 		mpv_command_async(mpv, 0, cmd);
 		fprintf(stderr, "audio: %s held paused for a page: the sound output reopened as it plays\n", baseName(currentPath()).c_str());
+	}
+
+	void Player::hideVideo(bool hide)
+	{
+		// a video under a photo goes on decoding, its frames taken by main's hidden target (drainUnder) and never shown:
+		// closing the photo shows it at once. (Its picture switched off instead, vid=no, came back only after a seek's
+		// buffering, or seconds of black till the next keyframe: the owner chose the CPU over the wait)
+		if (hide == hidingVideo || !mpv) return;
+		hidingVideo = hide;
+		if (!hide && vidOff)
+		{
+			prop("vid", "auto");
+			vidOff = false;
+		}
+		if (playing() && !isAudio && !isPhoto)
+			fprintf(stderr, "photo: %s %s\n", baseName(currentPath()).c_str(), hide ? "decodes on under the photo, unseen" : "shown again");
 	}
 
 	void Player::pause()

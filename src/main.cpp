@@ -290,8 +290,9 @@ int main(int argc, char** argv)
 	// outlives the player (mpv calls it till it's gone)
 	NetStore netStore;
 	netStore.load(opts.stateDir);
-	NetStreams netStreams;
+	NetStreams netStreams, photoStreams;	// (the photo viewer's own: a photo's open never cancels a video's)
 	netStreams.update(netStore);
+	photoStreams.update(netStore);
 	opts.net = &netStreams;
 	int netVersion = netStore.version();
 
@@ -304,6 +305,26 @@ int main(int argc, char** argv)
 			fprintf(stderr, "mpv could not start\n");
 			return 1;
 		}
+		// The photo viewer: a second mpv, photos only, with no sound output, drawn on the top panel in place of the
+		// first while a photo is up. What plays goes on in the first (a video's picture off meanwhile: hideVideo), so a
+		// photo never stops or reloads a song or a video. Photos always open here, with something playing or not (one
+		// way for them). Its settings are the player's, copied in as a photo opens and kept in step (syncPhotoSettings)
+		Player photos;
+		{
+			PlayerOptions po = opts;
+			po.stateDir.clear();	// (photos keep nothing: no resume, no history; settings.conf is the player's)
+			po.photosOnly = true;
+			po.net = &photoStreams;
+			if (!photos.init(po, onMpvWakeup, nullptr) || !photos.initRender(glProc, nullptr, onMpvRender, nullptr))
+			{
+				fprintf(stderr, "mpv could not start (the photo viewer)\n");
+				return 1;
+			}
+		}
+		photos.settings = player.settings;
+		std::string photoSettingsSeen = serializeSettings(player.settings);
+		// the one the bottom panel works on: the photo viewer while a photo is up, else the player
+		auto shown = [&]() -> Player& { return photos.playing() ? photos : player; };
 
 		Ui ui;
 		bool haveUi = bottom && ui.init(bottom, opts.fontsDir);
@@ -411,8 +432,9 @@ int main(int argc, char** argv)
 		// the lid closed, the handheld slept: paused at once (from the watch's thread), and the place kept
 		static std::atomic<bool> slept{false};
 		SleepWatch sleepWatch;
-		sleepWatch.start([&player](bool lid) {
+		sleepWatch.start([&player, &photos](bool lid) {
 			player.pauseNow();
+			photos.pauseNow();
 			slept = true;
 #ifdef BP_WEB
 			// the pages told now, from this thread (notify is thread-safe): bananad stops the process in a moment, and
@@ -453,8 +475,12 @@ int main(int argc, char** argv)
 		{
 			int index;
 			std::vector<std::string> list = siblingVideos(file, index);
-			player.open(list, index);
-			if (!isPhotoFile(file)) shadow.open(list, index, 0, "", "hh", nullptr, 0);
+			if (isPhotoFile(file)) photos.open(list, index);
+			else
+			{
+				player.open(list, index);
+				shadow.open(list, index, 0, "", "hh", nullptr, 0);
+			}
 		}
 		bool topDark = false;	// the top panel cleared while there's no video
 		Uint32 levelUntil = 0;
@@ -473,7 +499,8 @@ int main(int argc, char** argv)
 			if (!player.playing()) return;
 			// started with a file: its end still quits (as it always did)
 			if (!browserMode && why == StopWhy::End) { running = false; return; }
-			bool shown = !haveUi || ui.playerShown(player);
+			// (a photo up over it: the photo stays, and closing it goes where it would have)
+			bool shown = !haveUi || (ui.playerShown(player) && !photos.playing());
 			toBrowserMode();
 			// what it played from, read before stop() forgets it: a playlist goes back to that playlist
 			std::string last = player.currentPath();
@@ -488,20 +515,41 @@ int main(int argc, char** argv)
 			topDark = false;
 			fprintf(stderr, "stop: %s (%s)\n", why == StopWhy::End ? "the end of the list" : why == StopWhy::Web ? "the web" : "Stop",
 				shown ? "back to the browser" : "behind the browser");
-			if (shown && haveUi) ui.showBrowser(player, last, from, index);
+			if (shown && haveUi) ui.backFromPlayer(player, last, from, index);
 			else if (why == StopWhy::End)
 			{
-				// browsing meanwhile: the bar folds away, the list stays where it is; the top panel says why
-				player.osd("Finished", 2000);
+				// browsing meanwhile (or a photo up): the bar folds away, the list stays where it is; the top panel says why
+				(photos.playing() ? photos : player).osd("Finished", 2000);
 				levelUntil = SDL_GetTicks() + 2000;
 			}
 		};
+		// The photo viewer closed (B, Close, a pick that isn't a photo): what plays under it shows again where it has got
+		// to (it never stopped). screens: back where the photo was opened from (the player of what plays, or the
+		// browser's page as it was), else the caller changes them
+		bool photoOverPlayer = false;	// the photo was opened over the player of what plays (the web's pick)
+		auto closePhoto = [&](bool screens) {
+			if (!photos.playing()) return;
+			std::string was = photos.currentPath();
+			photos.stop();
+			player.hideVideo(false);
+			renderPending = true;
+			fprintf(stderr, "photo: closed%s\n", player.playing() ? (", " + player.currentPath().substr(player.currentPath().rfind('/') + 1) + " shown again").c_str() : "");
+			if (!screens || !haveUi) return;
+			if (photoOverPlayer && player.playing()) ui.showPlayer();
+			else ui.backFromPlayer(player, was);
+		};
 		// B, "<" or Back on the player (a press() or pointer() that says leave): the screen only, what plays goes on
-		// behind the browser, which opens on its folder (or playlist), the cursor on it. A photo (and a file that
+		// behind the browser, back where the player was opened from (Ui::backFromPlayer). A photo (and a file that
 		// didn't open) closes instead. With nothing playing (B twice at Home), out
 		auto leave = [&] {
+			if (photos.playing())
+			{
+				toBrowserMode();
+				closePhoto(true);
+				return;
+			}
 			if (!player.playing()) { running = false; return; }
-			if (player.playingPhoto() || !player.error.empty())
+			if (!player.error.empty())
 			{
 				toBrowserMode();
 				stopPlaying(StopWhy::Handheld);
@@ -511,7 +559,42 @@ int main(int argc, char** argv)
 			toBrowserMode();
 			ui.flushPlaylist(player);
 			fprintf(stderr, "leave: the player left, %s plays on\n", player.currentPath().substr(player.currentPath().rfind('/') + 1).c_str());
-			ui.showBrowser(player, player.currentPath(), player.source(), player.index());
+			ui.backFromPlayer(player, player.currentPath(), player.source(), player.index());
+		};
+		// the top panel's frame: the photo while one is up, else what plays, or the icon with nothing playing
+		auto renderTop = [&](int w, int h) { return shown().render(w, h); };
+		// What plays under a photo: a song's graph makes frames still (it carries the sound), and mpv waits for each to
+		// be taken (else its picture queue stalls, 200 ms a frame). They're drawn into a tiny target of their own, never
+		// shown, so the photo isn't drawn again 30 times a second. A video's picture is off meanwhile (hideVideo)
+		unsigned sinkFbo = 0;
+		auto drainUnder = [&] {
+			if (!photos.playing() || !player.playing() || !player.frameDue()) return;
+			SDL_GL_MakeCurrent(top, gl);
+			if (!sinkFbo)
+			{
+				using Gen = void (*)(int, unsigned*);
+				using Bind = void (*)(unsigned, unsigned);
+				using TexImage = void (*)(unsigned, int, int, int, int, int, unsigned, unsigned, const void*);
+				using FbTex = void (*)(unsigned, unsigned, unsigned, unsigned, int);
+				auto genFb = (Gen)SDL_GL_GetProcAddress("glGenFramebuffers");
+				auto bindFb = (Bind)SDL_GL_GetProcAddress("glBindFramebuffer");
+				auto genTex = (Gen)SDL_GL_GetProcAddress("glGenTextures");
+				auto bindTex = (Bind)SDL_GL_GetProcAddress("glBindTexture");
+				auto texImage = (TexImage)SDL_GL_GetProcAddress("glTexImage2D");
+				auto fbTex = (FbTex)SDL_GL_GetProcAddress("glFramebufferTexture2D");
+				if (!genFb || !bindFb || !genTex || !bindTex || !texImage || !fbTex) return;
+				unsigned tex = 0;
+				genTex(1, &tex);
+				bindTex(0x0DE1 /* GL_TEXTURE_2D */, tex);
+				texImage(0x0DE1, 0, 0x1908 /* GL_RGBA */, 16, 16, 0, 0x1908, 0x1401 /* GL_UNSIGNED_BYTE */, nullptr);
+				bindTex(0x0DE1, 0);
+				genFb(1, &sinkFbo);
+				bindFb(0x8D40 /* GL_FRAMEBUFFER */, sinkFbo);
+				fbTex(0x8D40, 0x8CE0 /* GL_COLOR_ATTACHMENT0 */, 0x0DE1, tex, 0);
+				bindFb(0x8D40, 0);
+			}
+			player.render(16, 16, sinkFbo);
+			player.reportSwap();
 		};
 
 		// the top panel's pixels (RGBA, top row first), the frame drawn again for it: screenshots
@@ -522,7 +605,7 @@ int main(int argc, char** argv)
 			using ReadPixels = void (*)(int, int, int, int, unsigned, unsigned, void*);
 			auto readPixels = (ReadPixels)SDL_GL_GetProcAddress("glReadPixels");
 			if (!readPixels) return nullptr;
-			player.render(w, h);	// a video, or the icon with nothing playing
+			renderTop(w, h);	// a video, a photo, or the icon with nothing playing
 			std::vector<unsigned char> rgba((size_t)w * h * 4);
 			readPixels(0, 0, w, h, 0x1908 /* GL_RGBA */, 0x1401 /* GL_UNSIGNED_BYTE */, rgba.data());
 			SDL_Surface* s = SDL_CreateRGBSurfaceWithFormat(0, w, h, 32, SDL_PIXELFORMAT_ABGR8888);
@@ -530,14 +613,14 @@ int main(int argc, char** argv)
 				for (int y = 0; y < h; y++)	// GL's rows go up
 					memcpy((unsigned char*)s->pixels + (size_t)y * s->pitch, &rgba[(size_t)(h - 1 - y) * w * 4], (size_t)w * 4);
 			SDL_GL_SwapWindow(top);
-			player.reportSwap();
+			shown().reportSwap();
 			return s;
 		};
 		// F + L2 (as in BananaOS's emulators) or, on a computer, F12: both panels, the top over the bottom, as a PNG
 		// in the card's screenshots folder
 		auto screenshot = [&] {
 			SDL_Surface* t = captureTop();
-			SDL_Surface* bt = haveUi ? ui.capture(player) : nullptr;
+			SDL_Surface* bt = haveUi ? ui.capture(shown()) : nullptr;
 			std::string dir = getenv("BP_SCREENSHOTS") ? getenv("BP_SCREENSHOTS")
 							: exists("/data/screenshots") ? "/data/screenshots" : getenv("HOME") ? getenv("HOME") : ".";
 			char name[64];
@@ -558,7 +641,7 @@ int main(int argc, char** argv)
 			}
 			if (t) SDL_FreeSurface(t);
 			if (bt) SDL_FreeSurface(bt);
-			player.osd(ok ? "Screenshot saved" : "Screenshot couldn't be saved");
+			shown().osd(ok ? "Screenshot saved" : "Screenshot couldn't be saved");
 			fprintf(stderr, "screenshot %s%s: %s\n", dir.c_str(), name, ok ? "saved" : "failed");
 		};
 		bool fHeld = false, fCombo = false, l2Down = false, r2Down = false;
@@ -634,10 +717,10 @@ int main(int argc, char** argv)
 					// even bananad's F + volume for brightness) the quick settings
 					bool down = e.type == SDL_CONTROLLERBUTTONDOWN;
 					if (down) fCombo = false;
-					else if (fHeld && !fCombo && haveUi) ui.toggleQuick(player);
+					else if (fHeld && !fCombo && haveUi) ui.toggleQuick(shown());
 					fHeld = down;
 				}
-				else if (e.type == SDL_KEYDOWN && e.key.keysym.sym == SDLK_F1 && !e.key.repeat && haveUi) ui.toggleQuick(player);
+				else if (e.type == SDL_KEYDOWN && e.key.keysym.sym == SDLK_F1 && !e.key.repeat && haveUi) ui.toggleQuick(shown());
 				else if (e.type == SDL_CONTROLLERAXISMOTION && (e.caxis.axis == SDL_CONTROLLER_AXIS_TRIGGERLEFT || e.caxis.axis == SDL_CONTROLLER_AXIS_TRIGGERRIGHT))
 				{
 					// L2 and R2 are triggers to SDL: down past half way, up again only below a quarter, so a trigger
@@ -654,30 +737,30 @@ int main(int argc, char** argv)
 							fCombo = true;
 							if (left) screenshot();	// F + L2; F + R2 does nothing
 						}
-						else if (down && haveUi && ui.press(left ? Button::L2 : Button::R2, player)) leave();
+						else if (down && haveUi && ui.press(left ? Button::L2 : Button::R2, shown())) leave();
 					}
 				}
 				else if (e.type == SDL_KEYDOWN && e.key.keysym.sym == SDLK_F12 && !e.key.repeat) screenshot();
 				else if (e.type == SDL_CONTROLLERBUTTONUP || e.type == SDL_KEYUP)
 				{
 					if (e.type == SDL_CONTROLLERBUTTONUP) held = Button::None;
-					if (Button b = buttonReleased(e); b != Button::None && haveUi) ui.release(b, player);
+					if (Button b = buttonReleased(e); b != Button::None && haveUi) ui.release(b, shown());
 				}
 				// F + START: out at once, from anywhere (the place is kept as the loop ends)
 				else if (e.type == SDL_CONTROLLERBUTTONDOWN && fHeld && buttonFromEvent(e) == Button::Start) running = false;
 				else if (Button b = buttonFromEvent(e); b != Button::None)
 				{
-					if (e.type == SDL_CONTROLLERBUTTONDOWN && ui.repeats(b, player))
+					if (e.type == SDL_CONTROLLERBUTTONDOWN && ui.repeats(b, shown()))
 					{
 						held = b;
 						heldNext = SDL_GetTicks() + 400;
 					}
-					if (ui.press(b, player)) leave();
+					if (ui.press(b, shown())) leave();
 				}
 				else if (e.type == evLevel)
 				{
 					std::string* what = (std::string*)e.user.data1;
-					player.showLevel(*what == "brightness" ? "Brightness" : "Volume", e.user.code);
+					shown().showLevel(*what == "brightness" ? "Brightness" : "Volume", e.user.code);
 					if (haveUi) ui.levelChanged(*what, e.user.code);	// the quick settings' bar follows the keys
 					fprintf(stderr, "level: %s %d (at %u ms)\n", what->c_str(), e.user.code, SDL_GetTicks());
 					logNextTop = true;
@@ -702,7 +785,7 @@ int main(int argc, char** argv)
 					auto toast = [&](const char* text) {
 						bool video = player.playing() && !player.playingAudio() && !player.playingPhoto();
 						if (video || ui.webPageShown()) return;
-						player.osd(text, 2000);
+						shown().osd(text, 2000);
 						levelUntil = SDL_GetTicks() + 2000;	// (with nothing playing the top panel is drawn while a card is up)
 						renderPending = true;
 					};
@@ -717,7 +800,7 @@ int main(int argc, char** argv)
 				else if (e.type == evTouch)
 				{
 					Pointer* pt = (Pointer*)e.user.data1;
-					if (ui.pointer(*pt, player)) leave();
+					if (ui.pointer(*pt, shown())) leave();
 					delete pt;
 				}
 				else if (haveUi && !ownTouch)
@@ -757,7 +840,7 @@ int main(int argc, char** argv)
 					{
 						pt.x = std::clamp(pt.x, 0.f, 1.f);
 						pt.y = std::clamp(pt.y, 0.f, 1.f);
-						if (ui.pointer(pt, player)) leave();
+						if (ui.pointer(pt, shown())) leave();
 					}
 				}
 				got = SDL_PollEvent(&e);
@@ -765,7 +848,7 @@ int main(int argc, char** argv)
 			if (held != Button::None && SDL_GetTicks() >= heldNext)
 			{
 				heldNext = SDL_GetTicks() + 150;
-				if (ui.repeats(held, player) && ui.press(held, player)) leave();
+				if (ui.repeats(held, shown()) && ui.press(held, shown())) leave();
 			}
 
 			player.pollEvents();
@@ -774,9 +857,24 @@ int main(int argc, char** argv)
 			player.checkDisplay();
 			player.checkCpu();
 			player.checkNet();
-			player.checkPhoto();
 			player.checkLoading();
-			if (haveUi) ui.tick(player);
+			photos.pollEvents();
+			photos.checkNet();
+			photos.checkPhoto();
+			photos.checkLoading();
+			photos.finished = false;	// (a photo stays: loop-file)
+			// the settings changed over a photo (START's menu over it): the player's, written; or the other way (the web)
+			if (std::string ps = serializeSettings(player.settings), fs = serializeSettings(photos.settings); fs != photoSettingsSeen)
+			{
+				player.setSettings(photos.settings);
+				photoSettingsSeen = fs;
+			}
+			else if (ps != photoSettingsSeen)
+			{
+				photos.settings = player.settings;
+				photoSettingsSeen = ps;
+			}
+			if (haveUi) ui.tick(shown());
 			if (player.quit || ui.quitRequested || ui.restartRequested) running = false;
 			// the player's own Stop: the session's (everywhere: a page playing it too); what the session doesn't have (a
 			// photo) stops here alone. The web's Stop of a photo, or of a file deleted under it, likewise
@@ -812,7 +910,7 @@ int main(int argc, char** argv)
 			if (woke) webForce = true;
 #endif
 			// a photo has no Play: an animated one paused by the lid goes on at the wake (a video waits for A)
-			if (woke && player.playingPhoto()) player.unpause();
+			if (woke && photos.playing()) photos.unpause();
 			if (woke) shadow.woke();
 			if (woke || (player.loaded && !player.paused && SDL_GetTicks() - savedAt > 60000))
 			{
@@ -841,34 +939,33 @@ int main(int argc, char** argv)
 					if (list.empty()) list = {pick};
 				}
 				else list = siblingVideos(pick, index);
-				// a photo while a song or video plays: one mpv, one picture. What plays stops, its place kept, and the
-				// mini bar offers it back after the photos
-				std::string was = player.currentPath();
-				// (a page playing it plays on: nothing is parked, the copy here is held again after the photos)
-				bool parks = haveUi && isPhotoFile(pick) && player.playing() && !player.playingPhoto() && player.error.empty() && !ui.pageIsOut();
-				std::string note = (player.title.empty() ? was.substr(was.rfind('/') + 1) : player.title) + " stopped \xC2\xB7 kept at " +
-					formatTime(std::max(0.0, player.position));
-				if (parks) ui.park(player);
-				if (isPhotoFile(pick) && player.playing() && !player.playingPhoto()) shadow.photoPark(std::max(0.0, player.position));
-				player.open(list, index, names);
-				routed(list, index, isNetPath(pick) ? 1 : 0, "", pick);
-				ui.showPlayer();
-				if (parks && ui.parkedShown())
+				if (isPhotoFile(pick))
 				{
-					fprintf(stderr, "park: %s stopped for a photo\n", was.substr(was.rfind('/') + 1).c_str());
-					player.osd(note, 2400);
+					// a photo: the photo viewer's, over what plays, which goes on (a song, the next one after it, a video's
+					// sound; a page's: untouched). The settings the player's
+					if (!photos.playing()) photoOverPlayer = haveUi && ui.playerShown(player);
+					photos.settings = player.settings;
+					photoSettingsSeen = serializeSettings(player.settings);
+					player.hideVideo(true);
+					photos.open(list, index, names);
+					if (player.playing()) fprintf(stderr, "photo: over %s, which plays on\n", player.currentPath().substr(player.currentPath().rfind('/') + 1).c_str());
 				}
+				else
+				{
+					closePhoto(false);	// (a song or video picked over a photo: it takes the screen)
+					player.open(list, index, names);
+					routed(list, index, isNetPath(pick) ? 1 : 0, "", pick);
+				}
+				ui.showPlayer();
 			}
-			// a playlist picked in the browser: its items, in its order (or shuffled); or what a photo stopped, again
+			// a playlist picked in the browser: its items, in its order (or shuffled); Up next's row
 			if (Ui::PlayRequest pr; ui.takePlayRequest(pr))
 			{
 				std::string pick = pr.paths[std::clamp(pr.index, 0, (int)pr.paths.size() - 1)];
-				// what a photo stopped, played again (resumeParked), else a pick
-				bool resumes = shadow.session().parked && pick == shadow.file();
+				if (!pr.stay) closePhoto(false);
 				if (pr.source.kind == SourceKind::Playlist) player.openPlaylist(pr.paths, pr.index, pr.source);
 				else player.open(pr.paths, pr.index, pr.names);
-				if (resumes) shadow.photoResume();
-				else routed(pr.paths, pr.index, pr.source.kind == SourceKind::Playlist ? 2 : pr.source.kind == SourceKind::NetFolder ? 1 : 0,
+				routed(pr.paths, pr.index, pr.source.kind == SourceKind::Playlist ? 2 : pr.source.kind == SourceKind::NetFolder ? 1 : 0,
 					pr.source.title, pick);
 				if (pr.stay) ui.playBehind();
 				else ui.showPlayer();
@@ -878,6 +975,7 @@ int main(int argc, char** argv)
 			{
 				netVersion = netStore.version();
 				netStreams.update(netStore);
+				photoStreams.update(netStore);
 			}
 			// a test run's steps wait for the file to open, 3 s at most (a file that never does: a loading test)
 			static Uint32 waitFrom = 0;
@@ -892,8 +990,8 @@ int main(int argc, char** argv)
 			{
 				burstLeft--;
 				burstAt = SDL_GetTicks() + 80;
-				if (ui.press(burstButton, player)) leave();
-				ui.release(burstButton, player);
+				if (ui.press(burstButton, shown())) leave();
+				ui.release(burstButton, shown());
 			}
 			if (scripted && (!waitFrom || SDL_GetTicks() - waitFrom > 3000) && running)
 			{
@@ -909,7 +1007,7 @@ int main(int argc, char** argv)
 						const std::string& step = steps[pressed++];
 						float v[4];
 						auto at = [&](Pointer::Kind k, float x, float y) {
-							if (ui.pointer({k, x / Ui::W, y / Ui::H}, player)) leave();
+							if (ui.pointer({k, x / Ui::W, y / Ui::H}, shown())) leave();
 						};
 						if (sscanf(step.c_str(), "dtap:%f:%f", &v[0], &v[1]) == 2)
 						{
@@ -933,8 +1031,8 @@ int main(int argc, char** argv)
 							for (int i = 0; i < 11; i++)
 							{
 								SDL_Delay(100);
-								ui.tick(player);	// (the Play button's hold is timed there)
-								ui.draw(player);
+								ui.tick(shown());	// (the Play button's hold is timed there)
+								ui.draw(shown());
 							}
 							at(Pointer::Up, v[0], v[1]);
 						}
@@ -962,7 +1060,7 @@ int main(int argc, char** argv)
 							// both panels: <BP_SHOTS or .>/<name>-top.png and -bottom.png
 							std::string base = std::string(getenv("BP_SHOTS") ? getenv("BP_SHOTS") : ".") + "/" + (step.c_str() + 5);
 							SDL_Surface* t = captureTop();
-							SDL_Surface* bt = haveUi ? ui.capture(player) : nullptr;
+							SDL_Surface* bt = haveUi ? ui.capture(shown()) : nullptr;
 							bool ok = t && bt && savePng(base + "-top.png", t->w, t->h, (unsigned char*)t->pixels) &&
 									  savePng(base + "-bottom.png", bt->w, bt->h, (unsigned char*)bt->pixels);
 							if (t) SDL_FreeSurface(t);
@@ -1000,8 +1098,8 @@ int main(int argc, char** argv)
 							burstButton = buttonFromName(step.substr(0, step.find('*')));
 							burstLeft = atoi(step.c_str() + step.find('*') + 1) - 1;
 							burstAt = SDL_GetTicks() + 80;
-							if (ui.press(burstButton, player)) leave();
-							ui.release(burstButton, player);
+							if (ui.press(burstButton, shown())) leave();
+							ui.release(burstButton, shown());
 						}
 						else if (step.find('~') != std::string::npos)
 						{
@@ -1009,21 +1107,21 @@ int main(int argc, char** argv)
 							// hold), then let go
 							Button b = buttonFromName(step.substr(0, step.find('~')));
 							Uint32 until = SDL_GetTicks() + atoi(step.c_str() + step.find('~') + 1);
-							if (ui.press(b, player)) leave();
+							if (ui.press(b, shown())) leave();
 							while (SDL_GetTicks() < until)
 							{
 								SDL_Delay(30);
 								player.pollEvents();
-								ui.tick(player);
-								ui.draw(player);
+								ui.tick(shown());
+								ui.draw(shown());
 							}
-							ui.release(b, player);
+							ui.release(b, shown());
 						}
 						else
 						{
 							Button b = buttonFromName(step);
-							if (ui.press(b, player)) leave();
-							ui.release(b, player);
+							if (ui.press(b, shown())) leave();
+							ui.release(b, shown());
 						}
 						// (no wait for mpv's answer here: a loop that doesn't draw holds mpv up as it switches files, and
 						// the timings would be the harness's; the state line can lag a step)
@@ -1036,14 +1134,18 @@ int main(int argc, char** argv)
 							std::string at = ui.browseSelection();
 							printf("press %zu: browse=%s at=%s\n", pressed, ui.browseFolder().c_str(), at.substr(at.rfind('/') + 1).c_str());
 						}
-						else if (!player.playing()) printf("press %zu: settings (from the browser)\n", pressed);
-						else if (player.playingPhoto())
+						else if (photos.playing())
 						{
-							const Player::PhotoView& v = player.photo();
-							printf("press %zu: photo=%d/%d %dx%d zoom=%.2f pan=%.3f,%.3f turn=%d %s thumb=%dx%d screen=%s\n", pressed,
-								player.index() + 1, player.count(), player.photoWidth(), player.photoHeight(), v.zoom, v.panX, v.panY,
-								v.rotate, v.fill ? "fill" : "fit", player.thumbW, player.thumbH, ui.screenOn() ? "on" : "off");
+							// (and what plays under it: its file, place and pause)
+							const Player::PhotoView& v = photos.photo();
+							printf("press %zu: photo=%d/%d %dx%d zoom=%.2f pan=%.3f,%.3f turn=%d %s thumb=%dx%d screen=%s", pressed,
+								photos.index() + 1, photos.count(), photos.photoWidth(), photos.photoHeight(), v.zoom, v.panX, v.panY,
+								v.rotate, v.fill ? "fill" : "fit", photos.thumbW, photos.thumbH, ui.screenOn() ? "on" : "off");
+							if (player.playing())
+								printf(" under=%s t=%.1f paused=%d", player.currentPath().substr(player.currentPath().rfind('/') + 1).c_str(), player.position, player.paused);
+							printf("\n");
 						}
+						else if (!player.playing()) printf("press %zu: settings (from the browser)\n", pressed);
 						else
 						{
 							// chapter=i/N: the current one (1-based, - before the first) of N, when the file has any
@@ -1120,7 +1222,7 @@ int main(int argc, char** argv)
 			}
 			Uint32 now = SDL_GetTicks();
 			// a chapter or equalizer card shown: it goes the way the volume card does, after its time
-			if (int ms = player.takeCardShown())
+			if (int ms = std::max(player.takeCardShown(), photos.takeCardShown()))
 			{
 				levelUntil = now + ms;
 				renderPending = true;
@@ -1128,6 +1230,7 @@ int main(int argc, char** argv)
 			if (levelUntil && now >= levelUntil)
 			{
 				player.hideLevel();
+				photos.hideLevel();
 				levelUntil = 0;
 				topDark = false;	// with no video: black again, without the card
 			}
@@ -1139,12 +1242,13 @@ int main(int argc, char** argv)
 			}
 			// with nothing playing the top panel is drawn on a change only, and mpv may not have the level card yet
 			// when it's asked to show: drawn again and again while the card is up
-			if (renderPending.exchange(false) || refresh || (!player.playing() && (!topDark || levelUntil)))
+			drainUnder();
+			if (renderPending.exchange(false) || refresh || (!shown().playing() && (!topDark || levelUntil)))
 			{
 				SDL_GL_MakeCurrent(top, gl);
 				int w, h;
 				SDL_GL_GetDrawableSize(top, &w, &h);
-				if (!player.playing())
+				if (!shown().playing())
 				{
 					// nothing playing: mpv draws its black with the icon (and a level card if one is up)
 					int r = player.render(w, h);
@@ -1159,19 +1263,19 @@ int main(int argc, char** argv)
 							logNextTop ? " with the level card" : "");
 					logNextTop = false;
 				}
-				// a new frame, or the same one again (paused, or a refresh)
-				else if (player.frameDue() || refresh)
+				// a new frame, or the same one again (paused, or a refresh); a photo's over what plays
+				else if (shown().frameDue() || refresh)
 				{
-					player.render(w, h);
+					shown().render(w, h);
 					SDL_GL_SwapWindow(top);
-					player.reportSwap();
+					shown().reportSwap();
 				}
 			}
 			if (haveUi)
 			{
 				// a slow bottom panel, in the log: what a press waits for on the handheld (the folder it was in)
 				Uint32 t0 = SDL_GetTicks();
-				ui.draw(player, refresh);
+				ui.draw(shown(), refresh);
 				Uint32 took = SDL_GetTicks() - t0;
 				if (took >= 30)
 					fprintf(stderr, "timing: bottom panel drawn in %u ms (%s)\n", (unsigned)took,
@@ -1200,6 +1304,7 @@ int main(int argc, char** argv)
 		if (haveUi) ui.flushPlaylist(player);
 		player.saveResume();
 		SDL_GL_MakeCurrent(top, gl);
+		photos.shutdown();
 		player.shutdown();
 	}
 	SDL_GL_DeleteContext(gl);

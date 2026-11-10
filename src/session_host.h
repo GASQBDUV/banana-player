@@ -93,8 +93,6 @@ namespace bp
 		Result stop(const std::string& origin);
 		// the executor's word to main that what plays here stops (HhUnload): 0 no, 1 a Stop, 2 the end of the list
 		int takeUnload() { int u = unload; unload = 0; return u; }
-		void photoPark(double pos);
-		void photoResume();
 		bool fileGone(const std::string& path);	// true: it was the session's item (stopped)
 		void seek(double t, bool relative, const std::string& origin);
 		void woke();

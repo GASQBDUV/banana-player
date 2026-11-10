@@ -191,8 +191,8 @@ namespace bp
 	{
 		if (b == Button::B)
 		{
-			// something playing (or stopped for a photo): back to it, so B never quits while it plays; else twice leaves
-			if (goNowPlaying(p)) return false;
+			// something playing: B stays on Home (SELECT goes to it) and never quits while it plays; else twice leaves
+			if (nowPlayable(p)) return false;
 			if (quitArmed && SDL_GetTicks() - quitArmed < QUIT_WINDOW_MS) return true;
 			quitArmed = SDL_GetTicks();
 			return false;
@@ -307,9 +307,8 @@ namespace bp
 
 	void Ui::openFile(const std::string& path, Player& p)
 	{
-		// what plays (or was stopped for a photo): back to it, never from its start
+		// what plays: back to it, never from its start
 		if (p.playing() && !p.playingPhoto() && p.currentPath() == path) { showPlayer(); return; }
-		if (parkedShown() && parked.path == path) { resumeParked(p, true); return; }
 		// a network file whose folder wasn't listed (Recent): listed first, a moment, for the files that play after it,
 		// its subtitles and its cover (netListed opens it)
 		NetPath np;
@@ -415,17 +414,11 @@ namespace bp
 					std::string sub = it.sub;
 					double frac = it.frac;
 					bool lit = !it.at.empty();
-					if (chip && chip != 4 && p.playing() && p.duration > 0)
+					if (chip && p.playing() && p.duration > 0)
 					{
 						double pos = std::max(0.0, shownPosition(p));
 						sub = formatTime(pos) + " / " + formatTime(p.duration);
 						frac = std::clamp(pos / p.duration, 0.0, 1.0);
-						lit = true;
-					}
-					else if (chip == 4 && parked.dur > 0)
-					{
-						sub = formatTime(parked.pos) + " / " + formatTime(parked.dur);
-						frac = std::clamp(parked.pos / parked.dur, 0.0, 1.0);
 						lit = true;
 					}
 					int chipW = chip ? drawChip(x + CARD_W - 8, CARD_Y + 19, chip, true) + 8 : 0;
@@ -485,12 +478,16 @@ namespace bp
 			}
 		}
 		if (quitArmed) { drawFooterText("Press B again to quit", ACCENT); return; }
-		// (something playing: B goes back to it, never quits)
-		const char* b = nowPlayable(p) ? "Now playing" : "Quit";
+		// (something playing: the mini bar says SELECT goes to it, and B does nothing here; else B twice quits)
+		bool playing = nowPlayable(p);
+		std::vector<Hint> h;
 		if (homeZone == HOME_STRIP && has && homeStrip < (int)recent.size())
-			drawHints({{"A", chipKind && recent[homeStrip].path == chipPath ? "Go to it" : "Play"}, {"Y", "Menu"}, {"X", "Options"}, {"B", b}, {"START", "Menu"}});
-		else if (homeZone == HOME_STRIP && has) drawHints({{"A", "Open"}, {"X", "Options"}, {"B", b}, {"START", "Menu"}});
-		else drawHints({{"D-PAD", "Move"}, {"A", "Open"}, {"X", "Options"}, {"B", b}, {"START", "Menu"}});
+			h = {{"A", chipKind && recent[homeStrip].path == chipPath ? "Go to it" : "Play"}, {"Y", "Menu"}, {"X", "Options"}};
+		else if (homeZone == HOME_STRIP && has) h = {{"A", "Open"}, {"X", "Options"}};
+		else h = {{"D-PAD", "Move"}, {"A", "Open"}, {"X", "Options"}};
+		if (!playing) h.push_back({"B", "Quit"});
+		h.push_back({"START", "Menu"});
+		drawHints(h);
 	}
 
 	Ui::Rect Ui::pipRect(int k, const Player& p) const
@@ -525,49 +522,10 @@ namespace bp
 
 	// ---- what plays behind the browser: the mini bar, the playing row's chip, what a photo stopped ----
 
-	void Ui::park(const Player& p)
-	{
-		if (!p.playing() || p.playingPhoto() || !p.error.empty()) return;
-		Parked k;
-		k.path = p.currentPath();
-		k.title = !p.title.empty() ? p.title : entryTitle(k.path);
-		k.paths = p.paths();
-		k.index = p.index();
-		k.source = p.source();
-		if (isNetPath(k.path)) k.names = netFolderNames(netParent(k.path));
-		k.pos = std::max(0.0, shownPosition(p));
-		k.dur = p.duration;
-		k.audio = p.playingAudio();
-		parked = k;
-	}
-
-	void Ui::resumeParked(Player& p, bool show)
-	{
-		if (!parkedShown()) return;
-		Parked k = parked;
-		parked = Parked();
-		playRequest = {};
-		playRequest.paths = k.paths;
-		playRequest.index = std::clamp(k.index, 0, std::max(0, (int)k.paths.size() - 1));
-		playRequest.source = k.source;
-		playRequest.names = k.names;
-		playRequest.stay = !show;
-		// at its place (a song too, which otherwise starts at its start), once it knows its length
-		seekPath = k.path;
-		seekTo = k.pos;
-		seekUntil = SDL_GetTicks() + 8000;
-		(void)p;
-	}
-
 	bool Ui::goNowPlaying(Player& p)
 	{
-		if (p.playing() && !p.playingPhoto())
-		{
-			showPlayer();
-			return true;
-		}
-		if (!parkedShown()) return false;
-		resumeParked(p, true);
+		if (!p.playing() || p.playingPhoto()) return false;
+		showPlayer();
 		return true;
 	}
 
@@ -580,17 +538,13 @@ namespace bp
 
 	void Ui::miniToggle(Player& p)
 	{
-		if (p.playing() && !p.playingPhoto())
-		{
-			// a page plays it: the page's play / pause (as A on the player)
-			if (pageDrives(p)) { toggleBrowser(p); return; }
-			if (!p.error.empty()) return;
-			if (pageIsOut()) { takeOver(p); return; }
-			SessionHost::get().play(p.paused);
-			p.togglePause();
-			return;
-		}
-		resumeParked(p, false);
+		if (!p.playing() || p.playingPhoto()) return;
+		// a page plays it: the page's play / pause (as A on the player)
+		if (pageDrives(p)) { toggleBrowser(p); return; }
+		if (!p.error.empty()) return;
+		if (pageIsOut()) { takeOver(p); return; }
+		SessionHost::get().play(p.paused);
+		p.togglePause();
 	}
 
 	void Ui::openNowMenu(const Player& p)
@@ -610,7 +564,7 @@ namespace bp
 		ctxArmed = false;
 		ctxPath.clear();
 		ctxFolder.clear();
-		ctxTitle = live ? (!p.title.empty() ? p.title : entryTitle(p.currentPath())) : parked.title;
+		ctxTitle = live ? (!p.title.empty() ? p.title : entryTitle(p.currentPath())) : "";
 		ctxNote.clear();
 		ctxPlFile.clear();
 		ctxPlItem = -1;
@@ -628,12 +582,6 @@ namespace bp
 			chipPath = p.currentPath();
 			chipKind = pageDrives(p) ? 3 : p.paused ? 2 : 1;
 			src = &p.source();
-		}
-		else if (parkedShown())
-		{
-			chipPath = parked.path;
-			chipKind = 4;
-			src = &parked.source;
 		}
 		if (src && src->kind == SourceKind::Playlist && !src->id.empty()) chipPlDir = plDirFor(src->id);
 	}
@@ -672,7 +620,7 @@ namespace bp
 		bool flash = landFlashUntil != 0;
 		drawBox(b, pressedBtn == MINI_BAR ? PRESSED : SURFACE, R_BUTTON, flash);
 		// how far into it, along its foot (dim: stopped for a photo)
-		double pos = live ? shownPosition(p) : parked.pos, dur = live ? p.duration : parked.dur;
+		double pos = live ? shownPosition(p) : 0, dur = live ? p.duration : 0;
 		double frac = dur > 0 && pos >= 0 ? std::clamp(pos / dur, 0.0, 1.0) : 0;
 		int fw = (int)std::lround(b.w * frac);
 		Rect in = flash ? Rect{b.x + theme::EDGE, b.y + theme::EDGE, b.w - 2 * theme::EDGE, b.h - 2 * theme::EDGE} : b;
@@ -687,7 +635,7 @@ namespace bp
 		}
 		drawGlyphMid(playingNow ? G_PAUSE : G_PLAY, b.x + 22, mid, err ? DIM : ACCENT);
 		fill({b.x + 44, b.y + 7, 2, b.h - 14}, RULE);
-		bool audio = live ? p.playingAudio() : parked.audio;
+		bool audio = live && p.playingAudio();
 		drawGlyphMid(audio ? G_NOTE : G_FILM, b.x + 62, mid, DIM);
 		// the right end: SELECT Now playing, a chevron
 		drawGlyphMid(G_RIGHT, b.x + b.w - 14, mid, DIM);
@@ -702,7 +650,7 @@ namespace bp
 			keyX -= (int)std::lround(textWidth("SELECT", 0) / sx);
 		}
 		// the title, then how it stands (dim; yellow for a page's; red for an error)
-		std::string title = live ? (!p.title.empty() ? p.title : entryTitle(p.currentPath())) : parked.title;
+		std::string title = live ? (!p.title.empty() ? p.title : entryTitle(p.currentPath())) : "";
 		std::string sub;
 		SDL_Color subInk = DIM;
 		if (err) { sub = "Couldn't read"; subInk = DANGER; }

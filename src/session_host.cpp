@@ -218,6 +218,8 @@ namespace bp
 				// Previous, the end of one), else the session's list opened. Held for a page: paused, it never sounds
 				if (s.index >= 0 && e.path == file())
 				{
+					// (held for a page while a photo is open here: the photo stays; pass() holds the copy once it closes)
+					if (e.hold && p.playingPhoto()) break;
 					if (!holdsItem() && !(p.playing() && !p.playingPhoto() && p.jumpTo(e.path, s.index))) bringHere();
 					if (e.t > 0) seekHere(e.t);
 					if (e.hold) p.holdPaused();
@@ -376,16 +378,6 @@ namespace bp
 	void SessionHost::play(bool on, const std::string& origin) { submit(make(on ? IntentType::Play : IntentType::Pause, origin)); }
 
 	Result SessionHost::stop(const std::string& origin) { return submit(make(IntentType::Stop, origin), true); }
-
-	void SessionHost::photoPark(double pos)
-	{
-		Intent i = make(IntentType::PhotoPark);
-		i.hasT = pos >= 0;
-		i.t = pos;
-		submit(i, true);
-	}
-
-	void SessionHost::photoResume() { submit(make(IntentType::PhotoResume), true); }
 
 	bool SessionHost::fileGone(const std::string& path)
 	{

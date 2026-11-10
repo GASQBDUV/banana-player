@@ -17,6 +17,7 @@
 #include <qrcodegen.hpp>
 #endif
 #include "ui_internal.h"
+#include "durations.h"
 
 namespace bp
 {
@@ -24,11 +25,27 @@ namespace bp
 	{
 		if (page == Page::Browse) return browseRows;
 		std::vector<Row> out;
+		if (page == Page::UpNext)
+		{
+			// a file a row (its place the id), the one playing as selected
+			int cur = -1;
+			auto list = upNextList(p, cur);
+			for (size_t i = 0; i < list.size(); i++) out.push_back({(int64_t)i, entryTitle(list[i]), (int)i == cur});
+			return out;
+		}
 		if (page == Page::Chapters)
 		{
 			// a chapter a row (its index the id), the one playing as selected
 			int cur = shownChapter(p);
 			for (size_t i = 0; i < p.chapters.size(); i++) out.push_back({(int64_t)i, chapterLabel(p.chapters[i], (int)i + 1), (int)i == cur});
+			return out;
+		}
+		if (tracksTab == TRACKS_PICTURE)
+		{
+			// the picture's size, as the old SELECT went round them (the mode the id)
+			static const char* NOTES[] = {"The whole picture", "Screen filled, edges cut", "Screen filled, stretched"};
+			for (int m = 0; m < 3; m++)
+				out.push_back({m, aspectName((AspectMode)m), p.aspect == (AspectMode)m, NOTES[m]});
 			return out;
 		}
 		TrackType type = trackType();
@@ -52,15 +69,49 @@ namespace bp
 		scroll = std::max(0, cursor - ROWS_SHOWN + 1);
 	}
 
+	std::vector<int> Ui::tracksTabs(const Player& p) const
+	{
+		// (a song's sound is its graph's: no track to choose; its chapters only)
+		std::vector<int> t;
+		if (!p.chapters.empty()) t.push_back(TRACKS_CHAPTERS);
+		if (!p.playingAudio()) t.insert(t.end(), {TRACKS_SUBS, TRACKS_AUDIO, TRACKS_PICTURE});
+		return t;
+	}
+
 	void Ui::openTracks(int tab, const Player& p)
 	{
 		tracksTab = tab;
+		tracksTabUsed = true;
+		if (tab == TRACKS_CHAPTERS) { openChapters(p); return; }
 		openMenu(Page::Tracks, p);
+	}
+
+	void Ui::openTracksPage(const Player& p)
+	{
+		auto tabs = tracksTabs(p);
+		if (tabs.empty()) return;
+		int want = tracksTabUsed ? tracksTab : p.chapters.empty() ? TRACKS_SUBS : TRACKS_CHAPTERS;
+		// (the last one shown isn't this file's: no chapters here) Subtitles, else the first there is
+		if (std::find(tabs.begin(), tabs.end(), want) == tabs.end())
+			want = std::find(tabs.begin(), tabs.end(), (int)TRACKS_SUBS) != tabs.end() ? TRACKS_SUBS : tabs[0];
+		openTracks(want, p);
+	}
+
+	void Ui::stepTracksTab(int dir, const Player& p)
+	{
+		auto tabs = tracksTabs(p);
+		int cur = page == Page::Chapters ? TRACKS_CHAPTERS : tracksTab;
+		auto it = std::find(tabs.begin(), tabs.end(), cur);
+		if (it == tabs.end()) return;
+		int i = (int)(it - tabs.begin()) + dir;
+		if (i >= 0 && i < (int)tabs.size()) openTracks(tabs[i], p);
 	}
 
 	void Ui::openChapters(const Player& p)
 	{
 		page = Page::Chapters;
+		tracksTab = TRACKS_CHAPTERS;
+		tracksTabUsed = true;
 		// on the one playing, three rows above it showing where the list allows (what came before it, a little)
 		int n = (int)p.chapters.size();
 		cursor = std::clamp(shownChapter(p), 0, std::max(0, n - 1));
@@ -94,7 +145,7 @@ namespace bp
 				// an item that isn't there: what can be done about it (its menu, why under the title)
 				if (plMissingAt(i)) { openBrowseMenu(i, MENU_Y); return; }
 				// the item that plays (from this playlist): back to it, never from its start
-				if (int k = rowChip(i)) { if (k == 4) resumeParked(p, true); else showPlayer(); return; }
+				if (rowChip(i)) { showPlayer(); return; }
 				plPlay(plCur, i, false, p);
 				return;
 			}
@@ -137,6 +188,11 @@ namespace bp
 			styleFromSubs = true;
 			return;
 		}
+		if (page == Page::UpNext)
+		{
+			playUpNext(i, p);
+			return;
+		}
 		if (page == Page::Chapters)
 		{
 			// from there: playing (a paused one too), the card says where, back to the player
@@ -149,6 +205,13 @@ namespace bp
 			return;
 		}
 		if (r[i].id < 0) return;
+		if (tracksTab == TRACKS_PICTURE)
+		{
+			p.setAspect((AspectMode)std::clamp((int)r[i].id, 0, 2));
+			p.osd(std::string("Aspect: ") + aspectName(p.aspect));
+			page = Page::Main;
+			return;
+		}
 		chooseTrack(p, trackType(), r[i].id);
 		page = Page::Main;
 	}
@@ -615,7 +678,7 @@ namespace bp
 				bool live = p.playing() && !p.playingPhoto();
 				bool on = live && (pageDrives(p) ? pagePlaying() : !p.paused);
 				bool liked = live && likedNow(p);
-				std::string where = live ? p.currentPath() : parked.path;
+				std::string where = p.currentPath();
 				where = isNetPath(where) ? netBaseName(netParent(where)) : baseName(parentFolder(where));
 				std::string npLabel = it == CTX_NP_NOW ? "Now playing" : it == CTX_NP_PLAY ? (on ? "Pause" : "Play")
 					: it == CTX_NP_LIKE ? (liked ? "Unlike" : "Like") : it == CTX_NP_ADD ? "Add to playlist\xE2\x80\xA6"
@@ -696,14 +759,16 @@ namespace bp
 
 	void Ui::drawChapters(const Player& p)
 	{
-		drawHeader("Chapters", p);
 		int n = (int)p.chapters.size();
 		if (n == 0)
 		{
+			// (the list emptied under it: the next file has none)
+			drawHeader("Chapters", p);
 			drawEmpty(G_CHAPTERS, "No chapters in this file", "When a file has chapters, L2 and R2 jump between them", nullptr);
 			drawHints({{"B", "Back"}});
 			return;
 		}
+		drawTracksHeader(p);
 		int cur = shownChapter(p), at = std::min(cursor, n - 1);
 		for (int i = scroll; i < n && i < scroll + ROWS_SHOWN; i++)
 		{
@@ -731,7 +796,104 @@ namespace bp
 			}
 		}
 		drawScrollBar(ROW_Y, ROWS_SHOWN * ROW_H - 4, scroll, ROWS_SHOWN, n);
-		drawHints({{"A", "Play from here"}, {"L2/R2", "Prev/Next"}, {"B", "Back"}});
+		if (tracksTabs(p).size() > 1) drawHints({{"A", "Play from here"}, {"L2/R2", "Prev/Next"}, {"R", "Subtitles"}, {"B", "Back"}});
+		else drawHints({{"A", "Play from here"}, {"L2/R2", "Prev/Next"}, {"B", "Back"}});
+	}
+
+	// ---- Up next: the list that plays ----
+
+	std::vector<std::string> Ui::upNextList(const Player& p, int& current) const
+	{
+		current = -1;
+		if (!p.playing() || p.playingPhoto()) return {};
+		// the Session's queue when it has this file (in the list's own order: Shuffle's is hidden), else the player's own
+		const Session& s = SessionHost::get().session();
+		if (s.index >= 0 && s.index < (int)s.queue.size() && s.queue[s.index] == p.currentPath())
+		{
+			current = s.index;
+			return s.queue;
+		}
+		current = p.index();
+		return p.paths();
+	}
+
+	void Ui::openUpNext(const Player& p)
+	{
+		page = Page::UpNext;
+		// on the one playing, three rows above it showing where the list allows (what came before it, a little)
+		int cur = -1;
+		int n = (int)upNextList(p, cur).size();
+		cursor = std::clamp(cur, 0, std::max(0, n - 1));
+		scroll = std::clamp(cursor - 3, 0, std::max(0, n - ROWS_SHOWN));
+	}
+
+	void Ui::playUpNext(int i, Player& p)
+	{
+		int cur = -1;
+		auto list = upNextList(p, cur);
+		if (i < 0 || i >= (int)list.size()) return;
+		page = Page::Main;
+		if (i == cur) return;	// (the one playing: back to it, never from its start)
+		// as a pick from that list: the same list from that row, where it came from (the Session's Open: the output, Shuffle
+		// and Loop stay as they are; with Shuffle on, a new order from that row)
+		playRequest = {};
+		playRequest.paths = list;
+		playRequest.index = i;
+		if (list == p.paths()) playRequest.source = p.source();
+		else
+		{
+			const Session& s = SessionHost::get().session();
+			playRequest.source.kind = s.source.kind == 2 ? SourceKind::Playlist : s.source.kind == 1 ? SourceKind::NetFolder : SourceKind::Folder;
+			playRequest.source.title = s.source.title;
+		}
+		if (isNetPath(list[i])) playRequest.names = netFolderNames(netParent(list[i]));
+		fprintf(stderr, "ui: up next, row %d of %d (%s)\n", i + 1, (int)list.size(), entryTitle(list[i]).c_str());
+	}
+
+	void Ui::drawUpNext(const Player& p)
+	{
+		drawHeader("Up next", p);
+		int cur = -1;
+		auto list = upNextList(p, cur);
+		int n = (int)list.size();
+		if (n == 0)
+		{
+			drawEmpty(G_PLAYLIST, "Nothing is playing", "Play a folder or a playlist to fill it", nullptr);
+			drawHints({{"B", "Back"}});
+			return;
+		}
+		// where it comes from, and which of how many
+		std::string from = p.source().title;
+		int count = n;
+		std::string place = std::to_string(cur + 1) + " / " + std::to_string(count);
+		drawTextMid(place, 0, DIM, 616, SUB_Y, 0, 1);
+		if (!from.empty()) drawTextMid("From " + from, 0, DIM, 16, SUB_Y, 600 - 24 - (int)std::lround(textWidth(place, 0) / sx));
+		int at = std::min(cursor, n - 1);
+		// the one playing: the chip the browser's row has (Now, Paused, Browser: a page plays it)
+		int chip = pageDrives(p) ? 3 : p.paused ? 2 : 1;
+		for (int i = scroll; i < n && i < scroll + ROWS_SHOWN; i++)
+		{
+			int y = ROW_Y + (i - scroll) * ROW_H, mid = y + 22;
+			bool focus = i == at, now = i == cur, past = cur >= 0 && i < cur;
+			if (focus) drawFocus({16, y, 608, ROW_H - 4});
+			SDL_Color soft = focus ? DIM_ON : DIM;
+			drawTextMid(std::to_string(i + 1), 0, now ? ACCENT : soft, 58, mid, 0, 1);
+			drawGlyphMid(isAudioFile(list[i]) ? G_NOTE : G_FILM, 82, mid, now ? ACCENT : soft);
+			// its length, where known (the one playing: mpv's; the others: the durations the lists probed)
+			int right = 608;
+			double d = now && p.duration > 0 ? p.duration : -1;
+			if (d <= 0 && !isNetPath(list[i])) cachedDuration(list[i], d);
+			if (d > 0)
+			{
+				std::string t = formatTime(d);
+				drawTextMid(t, 0, soft, right, mid, 0, 1);
+				right -= (int)std::lround(textWidth(t, 0) / sx) + 14;
+			}
+			if (now) right -= drawChip(right, mid, chip, true) + 10;
+			drawTextMid(entryTitle(list[i]), 1, focus ? ACCENT : past ? soft : TEXT, 104, mid, std::max(40, right - 8 - 104));
+		}
+		drawScrollBar(ROW_Y, ROWS_SHOWN * ROW_H - 4, scroll, ROWS_SHOWN, n);
+		drawHints({{"A", at == cur ? "Back to it" : "Play"}, {"B", "Back"}});
 	}
 
 	void Ui::readInfo(const Player& p)

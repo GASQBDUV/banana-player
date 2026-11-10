@@ -432,6 +432,7 @@ namespace bp
 		else if (page == Page::Chapters) drawChapters(p);
 		else if (page == Page::Sound) drawSound(p);
 		else if (page == Page::Playing) drawPlaying(p);
+		else if (page == Page::UpNext) drawUpNext(p);
 		else if (page != Page::Main) drawTracks(p);
 		else drawMain(p);
 		if (miniUp) drawMiniBar(p);
@@ -610,10 +611,10 @@ namespace bp
 		drawBattery(616, 24, p);
 	}
 
-	void Ui::drawTab(Rect r, const char* name, bool active)
+	void Ui::drawTab(Rect r, const char* name, bool active, int size)
 	{
 		drawBox(r, active ? ACCENT : BUTTON, R_BUTTON);
-		drawTextMid(name, 1, active ? ON_ACCENT : TEXT, r.x + r.w / 2, r.y + r.h / 2, r.w - 8, 2);
+		drawTextMid(name, size, active ? ON_ACCENT : TEXT, r.x + r.w / 2, r.y + r.h / 2, r.w - 8, 2);
 	}
 
 	void Ui::drawHints(const std::vector<Hint>& hints)

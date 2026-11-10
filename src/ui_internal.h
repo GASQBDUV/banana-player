@@ -41,7 +41,7 @@ namespace bp
 	struct GridKey { Button button; const char* hint; };
 	inline const GridKey GRID[2][5] = {
 		{{Button::L, "L"}, {Button::L3, "L3"}, {Button::A, "A"}, {Button::None, nullptr}, {Button::R, "R"}},
-		{{Button::X, "X"}, {Button::Y, "Y"}, {Button::Select, "SELECT"}, {Button::Up, "UP/DOWN"}, {Button::Start, "START"}},
+		{{Button::Y, "Y"}, {Button::X, "X"}, {Button::Select, "SELECT"}, {Button::Up, "UP/DOWN"}, {Button::Start, "START"}},
 	};
 
 	// the settings' on/off rows (TOGGLE_ROW + their index)

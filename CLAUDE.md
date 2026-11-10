@@ -49,7 +49,8 @@ tools/make-sprite.py                                 # web/sprite.svg from the G
 
 - **mpv:** never wait for mpv on the main thread while a file opens (`prop()`/commands async; track list, tags,
   chapters by `observe_property`). A file's own `start`/`aid`/`sid` go as `loadfile` options. Choose a track again by
-  its id (`songAid()`), never by setting "auto" again. mpv's Lua scripts stay off.
+  its id (`songAid()`), never by setting "auto" again. mpv's Lua scripts stay off. Photos play in their own mpv
+  (main's `photos`, no sound): what plays goes on under a photo (a video with `vid=no`).
 - **Music graphs** (`lavfi-complex`): clear before `aid`/`sid`; still inputs are single frames, never `loop=-1`; each
   branch starts with `aformat=sample_rates=44100|48000`, ≤30 fps, no per-frame conversions; time new graphs.
   EQ/effect is one `af` after the graph (`syncEq`).

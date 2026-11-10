@@ -342,11 +342,12 @@ namespace bp
 		}
 		// (on what plays behind it, as over the player)
 		if (page == Page::Browse && b == Button::Start) { openMainMenu(p, playingTabShown(p) ? TAB_PLAYING : TAB_SETTINGS); return false; }
-		if (page == Page::Tracks)
+		if (page == Page::Tracks || (page == Page::Chapters && !p.chapters.empty()))
 		{
-			// the tabs: Y the left one (Audio), X the right one (Subtitles); L/R as well, as the browser's tabs go
-			if (b == Button::Y || b == Button::L) { if (tracksTab != TRACKS_AUDIO) openTracks(TRACKS_AUDIO, p); return false; }
-			if (b == Button::X || b == Button::R) { if (tracksTab != TRACKS_SUBS) openTracks(TRACKS_SUBS, p); return false; }
+			// the tabs: L the one before, R the one after, as the browser's sections go; Y and X as well (the west and
+			// east buttons), X having opened the page
+			if (b == Button::Y || b == Button::L) { stepTracksTab(-1, p); return false; }
+			if (b == Button::X || b == Button::R) { stepTracksTab(1, p); return false; }
 		}
 		if (page == Page::Chapters && p.chapters.empty())
 		{
@@ -375,8 +376,8 @@ namespace bp
 			return false;
 		}
 		if (p.playingPhoto() && photoKey(b, p)) return false;
-		// a file that didn't open: nothing to pause, choose or speed up (Prev, Next, the menu and leaving still go)
-		if (!p.error.empty() && (b == Button::A || b == Button::X || b == Button::Y || b == Button::Select || b == Button::Up || b == Button::Down))
+		// a file that didn't open: nothing to pause, choose or speed up (Prev, Next, Up next, the menu and leaving still go)
+		if (!p.error.empty() && (b == Button::A || b == Button::X || b == Button::Select || b == Button::Up || b == Button::Down))
 			return false;
 		switch (b)
 		{
@@ -391,18 +392,15 @@ namespace bp
 		// out of the player at once: what plays goes on behind the browser (nothing is lost, so a pocket's press costs
 		// nothing); a photo closes
 		case Button::B: return true;
-		case Button::X: if (!musicKey(b, p)) openTracks(tracksTab, p); break;
-		// (a file with no chapters, or none known yet: the page says so)
-		case Button::Y: if (!musicKey(b, p)) openChapters(p); break;
+		// the play mode (a song or a video)
+		case Button::X: musicKey(b, p); break;
+		case Button::Y: openUpNext(p); break;
 		// the menu opens on what plays (Like, Add to playlist...): Settings is a tab along
 		case Button::Start: openMainMenu(p, playingTabShown(p) ? TAB_PLAYING : TAB_SETTINGS); break;
 		// the stick pressed in (the RG DS Plus): Like, at once (over a photo it turns it, above)
 		case Button::L3: likeNow(p); break;
-		case Button::Select:
-			if (musicKey(b, p)) break;
-			p.setAspect(nextAspect(p.aspect));
-			p.osd(std::string("Aspect: ") + aspectName(p.aspect));
-			break;
+		// a song: the Display popup; a video: Tracks (Chapters, Subtitles, Audio, Picture)
+		case Button::Select: if (!musicKey(b, p)) openTracksPage(p); break;
 		// (a page playing it: from where it should be by now; the jump is passed on to the page)
 		case Button::Left:
 		case Button::Right:
@@ -475,16 +473,15 @@ namespace bp
 			if (miniBarShown(p)) openNowMenu(p);
 		}
 		if (landFlashUntil && SDL_GetTicks() >= landFlashUntil) landFlashUntil = 0;
-		// what was stopped for a photo: forgotten once something else plays (a photo is no song's place)
-		if (parkedShown() && p.playing() && !p.playingPhoto()) parked = Parked();
 		// Home's Recent: listed again when what plays changes (the next song started by itself: its card comes first)
 		if (page == Page::Browse && !inMenu && atHome() && !homeTouch && !ctxOpen && p.currentPath() != homeListedFor)
 			enterFolder(HOMEDIR, p);
 		// the hand-off from a browser: its position, once the file it opened knows its length (5 s at most)
 		if (!seekPath.empty())
 		{
-			// (a play request still to be opened by main: not yet the file)
-			if (!playRequest.paths.empty()) {}
+			// (a play request still to be opened by main: not yet the file; a photo up: this is the photo viewer, the seek
+			// waits for the player)
+			if (!playRequest.paths.empty() || p.playingPhoto()) {}
 			else if (SDL_GetTicks() > seekUntil || p.currentPath() != seekPath || !p.error.empty()) seekPath.clear();
 			else if (p.loaded && p.duration > 0)
 			{
@@ -585,14 +582,15 @@ namespace bp
 			return false;
 		}
 		if (id >= PLAY_ROW && id < PLAY_ROW + 7) return playingChoose(id - PLAY_ROW, p);
-		// a song's line under the buttons, and its Sound button (Y's place, a song with no chapters): the Sound page
-		if (page == Page::Main && p.playingAudio() && (id == LINE1_BTN || (id == 6 && p.chapters.empty() && p.error.empty())))
+		// a song's line under the buttons: the Sound page
+		if (page == Page::Main && p.playingAudio() && id == LINE1_BTN)
 		{
 			openSound(p, false);
 			return false;
 		}
+		// a video's lines and the chapter line: their tab of Tracks
 		if (id == LINE1_BTN || id == LINE2_BTN) { openTracks(id == LINE1_BTN ? TRACKS_AUDIO : TRACKS_SUBS, p); return false; }
-		if (id == CHAPTER_BTN) { openChapters(p); return false; }
+		if (id == CHAPTER_BTN) { openTracks(TRACKS_CHAPTERS, p); return false; }
 		if (id == GROUP_PREV || id == GROUP_NEXT) { stepGroup(id == GROUP_NEXT ? 1 : -1); return false; }
 		if (id == SCREEN_BTN) { panel.set(false); return false; }
 		if (id == EXIT_BTN) { quitRequested = true; return false; }
@@ -935,11 +933,13 @@ namespace bp
 					if (pipRect(t, p).hit(x, y)) openSection(t, p);
 			return false;
 		}
-		if (page == Page::Tracks && y < 60)
+		if ((page == Page::Tracks || page == Page::Chapters) && y < 60)
 		{
 			// a tab switches as the finger lands (as the browser's do)
-			for (int t = 0; t < 2; t++)
-				if (tracksTabRect(t).hit(x, y) && t != tracksTab) openTracks(t, p);
+			auto tabs = tracksTabs(p);
+			int cur = page == Page::Chapters ? TRACKS_CHAPTERS : tracksTab;
+			for (int i = 0; i < (int)tabs.size(); i++)
+				if (tracksTabRect(i, (int)tabs.size()).hit(x, y) && tabs[i] != cur) openTracks(tabs[i], p);
 			return false;
 		}
 		if (page != Page::Main)
@@ -1036,6 +1036,8 @@ namespace bp
 		// the chapters: the list, the one playing (the Chapters page's progress goes by the position, above), the tab
 		photo += "|ch" + std::to_string(p.chapterSerial) + " " + std::to_string(p.chapters.size()) + " " +
 			std::to_string(shownChapter(p)) + " t" + std::to_string(tracksTab);
+		// Up next: the list and the one playing (the Session's version moves with both)
+		if (page == Page::UpNext) photo += "|un" + std::to_string(SessionHost::get().version()) + " " + std::to_string((int)p.paths().size());
 		// Sound: its tab, the band, the effect under the cursor, its dialogs and the presets' list; the Display popup
 		if (page == Page::Sound || displayOpen)
 		{
@@ -1088,8 +1090,8 @@ namespace bp
 		{
 			char bb[160];
 			snprintf(bb, sizeof bb, "|bg%d %d %d %d %d %d %d %d %.0f", bgPlay, miniBarShown(p), chipKind, landFlashUntil != 0, playHoldMini,
-				markW(p), markW(p) && markLive(p) && panel.on() ? (int)(SDL_GetTicks() / 166) : -1, p.loading(), parked.pos);
-			photo += bb + chipPath + "|" + parked.path + "|" + p.currentPath();
+				markW(p), markW(p) && markLive(p) && panel.on() ? (int)(SDL_GetTicks() / 166) : -1, p.loading(), 0.0);
+			photo += bb + chipPath + "|" + p.currentPath();
 		}
 		// Home: the focus, the strip's scroll, a finger on a card or a tile, the tiles' lines (the connections)
 		if (atHome())

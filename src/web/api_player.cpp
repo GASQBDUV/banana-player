@@ -111,7 +111,7 @@ namespace bp
 	// Ui's insides the routes need (a friend of Ui's), all on the main thread
 	struct WebPlayerGlue
 	{
-		// where the file just opened starts: where a parked one was (applied once it knows its length), else its place
+		// where the file just opened starts: a seek still waiting for it (applied once it knows its length), else its place
 		static double openPos(Player& p, Ui& u)
 		{
 			return u.seekPath == p.currentPath() && SDL_GetTicks() < u.seekUntil && u.seekTo >= 0 ? u.seekTo : p.position;
@@ -173,32 +173,8 @@ namespace bp
 		static WebSnapshot snapshot(WebServer& ws, Player& p, Ui& u)
 		{
 			WebSnapshot s;
-			// a photo on the handheld isn't shown to the page: what it paused (parked) is, paused at its place; with
-			// nothing parked, nothing plays
-			if (p.playing() && p.playingPhoto())
-			{
-				if (u.parkedShown())
-				{
-					const auto& k = u.parked;
-					s.path = ws.toVirtual(k.path);
-					s.title = webTitle(k.path, k.title);
-					s.kind = k.audio ? "audio" : "video";
-					s.screen = "browser";
-					const PlaySource& src = k.source;
-					s.sourceKind = src.kind == SourceKind::Playlist ? (src.id.empty() ? "selection" : "playlist") : "folder";
-					s.sourceTitle = src.title;
-					s.sourceId = src.kind == SourceKind::Playlist ? (src.id.empty() ? "" : playlistId(src.id)) : ws.toVirtual(src.id);
-					s.liked = u.plStore && u.plStore->isLiked(k.path);
-					s.index = k.index;
-					s.count = (int)k.paths.size();
-					s.paused = true;
-					s.position = std::max(0.0, k.pos);
-					s.duration = std::max(0.0, k.dur);
-					s.speed = 1;
-					s.shuffled = p.settings.shuffle;	// (the setting: the page shows it)
-				}
-			}
-			else if (p.playing())
+			// (a photo is the photo viewer's, never this player's: what plays under it is what the page sees)
+			if (p.playing())
 			{
 				std::string path = p.currentPath();
 				s.path = ws.toVirtual(path);
@@ -581,13 +557,6 @@ namespace bp
 				{
 					WebCall::setStatus(409);
 					return error("Nothing is playing on the handheld", "playing");
-				}
-				// a photo on the handheld: the page sees the song or video it paused (parked). Play brings that back
-				// (behind the browser; the photo closes), Pause has nothing to do, and the rest would step the photos
-				if (p.playingPhoto())
-				{
-					if (u.parkedShown() && (c == "toggle" || c == "play")) u.resumeParked(p, false);
-					return "{\"ok\":true}";
 				}
 				// a page is the output (another tab, this one a remote): Play / Pause / seeks are the session's, which the
 				// page follows; Stop stops everywhere (the handheld's Stop)

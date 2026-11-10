@@ -24,6 +24,7 @@ namespace bp
 	{
 		roots = browseRoots();
 		page = Page::Browse;
+		onPlayer = false;
 		if (!folder.empty())
 		{
 			browseTab = isNetPath(folder) ? TAB_NETWORK : TAB_LOCAL;
@@ -46,9 +47,41 @@ namespace bp
 		enterFolder(there ? last : std::string(HOMEDIR), p);
 	}
 
+	void Ui::backFromPlayer(Player& p, const std::string& lastPlayed, const PlaySource& from, int index)
+	{
+		PlayerBack b = playerBack;
+		playerBack = PlayerBack();
+		bool menuGone = b.inMenu && b.menuTab == TAB_PLAYING && !(p.playing() && !p.playingPhoto());
+		if (!b.set || !showAfterLeave.empty() || b.page == Page::Main || menuGone)
+		{
+			showBrowser(p, lastPlayed, from, index);
+			return;
+		}
+		// the page as it was left: nothing of the browser's was touched meanwhile but the cursor and the scroll, which
+		// the player's pages share (and the menu's way back, which START over the player set again)
+		onPlayer = false;
+		page = b.page;
+		inMenu = b.inMenu;
+		menuTab = b.menuTab;
+		setGroup = b.setGroup;
+		cursor = b.cursor;
+		scroll = b.scroll;
+		menuReturnDir = b.menuReturnDir;
+		menuReturnCursor = b.menuReturnCursor;
+		menuReturnScroll = b.menuReturnScroll;
+		bgPlay = p.playing();
+		ctxOpen = false;
+		touchLocked = false;	// the lock is the video's
+		if (bgPlay) landFlashUntil = SDL_GetTicks() + 900;	// the mini bar's edge lit a moment: it's still playing
+		dropTouch();
+		fprintf(stderr, "ui: back from the player to %s\n", page == Page::Browse && !inMenu ? (atHome() ? "Home" : browseDir.empty() ? "Files" : browseDir.c_str())
+			: inMenu ? "the menu" : "a page");
+	}
+
 	void Ui::showBrowser(Player& p, const std::string& lastPlayed, const PlaySource& from, int index)
 	{
 		page = Page::Browse;
+		onPlayer = false;
 		// (left while it plays: it goes on behind; stopped: nothing plays)
 		bgPlay = p.playing();
 		ctxOpen = false;
@@ -716,12 +749,8 @@ namespace bp
 			case CTX_NP_PLAY: miniToggle(p); break;
 			case CTX_NP_LIKE: likeNow(p); break;
 			case CTX_NP_ADD: if (p.playing() && !p.playingPhoto()) openAddOne(p.currentPath(), p.title, p.loaded ? p.duration : -1, p); break;
-			case CTX_NP_SHOW: showInFolder(p.playing() && !p.playingPhoto() ? p.currentPath() : parked.path, p); break;
-			case CTX_NP_STOP:
-				// (the one stopped for a photo: forgotten, its place kept)
-				if (p.playing() && !p.playingPhoto()) stopPressed = true;
-				else parked = Parked();
-				break;
+			case CTX_NP_SHOW: if (p.playing() && !p.playingPhoto()) showInFolder(p.currentPath(), p); break;
+			case CTX_NP_STOP: if (p.playing() && !p.playingPhoto()) stopPressed = true; break;
 			case CTX_R_PLAY: openFile(path, p); break;
 			case CTX_R_SHOW: showInFolder(path, p); break;
 			case CTX_R_ADD:
@@ -1133,11 +1162,17 @@ namespace bp
 		drawScrollBar(ROW_Y, ROWS_SHOWN * ROW_H - 4, scroll - first, ROWS_SHOWN, n - first);
 		if (!browse)
 		{
-			// the other tab's key, as on its tab; on Subtitle style A opens it
-			bool audio = trackType() == TrackType::Audio;
+			// the neighbours' keys, as on their tabs; on Subtitle style A opens it
+			static const char* TAB_NAMES[4] = {"Chapters", "Subtitles", "Audio", "Picture"};
 			const char* verb = cursor >= 0 && cursor < n && r[cursor].id == STYLE_ROW ? "Style" : "Choose";
-			if (noAudio) drawHints({{"X", "Subtitles"}, {"B", "Back"}});
-			else drawHints({{"A", verb}, {audio ? "X" : "Y", audio ? "Subtitles" : "Audio"}, {"B", "Back"}});
+			std::vector<Hint> h;
+			if (!noAudio) h.push_back({"A", verb});
+			auto tabs = tracksTabs(p);
+			auto it = std::find(tabs.begin(), tabs.end(), tracksTab);
+			if (it != tabs.end() && it != tabs.begin()) h.push_back({"L", TAB_NAMES[*(it - 1)]});
+			if (it != tabs.end() && it + 1 != tabs.end()) h.push_back({"R", TAB_NAMES[*(it + 1)]});
+			h.push_back({"B", "Back"});
+			drawHints(h);
 			return;
 		}
 		if (sel) { drawSelBar(); return; }
@@ -1222,29 +1257,51 @@ namespace bp
 
 	void Ui::drawTracksHeader(const Player& p)
 	{
+		tabsRight = std::min(630, statusLeft(p) - 10);
 		drawBackIcon();
-		// the tabs: the open one as START's menu draws its tab; the other with its key on its outer side (Y on the
-		// left one, X on the right one, as the buttons sit), its name centred in the rest
-		static const char* NAMES[2] = {"Audio", "Subtitles"};
-		for (int t = 0; t < 2; t++)
+		// the tabs, in their order: the open one as START's menu draws its tab; its neighbours with their key on their
+		// outer side (L the one before, R the one after: Y and X do the same), the name centred in the rest
+		static const char* FULL[4] = {"Chapters", "Subtitles", "Audio", "Picture"};
+		static const char* SHORT[4] = {"Chap.", "Subs", "Audio", "Picture"};
+		auto tabs = tracksTabs(p);
+		int cur = page == Page::Chapters ? TRACKS_CHAPTERS : tracksTab, at = 0;
+		for (int i = 0; i < (int)tabs.size(); i++)
+			if (tabs[i] == cur) at = i;
+		// (four tabs beside the header's status: their names a size smaller where one wouldn't fit, then short ones,
+		// all alike)
+		int size = 1;
+		const char* const* NAMES = FULL;
+		auto fits = [&](const char* const* names, int sz) {
+			for (int i = 0; i < (int)tabs.size(); i++)
+				if (textWidth(names[std::clamp(tabs[i], 0, 3)], sz) / sx > tracksTabRect(i, (int)tabs.size()).w - 12) return false;
+			return true;
+		};
+		if (!fits(FULL, 1)) size = 0;
+		if (!fits(FULL, size)) NAMES = SHORT;
+		for (int i = 0; i < (int)tabs.size(); i++)
 		{
-			Rect r = tracksTabRect(t);
-			if (t == tracksTab) { drawTab(r, NAMES[t], true); continue; }
+			Rect r = tracksTabRect(i, (int)tabs.size());
+			const char* name = NAMES[std::clamp(tabs[i], 0, 3)];
+			if (i == at) { drawTab(r, name, true, size); continue; }
 			drawBox(r, BUTTON, R_BUTTON);
-			const char* key = t == TRACKS_AUDIO ? "Y" : "X";
-			int kw = (int)std::lround(textWidth(key, 0) / sx), mid = r.y + r.h / 2;
-			int left = r.x, right = r.x + r.w;
-			if (t == TRACKS_AUDIO)
+			const char* key = i == at - 1 ? "L" : i == at + 1 ? "R" : nullptr;
+			int mid = r.y + r.h / 2, left = r.x, right = r.x + r.w;
+			// (the key where the name leaves room for it: the footer's hints name it too)
+			int kw = key ? (int)std::lround(textWidth(key, 0) / sx) : 0, nw = (int)std::lround(textWidth(name, size) / sx);
+			if (key && p.settings.buttonHotkeys && 14 + kw + 8 + nw + 8 <= r.w)
 			{
-				drawTextMid(key, 0, ACCENT, r.x + 14, mid);
-				left = r.x + 14 + kw;
+				if (i < at)
+				{
+					drawTextMid(key, 0, ACCENT, r.x + 14, mid);
+					left = r.x + 14 + kw;
+				}
+				else
+				{
+					drawTextMid(key, 0, ACCENT, r.x + r.w - 14, mid, 0, 1);
+					right = r.x + r.w - 14 - kw;
+				}
 			}
-			else
-			{
-				drawTextMid(key, 0, ACCENT, r.x + r.w - 14, mid, 0, 1);
-				right = r.x + r.w - 14 - kw;
-			}
-			drawTextMid(NAMES[t], 1, TEXT, (left + right) / 2, mid, right - left - 8, 2);
+			drawTextMid(name, size, TEXT, (left + right) / 2, mid, right - left - 8, 2);
 		}
 		drawBattery(616, 24, p);
 	}

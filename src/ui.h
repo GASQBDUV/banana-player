@@ -75,8 +75,11 @@ namespace bp
 		void setStateDir(const std::string& stateDir);
 		// the row the browser's cursor is on (Home: the card or the tile it's on), for test runs
 		std::string browseSelection() const;
+		// the player shown (a pick, Now playing, SELECT, a photo...): where it was opened from is kept, for the way back
 		void showPlayer()
 		{
+			if (!onPlayer) playerBack = {true, page, inMenu, menuTab, setGroup, cursor, scroll, menuReturnDir, menuReturnCursor, menuReturnScroll};
+			onPlayer = true;
 			page = Page::Main;
 			inMenu = false;
 			bgPlay = false;
@@ -91,11 +94,11 @@ namespace bp
 		// what plays stopped (any Stop, the end of the list): a page playing the file has nothing held here any more
 		// (the page plays on: not told)
 		void stopped() { playHoldAt = 0; }
-		// a song or video stopped for a photo (one mpv: a photo replaces it): its place kept, the mini bar offers it back
-		// (park, before the photo opens). Resumed by the bar's play (in the background) or its tap / SELECT (the player)
-		void park(const Player& p);
-		bool parkedShown() const { return !parked.path.empty(); }
-		// the parked one played again behind the browser (its PlayRequest's stay): the browser stays the base page
+		// Back from the player (B, "<", Back; its Stop; a photo closed): where it was opened from, as it was (the page,
+		// the folder, the cursor and the scroll; Home, a playlist, START's menu...), what plays going on behind it. Never
+		// opened from there (started with a file), or Show in folder asked for: the browser on lastPlayed (showBrowser)
+		void backFromPlayer(Player& p, const std::string& lastPlayed, const PlaySource& from = {}, int index = -1);
+		// opened behind the browser (a PlayRequest's stay): the browser stays the base page
 		void playBehind() { bgPlay = true; }
 		bool browsing() const { return page == Page::Browse; }
 		std::string browseFolder() const { return browseDir; }
@@ -111,8 +114,7 @@ namespace bp
 		}
 		std::string takeOpenRequest() { std::string r; r.swap(openRequest); return r; }
 		// a playlist picked in the browser (an item, Play, Shuffle play), once: the caller opens it (openPlaylist)
-		// names: a network folder's listing (open's folderNames); stay: opened behind the browser (the parked song's
-		// play from the mini bar), not on the player
+		// names: a network folder's listing (open's folderNames); stay: opened behind the browser, not on the player
 		struct PlayRequest { std::vector<std::string> paths; int index = 0; PlaySource source; std::vector<std::string> names; bool stay = false; };
 		bool takePlayRequest(PlayRequest& out)
 		{
@@ -231,22 +233,44 @@ namespace bp
 		friend struct WebPlayerGlue;
 		friend class SessionHost;
 		friend struct WebPlaylistGlue;
-		enum class Page { Main, Tracks, Chapters, Settings, Browse, Info, About, Exit, Sound, Web, Playing };
+		enum class Page { Main, Tracks, Chapters, Settings, Browse, Info, About, Exit, Sound, Web, Playing, UpNext };
 		struct Rect { int x, y, w, h; bool hit(int px, int py) const { return px >= x && py >= y && px < x + w && py < y + h; } };
 		struct Row { int64_t id; std::string label; bool selected; std::string note = ""; };
 
 		std::vector<Row> rows(const Player& p) const;
 		void openMenu(Page pg, const Player& p);
-		// Audio & Subtitles: one page, two tabs (Y the left one, X the right), the last one open kept for the run
-		enum TracksTab { TRACKS_AUDIO, TRACKS_SUBS };
-		int tracksTab = TRACKS_AUDIO;
+		// Tracks: one page, four tabs in this order, those that apply (tracksTabs): Chapters (a file with chapters; the
+		// Chapters page, Page::Chapters), Subtitles, Audio and Picture (Fit, Fill, Stretch) (a video; Page::Tracks).
+		// L/R (and Y/X) step between them. SELECT on a video opens the last one shown (openTracksPage); none shown yet:
+		// Chapters where there are some, else Subtitles. A line of the player's opens its own tab
+		enum TracksTab { TRACKS_CHAPTERS, TRACKS_SUBS, TRACKS_AUDIO, TRACKS_PICTURE };
+		int tracksTab = TRACKS_SUBS;
+		bool tracksTabUsed = false;	// a tab was shown this run (X opens it again)
 		TrackType trackType() const { return tracksTab == TRACKS_AUDIO ? TrackType::Audio : TrackType::Sub; }
+		std::vector<int> tracksTabs(const Player& p) const;
 		void openTracks(int tab, const Player& p);
-		Rect tracksTabRect(int t) const { return {t == TRACKS_AUDIO ? 72 : 248, 10, 168, 44}; }
+		void openTracksPage(const Player& p);
+		void stepTracksTab(int dir, const Player& p);	// the tab before (-1) or after (+1), no wrap
+		// the i-th of n tabs shown: three or fewer 152 wide, four share the room before the clock
+		// the tabs share the room between the back key and the header's status (clock, Wi-Fi, battery): tabsRight, set
+		// as the header is drawn (statusLeft), so a tap hits what was drawn
+		int tabsRight = 630;
+		Rect tracksTabRect(int i, int n) const
+		{
+			int room = tabsRight - 70, step = std::min(n > 3 ? 122 : 156, n > 0 ? room / n : room);
+			return {70 + i * step, 10, step - 4, 44};
+		}
 		void drawTracksHeader(const Player& p);
-		// the file's chapters: the cursor on the one playing
+		// the file's chapters (the Tracks page's Chapters tab): the cursor on the one playing
 		void openChapters(const Player& p);
 		void drawChapters(const Player& p);
+		// Up next (Y on the player): the list that plays, in its own order (the Session's queue: Shuffle reorders
+		// nothing shown), the one playing marked, scrolled to it; A plays a row as a pick from that list does (the
+		// Session's Open: Shuffle and Loop stay as set)
+		std::vector<std::string> upNextList(const Player& p, int& current) const;
+		void openUpNext(const Player& p);
+		void playUpNext(int i, Player& p);
+		void drawUpNext(const Player& p);
 		// the chapter line over the bar (the one playing), and the two track lines under the buttons: each opens its
 		// page. Their ids are apart from buttonRect's grid and the photo's
 		static constexpr int LINE1_BTN = 500, LINE2_BTN = 501, CHAPTER_BTN = 502;
@@ -783,7 +807,7 @@ namespace bp
 		// yellow, what it does), the cursor's row, a list's scroll bar, a page with nothing to list
 		struct Hint { std::string key, verb; };
 		void drawHeader(const std::string& title, const Player& p, int titleRight = 0);	// titleRight: the title ends before it
-		void drawTab(Rect r, const char* name, bool active);
+		void drawTab(Rect r, const char* name, bool active, int size = 1);
 		void drawHints(const std::vector<Hint>& hints);
 		void drawFooterText(const std::string& text, SDL_Color c);
 		void drawFocus(Rect r);
@@ -992,21 +1016,20 @@ namespace bp
 		// the player left (B, "<", Back) while a song or video plays on: the browser is the base page; showPlayer ends it
 		bool bgPlay = false;
 		bool stopPressed = false;	// the player's own Stop (takeStopPressed)
-		// what was stopped for a photo: where it played from, and where it was
-		struct Parked
+		// the player shown (showPlayer) and not left since; back: where it was opened from (backFromPlayer)
+		bool onPlayer = true;
+		struct PlayerBack
 		{
-			std::string path, title;
-			std::vector<std::string> paths, names;
-			int index = 0;
-			PlaySource source;
-			double pos = 0, dur = 0;
-			bool audio = false;
-		} parked;
-		void resumeParked(Player& p, bool show);	// played again at its place (show: on the player)
-		// back to what plays (SELECT on a browse page, the bar, Now playing, B at Home): the player, or the parked one
-		// reopened there. False: nothing to go back to
+			bool set = false;
+			Page page = Page::Browse;
+			bool inMenu = false;
+			int menuTab = 0, setGroup = -1, cursor = 0, scroll = 0;
+			std::string menuReturnDir;
+			int menuReturnCursor = 0, menuReturnScroll = 0;
+		} playerBack;
+		// back to what plays (SELECT on a browse page, the bar, Now playing, B at Home): the player. False: nothing plays
 		bool goNowPlaying(Player& p);
-		bool nowPlayable(const Player& p) const { return (p.playing() && !p.playingPhoto()) || parkedShown(); }
+		bool nowPlayable(const Player& p) const { return p.playing() && !p.playingPhoto(); }
 		// the mini bar (Now playing) along the bottom of Home and the browser's pages: a tap the player, its play mark
 		// play / pause (a page playing the file: the page's, held: here), a hold its menu
 		static constexpr Rect MINI_BOX{16, 422, 608, 34};
@@ -1014,14 +1037,14 @@ namespace bp
 		bool miniBarShown(const Player& p) const;
 		bool miniUp = false;	// shown in the last frame drawn (tileRect, the footer's line)
 		void drawMiniBar(const Player& p);
-		void miniToggle(Player& p);	// its play mark: play / pause what plays (a page's, the parked one in the background)
+		void miniToggle(Player& p);	// its play mark: play / pause what plays (a page's too)
 		void openNowMenu(const Player& p);
 		Uint32 miniHoldAt = 0;
 		bool playHoldMini = false;	// the Play hold (a page plays the file) is on the mini bar's play mark
 		int footY() const { return miniUp ? 468 : FOOT_Y; }
 		// the playing file's row (and Recent card): a chip ("Playing", "Paused", "In browser", "Stopped"), set each frame
 		std::string chipPath, chipPlDir;	// chipPlDir: a playlist's page (only there, of the playlists: the one playing)
-		int chipKind = 0;	// 0 none, 1 playing, 2 paused, 3 in a browser, 4 stopped (for a photo)
+		int chipKind = 0;	// 0 none, 1 playing, 2 paused, 3 in a browser
 		void setChip(const Player& p);
 		int drawChip(int right, int mid, int kind, bool card = false);	// its width
 		int rowChip(int i) const;	// the chip of the browser's row i (0 none)

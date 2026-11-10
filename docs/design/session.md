@@ -199,6 +199,11 @@ New route: `POST /api/intent` (JSON `{origin, seq, basis, type, …}`) → `{ok,
   `parked = true`, `playing = false`, `pos` frozen; if `out == Browser`, nothing changes for the page (it plays on), only
   the handheld's mpv shows the photo. `PhotoResume` (the bar's play, SELECT, a photo closed): `parked = false`, `load++`
   so the handheld reloads at `pos`. Any `Open` clears `parked`.
+  **Since 2026-11-10 nothing is parked**: photos play in a second mpv of their own (main's `photos`), so a photo over
+  the handheld's song or video changes nothing in the session (it plays on, the next item follows; a video's picture is
+  only hidden, `Player::hideVideo`), and over a page's item the held copy stays held. The host no longer sends
+  `PhotoPark`/`PhotoResume`; the reducer keeps them (tested, and harmless), and `parked` stays false in practice.
+  docs/notes/2026-11-10-photos-over-media.md.
 - **End of list**: `Ended` on the last item, no loop → `index = -1`, `playing = false`, `Note "Finished"` / `PageToast
   "End of <source>"`; the last item and place go to Recent as today (`saveResume`). Loop one: `seekN++`. Loop all: wrap.
   The list is kept as `ended` for the pages to offer again (§13).
@@ -529,6 +534,10 @@ What moved, what went, and the choices made (the code and tests follow these):
   intent). Files/Playlists/Recent don't mark its last item as playing; a headset's Play doesn't restart it.
 
 ## 14. Shuffle (2026-11-10)
+
+(The handheld's **Up next** page, Y on its player, lists `queue` in this order too, the item playing marked; a row is
+an `Open` of that queue from that index, as a pick from the list: Shuffle makes a new order from it.)
+
 
 - **Two settings**, independent and lasting (settings.conf `shuffle = yes|no`, `loop = off|all|one`; never reset by an
   Open from anywhere): `Session::shuffle` and `Session::loop` follow them each pass (`SessionHost::pass`). The web's

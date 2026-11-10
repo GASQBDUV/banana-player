@@ -45,7 +45,7 @@ Open Banana Player and the bottom screen shows **Home**:
 
 Move with the D-pad: **UP/DOWN** between the strip and the tiles (back to the card or the column you left),
 **LEFT/RIGHT** along them. **X** on Home: **Clear Recent** (press twice), **Show hidden folders**, **Settings**. **B**
-twice quits (while something plays, **B** goes back to it instead), **START** opens the menu.
+twice quits (while something plays, **B** does nothing on Home and **SELECT** goes to it), **START** opens the menu.
 
 Inside a section the header reads its name with four markers beside it, the open one lit: **L/R** go to the section
 before or after, or tap a marker. Each section opens where you left it (its top if that folder or playlist is gone),
@@ -73,9 +73,10 @@ its folder on that file.
 
 Leaving the player doesn't stop what plays. **B** (or **Back**, or **<**) on the playing screen takes you to the list,
 and the song or video goes on: a video keeps playing full size on the top screen, a song keeps its visualizer or art.
-Paused stays paused. You land in the folder (or playlist) it plays from, the cursor on it, whatever folder you
-browsed meanwhile; its row lights up for a moment. When the next file starts by itself, that's where you land next
-time.
+Paused stays paused. You land back **where you were before you opened the player**: the same page, folder, cursor
+and scroll (Home, a folder, a playlist, All recent, START's menu…). Started with a file, or after **Show in folder**,
+you land in the folder (or playlist) it plays from, the cursor on it. The same goes for **Stop** and for the end of
+the list while the playing screen was up.
 
 - **The mini bar**, along the bottom of Home and every list (Files, Playlists, Network, All recent): the play / pause
   mark, the title, `0:14 / 1:00` (· paused), and a line showing how far it has got. Tap the bar to go back to the
@@ -84,8 +85,7 @@ time.
   while you select files, type, fill in a connection, and on Settings and Info.
 - **The header** shows three small yellow bars left of the clock while something plays behind the list (dim and still
   when it's paused).
-- **The playing file's row** carries a chip: **Playing**, **Paused**, **In browser** (the web dashboard plays it), or
-  **Stopped**. Its card on Home says **Now** with its time and bar running. **A** on that row or card goes back to it,
+- **The playing file's row** carries a chip: **Playing**, **Paused** or **In browser** (the web dashboard plays it). Its card on Home says **Now** with its time and bar running. **A** on that row or card goes back to it,
   never from its start.
 - **Back to the playing screen:** **SELECT** on any list or on Home, a tap on the mini bar, **START** › **Playing** ›
   **Now playing**, **A** on its row or card, or **B** on Home.
@@ -94,9 +94,10 @@ time.
   bar's menu. The place is kept (its card on Home resumes it). Reaching the end of the folder or playlist stops too:
   on the playing screen you're back in the list on it; while browsing the bar folds away and the top screen says
   **Finished**.
-- **Opening a photo** while a song or video plays stops it with its place kept (there's one picture on the top
-  screen): the photo says so, and back in the list the mini bar offers it again as `stopped at 0:33`. Its mark plays it
-  again where it was, behind the list; a tap on the bar (or **SELECT**) reopens the player on it.
+- **Opening a photo** while a song or video plays doesn't stop it: the photo takes the top screen and what plays goes
+  on behind it, sound and all (a song's next song follows as usual; a video's picture just isn't shown, or decoded,
+  meanwhile). Close the photo (**B**, **Close**) and you're back where you opened it, the video showing again where it
+  has got to. A page playing it in a browser isn't disturbed either.
 - **Screen off after** (Settings) works while browsing too, as long as something plays (not paused).
 - Started with a file (`banana-player FILE`): **B** opens the list on its folder, as if you'd started with none.
 
@@ -196,9 +197,9 @@ Like a song or a video to keep it in **Liked**, a playlist of its own. Photos an
 | **L / R** | Previous (5 s or more in: back to the start) / next file in the folder |
 | **L2 / R2** | Previous / next chapter (**F + L2** is still the screenshot) |
 | **UP / DOWN** | Faster / slower (0.5x, 1x, 1.5x, 2x, 2.5x); the speed button becomes a yellow key when it isn't 1x |
-| **X** | Video: audio and subtitles (one page, two tabs: **Y** / **X** or **L / R** switch them) · Music: In order → Loop all → Loop one → Shuffle (with Loop all) |
-| **Y** | Video: chapters · Music: chapters, for a song or audiobook that has them (on other songs it does nothing) |
-| **SELECT** | Video: Fit → Fill → Stretch · Music: the Display popup (what's shown, and the visualizer's style) |
+| **X** | The play mode, on a video as on a song: In order → Loop all → Loop one → Shuffle (with Loop all); the key shows the loop mark with Off / All / One, or the shuffle mark with On / One / Once |
+| **Y** | **Up next** (the **List** key): the folder or playlist that plays, in its own order, the one playing marked **Now** |
+| **SELECT** | Video: **Tracks**, one page with four tabs in this order: **Chapters** (when the file has them), **Subtitles**, **Audio**, **Picture** (Fit, Fill, Stretch); **L / R** (or **Y / X**) switch them. It opens on the tab you used last (the first time: Chapters if the file has chapters, else Subtitles) · Music: the Display popup (what's shown, and the visualizer's style) |
 | **START** | Menu, on its **Playing** tab: Like, Add to playlist…, Show in folder, Info, Stop |
 | **L3** (press the stick, RG DS Plus) | Like / Unlike what plays |
 | **B** (or **Back**) | Back to the list: it keeps playing (see [Playing while you browse](#playing-while-you-browse)) |
@@ -209,15 +210,24 @@ Like a song or a video to keep it in **Liked**, a playlist of its own. Photos an
 **By touch:**
 - **Progress bar:** touch it to jump there. Hold and drag to scrub, and the picture follows your finger.
 - **Buttons:** they act when you lift your finger, so slide off one to cancel.
-- **Audio and subtitles:** on a video, tap the audio or subtitle line under the buttons to change that track.
-- **Sound:** on a song, tap the line under the buttons (it shows the preset and effect) to open the Sound page. On a
-  song without chapters, the **Sound** button (**FX**) does the same.
-- **Chapters:** tap the chapter line above the progress bar to see the chapters.
+- **Audio and subtitles:** on a video, tap the audio or subtitle line under the buttons for that tab of Tracks.
+- **Sound:** on a song, tap the line under the buttons (it shows the preset and effect) to open the Sound page.
+- **Chapters:** tap the chapter line above the progress bar for the Chapters tab.
+- **The keys' second row**, the same on a video and a song: **List** (Up next, **Y**) under **Prev**, the play mode
+  (**X**) under **Like**, then **Tracks** on a video (its tabs' marks, **SELECT**) or the music display on a song
+  (**SELECT**), the speed (**UP/DOWN**) and **Menu** (**START**).
 - **Lists:** tap to choose, drag to scroll.
 - **Back to the list:** tap **<** (top left): it keeps playing. **Stop** (bottom right, in red) stops it, one tap.
 - **Lock**, **Info** and **Screen off** are along the bottom, beside Stop.
 - **<** is at the top left of every page and does what **B** does: in the file list it goes up a folder (on Home with
   nothing playing: tap twice to quit), on a page or in the menu it goes back.
+
+**Up next** (**Y**, or the **List** key) lists what plays from (a folder, a playlist, Recent's folder, a selection
+from the web) in its own order: Shuffle never reorders it. The one playing is marked **Now** (**Paused**, or **Browser**
+when a web page plays it), with each file's length where it's known; the page opens scrolled to it. **A** (or a tap)
+plays that row as picking it from its list would (Shuffle and Loop stay as they are; with Shuffle on, a new order from
+there), on the handheld or in the browser that plays the list; **A** on the one playing just goes back to it. **B**
+goes back.
 
 Under the progress bar you'll see the time played, the time left (at the current speed) and the total length.
 
@@ -306,10 +316,13 @@ Photos can put it on the right), with a box around the part you see on top:
 The buttons beside it do the same as the handheld's: Prev, Next, Zoom −, Zoom +, Rotate, Fit/Fill, Info and Menu.
 
 The next photo opens at the same zoom, in the same corner, which suits scanned comics page by page (turn this off with
-**Keep zoom between photos**). Camera photos (JPEG) taken sideways are shown upright, and animated GIFs play. Photos don't go into
+**Keep zoom between photos**). A song or video playing when you open a photo plays on behind it (see
+[Playing while you browse](#playing-while-you-browse)). Camera photos (JPEG) taken sideways are shown upright, and animated GIFs play. Photos don't go into
 Recent. **Info** shows the photo's size, format, and when and with which camera it was taken.
 
 ## Picture size
+
+On a video, **SELECT** › **Tracks** › **Picture** (the last tab): **A** chooses, the one in use is ticked.
 
 | | |
 |---|---|
@@ -332,8 +345,8 @@ Songs show their title, artist and album on the top screen. While a song plays:
   **B** closes it. The Style row is greyed out for Album art and None, which don't show a visualizer, but it can still
   be changed. A song without art shows its title alone on Album art, and the visualizer on Art + visualizer. Album art
   can be inside the song file or a `cover.jpg` in the same folder.
-- **Y: chapters.** A song or audiobook with chapters opens its **Chapters** page, as on a video. On other songs **Y**
-  does nothing.
+- **Y: Up next**, as on a video. A song or audiobook with chapters shows them on the line above the progress bar: tap
+  it for the **Chapters** page (**L2** / **R2** jump). The **Sound** page is the line under the buttons.
 - **X: Shuffle and Loop**, in turn: **In order** (the key says **Off** by the loop mark), **Loop all** (**All**: the
   folder starts again after its last song), **Loop one** (**One**: the same song again) and **Shuffle** (**On** by the
   shuffle mark: Shuffle with Loop all, so it never stops), then In order again. The screen says which as it changes.
@@ -393,7 +406,7 @@ marks them:
 - The top screen shows a card on each jump: **Chapter 3 of 12** and the chapter's title.
 - The line above the progress bar on the Main page shows the chapter you're in (its title, or "Chapter 3 of 12" if it
   has none). Tap it for the list.
-- **Y** (for a video, or a song with chapters) or that line opens the **Chapters** page: every chapter with its start
+- That line, or **SELECT** on a video (the **Chapters** tab of **Tracks**), opens the chapters: every chapter with its start
   time, and the one playing marked. **A** (or a tap) plays from the chapter you pick, and **L2** / **R2** still work
   there.
 - Marks on the progress bar show where each chapter starts.

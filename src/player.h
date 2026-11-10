@@ -23,6 +23,8 @@ namespace bp
 		std::string fontsDir;	// the subtitle fonts (assets/fonts)
 		bool verbose = false;
 		NetStreams* net = nullptr;	// bpnet:// files (none: they don't open)
+		// the photo viewer's own mpv (main's second Player): no sound output at all, so what plays goes on in the first
+		bool photosOnly = false;
 	};
 
 	// where what plays comes from: a folder (its videos or songs, in name order), a network folder, or a playlist
@@ -111,8 +113,15 @@ namespace bp
 		void checkPhoto();
 		bool frameDue();
 		// mpv's result: < 0 when it couldn't draw (in the log, the first few times: a black top panel's cause)
-		int render(int w, int h);
+		// fbo: the target (0 the window's; main's small one for what plays under a photo)
+		int render(int w, int h, unsigned fbo = 0);
 		void reportSwap();
+
+		// a photo is up over what plays (on the photo viewer's own mpv): a video's picture is neither decoded nor drawn
+		// meanwhile (vid=no; its sound plays on), and comes back where it has got to (mpv's track switch seeks the
+		// new decoder there). A song's graph keeps drawing (main draws it under the photo): its sound comes through it
+		void hideVideo(bool hide);
+		bool videoHidden() const { return hidingVideo; }
 
 		void togglePause();
 		void unpause();
@@ -350,6 +359,8 @@ namespace bp
 		int shownMusic() const;	// MusicShow as it comes out for this file (its art or none)
 		void updateOverlay();
 		bool isAudio = false, isPhoto = false;
+		bool hidingVideo = false;	// hideVideo(true): a video's picture off (each video's loadfile says vid=no)
+		bool vidOff = false;		// the vid property itself is "no" (a song opened next needs it back first)
 		// photos: the size mpv shows (before any turn), the turn mpv makes of the file's own (rotation metadata) and
 		// the one made here for an EXIF orientation mpv's FFmpeg leaves (7.1's does)
 		PhotoView view;

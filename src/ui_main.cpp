@@ -102,10 +102,8 @@ namespace bp
 
 	bool Ui::musicKey(Button b, Player& p)
 	{
-		if (!p.playingAudio()) return false;
-		// Y: a song with chapters, its chapters (as a video's); one without, nothing (its slot is Sound's, by touch)
-		if (b == Button::Y) return p.chapters.empty();
-		if (b == Button::Select)
+		// X, a song or a video: the play mode; SELECT, a song: the Display popup (a video's is Tracks)
+		if (b == Button::Select && p.playingAudio())
 		{
 			displayOpen = true;
 			displayRow = 0;
@@ -347,12 +345,6 @@ namespace bp
 		}
 
 		drawLeave(p);
-		// what a photo stopped: it waits in the list (the mini bar plays it again)
-		if (parkedShown())
-		{
-			drawGlyphMid(parked.audio ? G_NOTE : G_FILM, 33, 404, DIM);
-			drawTextMid(parked.title + " stopped at " + formatTime(parked.pos) + " \xC2\xB7 it waits in the list", 0, DIM, 52, 404, 564);
-		}
 		// along the bottom, beside it: what A does here
 		if (hints) drawTextMid("A", 0, ACCENT, 24, 450), drawTextMid("Zoom to 2x, or the whole photo", 0, DIM, 24 + (int)std::lround(textWidth("A", 0) / sx) + 7, 450, 400);
 	}
@@ -493,27 +485,27 @@ namespace bp
 						: !p.settings.shuffle && p.settings.loop == LOOP_OFF && p.index() + 1 >= p.count();
 					break;
 				}
-				// music: loop, Sound (or chapters), the Display popup; a video: audio, subtitles, picture size
+				// Up next, both; music: loop, the Display popup; a video: Tracks, picture size
+				case Button::Y: label = "List"; g = &G_PLAYLIST; break;	// (Up next: "List" fits the key)
 				case Button::X:
-					if (p.playingAudio())
-					{
-						// (the mode: the Loop's mark and word, or Shuffle's mark and "On" (Shuffle with Loop all), "One" or
-						// "Once" for the pairs the web can set; "Shuffle" doesn't fit beside it)
-						int mode = playMode(p);
-						label = mode != MODE_SHUFFLE ? LOOP_SHORT[mode] : p.settings.loop == LOOP_ALL ? "On" : p.settings.loop == LOOP_ONE ? "One" : "Once";
-						g = mode == MODE_SHUFFLE ? &G_SHUFFLE : &G_LOOP;
-					}
+				{
+					// the play mode, songs and videos alike (the Loop's mark and word, or Shuffle's mark and "On" (Shuffle
+					// with Loop all), "One" or "Once" for the pairs the web can set; "Shuffle" doesn't fit beside it)
+					int mode = playMode(p);
+					label = mode != MODE_SHUFFLE ? LOOP_SHORT[mode] : p.settings.loop == LOOP_ALL ? "On" : p.settings.loop == LOOP_ONE ? "One" : "Once";
+					g = mode == MODE_SHUFFLE ? &G_SHUFFLE : &G_LOOP;
 					break;
+				}
 				case Button::Select:
-					if (!p.playingAudio()) { label = aspectName(p.aspect); break; }
+					if (!p.playingAudio()) break;	// (a video's Tracks: drawn below)
 					label = SHOW_SHORT[std::clamp(p.settings.musicShow, 0, SHOWS - 1)];
 					g = showGlyph(p.settings.musicShow, p.settings.visualizer);
 					break;
 				case Button::Up: label = speedLabel(p.speed); break;
 				default: label = "Menu"; break;
 				}
-				// a file that didn't open: only what leads elsewhere (the next file, the menu), and Like / Add
-				if (err && which != Button::L && which != Button::R && which != Button::Start && which != Button::L3 && which != Button::None) off = true;
+				// a file that didn't open: only what leads elsewhere (the next file, Up next, the menu), and Like / Add
+				if (err && which != Button::L && which != Button::R && which != Button::Y && which != Button::Start && which != Button::L3 && which != Button::None) off = true;
 				// the speed when it isn't 1x: a yellow key (as Locked is), so a changed speed can't go unnoticed
 				bool fast = which == Button::Up && !off && std::fabs(p.speed - 1) > 1e-6;
 				bool down = (pressedBtn == r * 5 + c || (which == Button::A && playHoldAt)) && !off;
@@ -525,34 +517,23 @@ namespace bp
 					fillRound({b.x + 6, b.y + b.h - 7, (int)((b.w - 12) * f), 4}, ACCENT, 2);
 				}
 				const char* key = hotkeys ? GRID[r][c].hint : nullptr;
-				if (which == Button::X && !p.playingAudio())
+				if (which == Button::Select && !p.playingAudio())
 				{
-					// a video's Audio & Subtitles: their two marks, no words
+					// a video's Tracks: its tabs' marks in their order (chapters when it has some, subtitles, audio), no words
 					SDL_Color ink = off ? DIM : TEXT;
-					drawGlyphMid(G_SPEAKER, b.x + 40, b.y + 24, ink);
-					drawGlyphMid(G_CC, b.x + 66, b.y + 24, ink);
-					if (key) drawTextMid(key, 0, off ? DIM : ACCENT, b.x + b.w / 2, b.y + b.h * 4 / 5 - 2, b.w - 6, 2);
-				}
-				else if (which == Button::Y && (!p.playingAudio() || !p.chapters.empty()))
-				{
-					// Chapters: the one playing of how many ("3/12"; "3" when that's too wide, "–/12" before the first).
-					// None (or not known yet) dims it, though it still opens the page that says so
-					int n = (int)p.chapters.size(), c = shownChapter(p);
-					std::string num;
-					if (n > 0)
+					std::vector<const Glyph*> marks;
+					if (!p.chapters.empty()) marks.push_back(&G_CHAPTERS);
+					marks.insert(marks.end(), {&G_CC, &G_SPEAKER});
+					int gap = 8, w = gap * ((int)marks.size() - 1);
+					for (auto* m : marks) w += glyphW(*m);
+					int x = b.x + b.w / 2 - w / 2;
+					int y = key ? b.y + b.h * 2 / 5 : b.y + b.h / 2;
+					for (auto* m : marks)
 					{
-						num = (c >= 0 ? std::to_string(c + 1) : std::string("\xE2\x80\x93")) + "/" + std::to_string(n);
-						if (textWidth(num, 1) / sx > 66 && c >= 0) num = std::to_string(c + 1);
+						drawGlyphMid(*m, x + glyphW(*m) / 2, y, ink);
+						x += glyphW(*m) + gap;
 					}
-					drawButton(b, &G_CHAPTERS, num, key, off || n == 0, 1);
-				}
-				else if (which == Button::Y)
-				{
-					// a song with no chapters: Sound, by touch only (no key: Y does nothing here). "FX", never dim, whether
-					// the equalizer and effect are on or off (dim read as a button that can't be pressed); what's set
-					// is on the line under the buttons
-					drawButton({b.x, b.y, b.w, b.h * 4 / 5}, &G_EQ, "FX", nullptr, off, 1);
-					drawTextMid("Sound", 0, off ? DIM : DIM_ON, b.x + b.w / 2, b.y + b.h * 4 / 5 - 2, b.w - 6, 2);
+					if (key) drawTextMid(key, 0, off ? DIM : ACCENT, b.x + b.w / 2, b.y + b.h * 4 / 5 - 2, b.w - 6, 2);
 				}
 				else if (which == Button::L3)
 				{

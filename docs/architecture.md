@@ -54,6 +54,18 @@ Moved out of `CLAUDE.md`, which keeps the one-line rules and the map; the reason
   by zoom, not `panscan`. Everything set for a photo at `load()` (vf, dscale, zoom/pan/rotate) is reset for a video.
   `video-params` is before the `vf` scale and before rotation. The thumbnail is `screenshot-raw video`, unrotated.
   Photos have their own playlist (`siblingVideos` splits photos from videos/songs), no history and no resume.
+  **Photos play in a second `Player`** (`main.cpp`'s `photos`: `PlayerOptions::photosOnly`, `ao=null`, no state dir,
+  its own `NetStreams`), always, so a photo never stops or reloads what plays: a song goes on (its next one too), a
+  video's sound goes on with its picture off (`Player::hideVideo`: `vid=no` mid-file, and `vid=no` as each video's
+  `loadfile` option while hidden; back with `vid=auto`, mpv's track switch seeks the new decoder to the clock), a page's
+  item stays held. The top panel draws `photos` while a photo is up (`shown()`), and the bottom panel's `Ui` gets
+  `photos` as its `Player&` then (main's `shown()`: press, pointer, tick, draw). A song's graph still makes frames under
+  the photo and mpv waits for each to be taken (else 200 ms stalls): `drainUnder()` renders them into a 16×16 FBO of
+  its own, so the photo isn't drawn again per frame. The settings are the player's, copied into `photos` as a photo opens
+  and kept in step each pass (a change over the photo, from START's menu, is `setSettings` on the player). Closing it
+  (`closePhoto`) goes back to the player when the photo was opened over it (a web pick), else `Ui::backFromPlayer`.
+  Measured on the Mac (14 s each): a 640×360 video alone 23% CPU, the same under a photo 14%, a photo alone 8%; max RSS
+  152 / 178 / 160 MB.
 - **Never wait for mpv on the main thread while a file opens.** As it switches files mpv waits for the main thread
   to draw the top panel (`mpv_render_context_render`); a blocking call meanwhile (`mpv_set_property`,
   `mpv_command`, `mpv_get_property`) holds both until mpv gives up after 200 ms ("not being called or stuck" in
@@ -66,7 +78,7 @@ Moved out of `CLAUDE.md`, which keeps the one-line rules and the map; the reason
   `video-out-params` of the last file (or the idle window) can't tell.
 - **Chapters** come by `observe_property` (`chapter-list`, `chapter`), as the track list does; `chapterTarget` in bpcore
   computes each L2/R2 jump, a pending chapter covers quick repeated presses, and the L2/R2 card shares `osd-overlay` id 2 with the volume card.
-- **`Ui`** is the whole bottom panel (its definitions are split over `src/ui*.cpp` by area: see "Where things live" below): pages (Main, Tracks (Audio & Subtitles tabs), Chapters, Settings, Browse, Info, About, Exit, Sound (Equalizer & Effects tabs)), START's tabbed
+- **`Ui`** is the whole bottom panel (its definitions are split over `src/ui*.cpp` by area: see "Where things live" below): pages (Main, Tracks (SELECT on a video; tabs Chapters, Subtitles, Audio, Picture (Fit/Fill/Stretch): `tracksTabs()`; the Chapters tab is `Page::Chapters`), Up next (`Page::UpNext`: the Session's queue, `upNextList`; a row is a `PlayRequest` of that list), Settings, Browse, Info, About, Exit, Sound (Equalizer & Effects tabs)), START's tabbed
   menu (`inMenu`: Playing (`Page::Playing`, while a song or video plays: Like, Add to playlist…; `menuTabs`), Settings, About; no Quit: quick settings and F + START quit), the Options menu (X), Lock, Screen off. The browser's first page is **Home**
   (`browseDir` `HOMEDIR`, `drawHome`, `homeKey`, `homePointer`): the Recent strip (`recent`, built by `listRecent` from the
   history and resume.tsv's positions and `#duration` lines; cards `CARD_W` wide, `STRIDE` apart, the focused one kept in
@@ -96,7 +108,11 @@ Moved out of `CLAUDE.md`, which keeps the one-line rules and the map; the reason
   is rendered at the real panel size. It redraws only when
   `signature()` changes (or when forced), so any new state that affects drawing must be added to `signature()`.
   `press(Button)` and `pointer(Pointer)` return true for "leave", which `main` turns into leaving the player (it plays
-  on behind the browser, `bgPlay`; a photo closes) or, with nothing playing, quitting. Stop is its own request
+  on behind the browser, `bgPlay`; a photo closes) or, with nothing playing, quitting. The way back is
+  `backFromPlayer`: `showPlayer` keeps where the player was opened from (`playerBack`: page, menu tab, settings group,
+  cursor, scroll, the menu's own way back; `onPlayer` says the player is up, so pages over it don't overwrite it), and
+  leaving, Stop and a list's end with the player up restore it as it was; never opened from a page (started with a
+  file) or Show in folder: `showBrowser` on the file. Stop is its own request
   (`takeStopPressed`). See docs/notes/2026-11-10-background-playback.md.
 - **Playlists** (`PlaylistStore`, `playlists.*`) are browser pages: `PLROOT` (the Playlists tab) and `PLDIR` (`"\x01pl:"` plus
   the m3u's path) are pseudo-dirs that `pseudoDir()` recognises, so a new path check must go through it. Select, add and
@@ -200,7 +216,7 @@ Ui (class declared in `src/ui.h`; file-static names shared by the files are in `
 |---|---|
 | `ui.cpp` | init/destructor, `press`, `pointer`, `act`, `tick`, `signature` (dispatch and the redraw rule) |
 | `ui_draw.cpp` | text (`runs`, `drawText`), `fill`/`fillRound`/`drawBox`/`drawLevel`, `draw`/`renderPage`, header, battery, clock, hints, glyph drawing, `drawButton`, `wrapText`, `capture` |
-| `ui_menus.cpp` | rows/`choose`, START menu tabs, Tracks/Chapters pages (`openTracks`, `drawChapters`), quick settings (F), update popup, the browse Options menu's drawing, Exit/About/Info, Like, Playing tab, `volumeLevel` |
+| `ui_menus.cpp` | rows/`choose`, START menu tabs, Tracks/Chapters pages (`openTracks`, `drawChapters`), Up next (`openUpNext`, `drawUpNext`), quick settings (F), update popup, the browse Options menu's drawing, Exit/About/Info, Like, Playing tab, `volumeLevel` |
 | `ui_browse.cpp` | the file list: `enterFolder`, `netListed`, sections/tabs, Options menu items (`openBrowseMenu`, `chooseBrowseMenu`), `drawTracks` (the list), `folderChanged` |
 | `ui_forms.cpp` | connection form, found servers, the on-screen keyboard |
 | `ui_playlists.cpp` | the Playlists pages, select/move/drag, picker, add, their drawing, edits from the web |
@@ -208,7 +224,7 @@ Ui (class declared in `src/ui.h`; file-static names shared by the files are in `
 | `ui_main.cpp` | the playing screen (`drawMain`, `drawLeave`), photo view, predicted position, `musicKey`, `buttonRect` |
 | `ui_sound.cpp` | the Display popup, the Sound page (Equalizer, Effects) |
 | `ui_web.cpp` | the Web dashboard page and the header's globe |
-| `ui_home.cpp` | Home: the Recent strip, tiles, section header; what plays behind the browser: the mini bar, the playing row's chip, what a photo parked |
+| `ui_home.cpp` | Home: the Recent strip, tiles, section header; what plays behind the browser: the mini bar, the playing row's chip |
 
 Web app (`web/app.js` is the entry: shell, App, debug hook; `web/js/` the modules; `index.html` loads `/app.js` as a module):
 `store.js` (store, `useStore`, `parseRoute`, layout queries, `NO_HERE`), `router.js` (history bookkeeping), `util.js`, `api.js`,
@@ -276,6 +292,8 @@ CLAUDE.md now keeps one line per rule; this is the full text it had, kept here w
   `Ui::playerShown()`. "Back to Main" goes through `home()`/`showPlayer()`, never `p.playing()` alone. Any Stop clears
   the browser hand-off (`Ui::stopped`) without telling the page; the page announces only to a snapshot with a path.
   A photo opened over a song parks it (`Ui::park`); the mini bar (`drawMiniBar`, `miniBarShown`) offers it back.
+  (Superseded 2026-11-10: photos play in their own mpv, nothing is parked; back from the player is
+  `Ui::backFromPlayer`. See "Photos" above and docs/notes/2026-11-10-photos-over-media.md.)
 - **Fonts:** SDL_ttf has no fallback (`Ui::runs()` picks per run); libass uses the bundle's `fonts.conf` (player's fonts
   only). The icon's 32×32 grid lives in both `packaging/icon/make-icon.py` and `src/logo.h`: change both.
 - **Code style:** tabs; comments say why, not what. Screenshots/README use Blender's *Sintel* (CC BY 3.0); no
