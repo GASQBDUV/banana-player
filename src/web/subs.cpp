@@ -469,7 +469,7 @@ namespace bp
 			e.label = trackLabel(t, ++n);
 			e.lang = s.lang;
 			e.codec = s.codec;
-			e.kind = textCodec(s.codec) ? "text" : "image";
+			e.kind = textCodec(s.codec) ? "text" : pictureCodec(s.codec) ? "picture" : "image";
 			e.styled = s.codec == "ass" || s.codec == "ssa";
 			e.isDefault = s.isDefault;
 			e.forced = s.forced;
@@ -504,7 +504,7 @@ namespace bp
 			e.label = trackLabel(t, ++n);
 			e.lang = t.lang;
 			e.codec = t.codec;
-			e.kind = text ? "text" : "image";
+			e.kind = text ? "text" : ext == "idx" || ext == "sup" ? "picture" : "image";
 			e.styled = ext == "ass" || ext == "ssa";
 			e.external = true;
 			e.file = dirName(real) + "/" + name;

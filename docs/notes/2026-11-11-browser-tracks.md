@@ -17,8 +17,9 @@ handheld, without ever converting anything (the RK3568 decodes in software; tran
      file's font attachments and `/api/font` serves one; JASSUB loads them all, with the dashboard's Inter as the
      fallback. JASSUB is imported only when a styled track is chosen; its canvas sits in `assBox`, which moves with the
      `<video>`. If it can't start (no WebAssembly or Worker, or an error), the same track shows as plain cues.
-   - Picture subtitles (PGS, VobSub) are listed but disabled: **Shows on the handheld only**. Showing them would mean
-     decoding bitmaps into images on the handheld, or OCR.
+   - Picture subtitles (PGS, VobSub, DVB) are decoded on the handheld a window at a time into PNGs (`/api/picsubs`,
+     kind `picture`) and placed over the picture by the page: [2026-11-10 picture subtitles](2026-11-10-picture-subs.md).
+     Other picture formats (XSUB, a `.sub` without its `.idx`) keep kind `image`: **Shows on the handheld only**.
 2. **Audio tracks.**
    - Safari exposes `video.audioTracks`: switched in place, true Direct Play.
    - Elsewhere the default track is the file itself. Another track is a **Direct Stream**: `/api/remux-start` finds the

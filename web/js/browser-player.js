@@ -31,12 +31,14 @@ el.addEventListener('pause', () => { if (document.hidden && !isPref()) closeSSE(
 let posTimer = 0;
 // (the session's Pos report: only the output's, for its load. A play or pause made here first says so: Play / Pause)
 function sendPos() {
+	if (B.skipping) return;	// (a Direct Stream running on to where it was asked: not a play or pause of the viewer's)
 	if (!B.active || !B.meta || B.leaving || B.parked != null || store.conn !== 'ok' || !el.getAttribute('src') || !isOutput() || B.meta.p !== S.s.file) return;
 	// (waiting for a tap: still waiting, at its place now; a Pos would say it's paused)
 	if (B.blocked && el.paused) { intent('Blocked', { load: S.s.load, t: bPos().toFixed(2) }).catch(() => {}); return; }
 	intent('Pos', { load: S.s.load, t: bPos().toFixed(2), playing: el.paused ? 0 : 1 }).catch(() => {});
 }
 for (const ev of ['play', 'pause', 'seeked']) el.addEventListener(ev, () => {
+	if (B.skipping) return;
 	// (not the pause a file's end brings: that's its Ended, and the next one plays)
 	if (ev === 'play' && B.blocked) { B.blocked = false; notify(); }	// (the tap came: Pos says it plays)
 	if (ev !== 'seeked' && !el.ended && !B.blocked && isOutput() && B.active && B.meta && B.meta.p === S.s.file && S.s.playing === el.paused && !B.leaving)
@@ -179,7 +181,9 @@ export function bPos() {
 	return el.currentTime || 0;
 }
 // (a Direct Stream doesn't know its own length: the file's)
-function bDur() { return !B.remux && isFinite(el.duration) && el.duration ? el.duration : (B.meta && B.meta.duration) || (isFinite(el.duration) && el.duration) || 0; }
+// the file's length as the handheld reads it (its chapters, its bar) when known: a browser's own for a Matroska file
+// can differ by a little (the chapter marks then sat off their times); the element's only when the file says none
+function bDur() { return (B.meta && B.meta.duration) || (isFinite(el.duration) && el.duration) || 0; }
 // to a place in the file, whichever way it plays: a Direct Stream can't seek, so it starts again from there
 export function seekTo(t) {
 	if (B.remux) {
@@ -255,10 +259,39 @@ async function remuxAt(a, t, play) {
 	try { r = await get('/api/remux-start', { p, a, t: t.toFixed(2) }, { ms: 15000, quiet: true }); }
 	catch (e) { if (B.meta && B.meta.p === p && tok === B.tok) { B.switching = null; if (B.remux) B.remux.pending = null; notify(); toast(e.status === 0 ? "Couldn't switch the audio track" : errMsg(e)); } return; }
 	if (!B.meta || B.meta.p !== p || tok !== B.tok || (B.switching && B.switching.a !== a)) return;	// moved on meanwhile
-	B.remux = { a, base: r.start, pending: null };
+	// the stream starts at the keyframe at or before t (x265 puts them seconds apart). Played from there it showed the
+	// seconds before t (a chapter's start, a spot on the bar: "it jumps back"). So it plays on, muted and unseen, fast,
+	// until it reaches t, then shows: this stream can't be seeked (a jump inside it went back to its start), and a
+	// browser fetches it only a little ahead of what it shows (paused, it stops fetching). The clock says t meanwhile
+	// (pending); the session hears nothing of it (B.skipping)
+	const skip = t - r.start;
+	const rx = B.remux = { a, base: r.start, pending: skip > 0.3 ? t : null };
 	B.switching = null;
 	el.src = '/api/remux?' + new URLSearchParams({ p, a, t: r.start.toFixed(3), tab: TAB_ID });
-	if (play) el.play().catch(e => { if (e && e.name === 'NotAllowedError') refused(e); });
+	const start = () => { if (play) el.play().catch(e => { if (e && e.name === 'NotAllowedError') refused(e); }); };
+	if (skip > 0.3) {
+		const wasMuted = el.muted, rate = el.playbackRate, t0 = Date.now();
+		B.skipping = true; el.muted = true; el.style.visibility = 'hidden';
+		const done = () => {
+			if (!B.skipping) return;
+			el.playbackRate = rate; el.muted = wasMuted; el.style.visibility = '';
+			if (!play && B.remux === rx) el.pause();
+			B.skipping = false;
+			if (B.remux !== rx) return;
+			rx.pending = null; notify();
+			if (play && el.paused) start();
+		};
+		// each frame: 16x while far, slower as it nears t, so it stops within a frame or two of it
+		const step = () => {
+			if (!B.skipping) return;
+			if (B.remux !== rx || Date.now() - t0 > 8000) return done();	// (a stream slow to come: from where it got to)
+			const left = skip - el.currentTime;
+			if (el.readyState >= 1 && left <= 0.04) return done();
+			el.playbackRate = Math.max(1, Math.min(16, left * 6));
+			requestAnimationFrame(step);
+		};
+		el.play().then(() => requestAnimationFrame(step)).catch(done);
+	} else start();
 	shiftSubs();
 	notify();
 }
@@ -266,7 +299,7 @@ async function remuxAt(a, t, play) {
 /* ---- subtitles in this browser: one <track> per text track, fetched as WebVTT when chosen ---- */
 export const SUBS = { file: '', list: [], chosen: -1, urls: {}, progress: null, failed: {}, seq: 0, noAss: {}, ass: false };
 function clearSubs() {
-	assOff();
+	assOff(); picOff();
 	[...el.querySelectorAll('track')].forEach(t => t.remove());
 	Object.values(SUBS.urls).forEach(u => URL.revokeObjectURL(u));
 	Object.assign(SUBS, { file: '', list: [], chosen: -1, last: -1, urls: {}, progress: null, failed: {}, seq: SUBS.seq + 1, noAss: {}, ass: false });
@@ -309,10 +342,12 @@ export async function chooseSub(i, quiet) {
 	if (!quiet && file && B.meta && B.meta.p === file) sendPick('SetSub', subPick(i));
 	if (i >= 0) rememberSub(i);
 	[...el.textTracks].forEach(t => t.mode = 'disabled');
-	assOff();
+	assOff(); picOff();
 	notify();
 	if (i < 0) return;
 	const sx = SUBS.list.find(x => x.i === i);
+	// pictures (VobSub, PGS, DVB): the handheld decodes them a window at a time
+	if (sx && sx.kind === 'picture') { choosePic(i, file); return; }
 	// styled (ASS/SSA): drawn by libass in the page, in its own look; plain cues if that can't run here
 	if (sx && sx.styled && !SUBS.noAss[i] && assCan()) { if (await chooseAss(i, file, seq)) return; if (SUBS.seq !== seq || SUBS.chosen !== i) return; }
 	if (!SUBS.urls[i]) {
@@ -353,7 +388,7 @@ const abs = u => new URL(u, location.href).href;
 const assCan = () => typeof WebAssembly === 'object' && typeof Worker === 'function';
 function assOff() {
 	if (ASS.jas) { try { ASS.jas.destroy(); } catch (e) {} ASS.jas = null; }
-	assBox.textContent = '';
+	assBox.querySelectorAll('canvas').forEach(c => c.remove());	// (psubBox stays)
 	SUBS.ass = false;
 }
 // true: it shows; false: use the plain cues instead
@@ -399,6 +434,92 @@ async function chooseAss(i, file, seq) {
 		assOff(); SUBS.noAss[i] = 1;
 		return false;
 	}
+}
+
+/* ---- picture subtitles (VobSub, PGS, DVB): the handheld decodes them a window of the film at a time into PNGs
+   (/api/picsubs: about 60 s, cues in file seconds, rects in the track's canvas, VobSub's 720×480 or PGS's 1920×1080),
+   asked ahead of the clock and again on a seek. They go over the picture where it shows (object-fit: contain), in
+   psubBox inside assBox (which moves with the video). One shows at a time: a later picture replaces the one before ---- */
+const psubBox = document.createElement('div');
+psubBox.className = 'psub-box';
+assBox.appendChild(psubBox);
+const PIC_WIN = 60, PIC_AHEAD = 25;
+const PIC = { i: -1, file: '', seq: 0, cues: [], from: 0, to: 0, eof: false, w: 0, h: 0, busy: false, fails: 0, raf: 0, shown: null, lay: '' };
+function picOff() {
+	PIC.seq++; PIC.i = -1; PIC.cues = []; PIC.from = PIC.to = 0; PIC.eof = false; PIC.busy = false; PIC.shown = null; PIC.lay = '';
+	cancelAnimationFrame(PIC.raf); PIC.raf = 0;
+	psubBox.textContent = '';
+}
+function choosePic(i, file) {
+	picOff();
+	Object.assign(PIC, { i, file, fails: 0 });
+	picFrame();
+}
+// a window from t on: `fresh` drops what was there (a seek away from it), else it goes on after it
+async function picFetch(t, fresh) {
+	const seq = PIC.seq, from = fresh ? Math.max(0, Math.floor(t / 10) * 10) : PIC.to;
+	PIC.busy = true;
+	let d = null;
+	try { d = await get('/api/picsubs', { p: PIC.file, i: PIC.i, from: from.toFixed(3), to: (from + PIC_WIN).toFixed(3) }, { ms: 20000, quiet: true }); } catch (e) {}
+	if (seq !== PIC.seq) return;
+	PIC.busy = false;
+	if (!d || !Array.isArray(d.cues)) {
+		// (the handheld busy, the connection blinking): again a bit later, then said so
+		if (++PIC.fails >= 4) { SUBS.failed[PIC.i] = "Couldn't load these subtitles"; picOff(); SUBS.chosen = -1; notify(); return; }
+		PIC.busy = true; setTimeout(() => { if (seq === PIC.seq) PIC.busy = false; }, 1500 * PIC.fails);
+		return;
+	}
+	PIC.fails = 0;
+	if (fresh) { PIC.cues = []; PIC.from = d.from; }
+	PIC.to = d.to; PIC.eof = !!d.eof; PIC.w = d.w || 720; PIC.h = d.h || 480;
+	// a cue in two windows: once, with the later end (where the first one stopped reading is all it knew)
+	for (const c of d.cues) {
+		const o = PIC.cues.find(x => Math.abs(x.s - c.s) < .001);
+		if (o) { o.e = Math.max(o.e, c.e); continue; }
+		PIC.cues.push(c);
+	}
+	const now = bPos();
+	PIC.cues = PIC.cues.filter(c => c.e > now - 120).sort((a, b) => a.s - b.s);
+	PIC.shown = undefined;
+}
+function picFrame() {
+	PIC.raf = requestAnimationFrame(picFrame);
+	if (PIC.i < 0) return;
+	if (el.readyState < 1 && !B.remux && B.parked == null) return;	// (the file's start position isn't there yet)
+	const t = bPos(), inside = t >= PIC.from && (t < PIC.to || PIC.eof) && PIC.to > PIC.from;
+	if (!PIC.busy) {
+		if (!inside) picFetch(t, true);
+		else if (!PIC.eof && t > PIC.to - PIC_AHEAD) picFetch(t, false);
+	}
+	// the picture showing now: the latest to start (only once its window is here: not after a seek, meanwhile)
+	let cur = null;
+	if (inside) for (const c of PIC.cues) { if (c.s > t) break; if (t < c.e) cur = c; }
+	picPlace();
+	if (cur === PIC.shown) return;
+	PIC.shown = cur;
+	psubBox.textContent = '';
+	if (!cur) return;
+	for (const r of cur.r) {
+		const img = new Image();
+		img.className = 'psub-img'; img.alt = ''; img.decoding = 'sync';
+		img.src = 'data:image/png;base64,' + r.png;
+		const st = img.style;
+		st.left = (r.x / PIC.w * 100) + '%'; st.top = (r.y / PIC.h * 100) + '%';
+		st.width = (r.w / PIC.w * 100) + '%'; st.height = (r.h / PIC.h * 100) + '%';
+		psubBox.appendChild(img);
+	}
+}
+// psubBox over the picture as it shows inside the element (letterboxed: object-fit contain)
+function picPlace() {
+	const ar = assBox.getBoundingClientRect(), er = el.getBoundingClientRect();
+	const vw = el.videoWidth, vh = el.videoHeight;
+	let w = er.width, h = er.height;
+	if (vw > 0 && vh > 0 && w > 0 && h > 0) { const k = Math.min(w / vw, h / vh); w = vw * k; h = vh * k; }
+	const l = er.left - ar.left + (er.width - w) / 2, tp = er.top - ar.top + (er.height - h) / 2;
+	const lay = [l, tp, w, h].map(x => x.toFixed(1)).join();
+	if (lay === PIC.lay) return;
+	PIC.lay = lay;
+	Object.assign(psubBox.style, { left: l.toFixed(1) + 'px', top: tp.toFixed(1) + 'px', width: w.toFixed(1) + 'px', height: h.toFixed(1) + 'px' });
 }
 
 // the viewer's own look: size (a share of the picture's height) and how high the lines sit
@@ -609,7 +730,7 @@ function tracksFor(m, ss) {
 	if (ss.sub && ss.sub.set) {
 		const k = matchTrack(ss.sub, subs.map(x => ({ lang: x.lang || '', label: x.label, external: !!x.external })));
 		if (k === MATCH_OFF) out.s = -1;
-		else if (k >= 0) out.s = subs[k].i;	// (a picture one: subsForFile says it shows on the handheld only)
+		else if (k >= 0) out.s = subs[k].i;	// (one the page can't show, kind 'image': subsForFile says so)
 	}
 	return out;
 }

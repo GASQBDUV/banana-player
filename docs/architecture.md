@@ -151,7 +151,10 @@ Moved out of `CLAUDE.md`, which keeps the one-line rules and the map; the reason
   (sidebar with playlists and the handheld's card); `Q_WIDE`/`Q_DESK` in `web/js/store.js` match the CSS's media queries (a phone
   on its side, short and touch, stays a phone). One edged, lipped `.box` (`.btn`, `.surface`, `.yellow`, `.red`);
   covers are the file's art over a generated gradient (`Art`, `GenCover`, keyed on the path). Uploads are the round key
-  (`UploadFab`, `UploadSheet`); web-only glyphs (`g-folder-move`) are inline symbols in `web/index.html`.
+  (`UploadFab`, `UploadSheet`); the page's one `<video>` (`el`) docks in the newest slot on the page through
+  `useVideoSlot` (`playing.js`: the player's media box with the ASS canvas, else the phone's small player's or the bar's
+  art tile, else `#holder`); `:root.vid-mini` is on while it sits in a tile and hides the overlays drawn over the
+  picture (`.assbox`, `psub*`); web-only glyphs (`g-folder-move`) are inline symbols in `web/index.html`.
   **History in `web/js/router.js`:** each entry carries the load's id (`bpDoc`), how many of ours lie behind (`bpIdx`) and
   whether it came from a tap (`bpOk`); the player's chevron goes back only when `canGoBack()` (Safari skips, going
   back, an entry left by a step without a tap, and an entry from an earlier load reloads the page), else it replaces

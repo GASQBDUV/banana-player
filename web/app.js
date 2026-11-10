@@ -8,7 +8,7 @@ import { Art, Modal, Seek, Storage, coverUrl, useHeld, useLater, useMedia, useTi
 import { depth, filesHash, go } from './js/router.js';
 import { LikeBtn, addToPlaylist, likable, loadLikes, newPlaylistDialog, plUsed } from './js/plshared.js';
 import { Icon, dimsCache } from './js/icons.js';
-import { DevButton, LoopIcon, NowPlaying, TapToPlay, closePanel, loopName, showTab, targetLabel } from './js/playing.js';
+import { DevButton, LoopIcon, NowPlaying, TapToPlay, closePanel, loopName, showTab, targetLabel, useVideoSlot } from './js/playing.js';
 import { cmpName, fmtTime, isIOS, throttled } from './js/util.js';
 import { Playlists } from './js/playlists.js';
 import { RECENT_ID } from './js/recent.js';
@@ -26,13 +26,16 @@ async function loadPls() { try { set({ pls: (await get('/api/playlists', null, {
 
 // the handheld plays it behind its browser (its player left, not stopped): the bars say so
 const bgShown = () => { const sn = store.snap, ss = sn && sn.session; return !!sn && !!sn.path && sn.screen === 'browser' && !(ss && ss.out && ss.out.kind === 'browser' && ss.index >= 0); };
+// a video playing in this browser (not parked under a photo): away from the player it goes on, live, in the art tile
+// of the phone's small player or of the bar (the one <video> moves there: playing.js's useVideoSlot)
+const vidHere = v => v.has && v.here && v.kind === 'video' && v.parked == null;
 // the phone's small player, floating over the tab bar
 function MiniPlayer() {
-	const v = view(); useTick(1000);
+	const v = view(), slot = useVideoSlot(false); useTick(1000);
 	if (!v.has || store.route.page === 'playing' || store.selecting) return null;
 	const frac = v.duration ? Math.min(1, v.pos() / v.duration) : 0;
 	return html`<div class="mini box surface" onClick=${() => go('#/playing')} role="region" aria-label="Now playing">
-		<div class="tile art-sm"><${Art} src=${coverUrl(v.kind === 'video' ? v.path : v.cover)} seed=${v.path} kind=${v.kind} /></div>
+		${vidHere(v) ? html`<div class="tile art-sm vthumb" key="v" ref=${slot}></div>` : html`<div class="tile art-sm" key="a"><${Art} src=${coverUrl(v.kind === 'video' ? v.path : v.cover)} seed=${v.path} kind=${v.kind} /></div>`}
 		<div class="meta"><div class="t ell">${v.title}</div><div class="m ell">${v.here ? 'In this browser' : html`<span class="y">On handheld</span>`}${!v.here && bgShown() ? ' · in the background' : v.artist ? ' · ' + v.artist : ''}</div></div>
 		${likable(v) && html`<${LikeBtn} v=${v} cls="ib" />`}
 		<button class="ib play" aria-label=${v.paused ? 'Play' : 'Pause'} onClick=${e => { e.stopPropagation(); ctl.toggle(); }}><${Icon} n=${v.paused ? 'play' : 'pause'} k=${2} /></button>
@@ -40,7 +43,7 @@ function MiniPlayer() {
 }
 // the tablet's and the computer's player bar, on every page (on Playing too: on a computer the transport lives here)
 function PlayerBar() {
-	const v = view(), s = store; useTick(1000);
+	const v = view(), s = store, slot = useVideoSlot(false); useTick(1000);
 	if (!v.has) return html`<div class="pbar idle" role="region" aria-label="Player"><span class="dim" style="font-size:14px">Nothing playing</span><div class="right"><${DevButton} /></div></div>`;
 	const off = s.reconnecting && !v.here, onPage = s.route.page === 'playing';
 	const open = () => { if (!onPage) go('#/playing'); };
@@ -52,7 +55,7 @@ function PlayerBar() {
 			<span class="ptime">${fmtTime(v.pos())} / ${fmtTime(v.duration)}</span></div>
 		<div class=${'pb-now' + (onPage ? ' here' : '')}>
 			<div class="go" onClick=${open} role=${onPage ? undefined : 'link'} tabindex=${onPage ? undefined : 0} aria-label=${onPage ? undefined : 'Open the player'} onKeyDown=${e => { if (e.key === 'Enter') open(); }}>
-				<span class="tile art-sm"><${Art} src=${coverUrl(v.kind === 'video' ? v.path : v.cover)} seed=${v.path} kind=${v.kind} /></span><span class="grow"><div class="t ell">${v.title}</div><div class="m ell">${v.artist || targetLabel(s.target)}${!v.here && bgShown() ? ' · in the background' : ''}</div></span></div>
+				${vidHere(v) && !onPage ? html`<span class="tile art-sm vthumb" key="v" ref=${slot}></span>` : html`<span class="tile art-sm" key="a"><${Art} src=${coverUrl(v.kind === 'video' ? v.path : v.cover)} seed=${v.path} kind=${v.kind} /></span>`}<span class="grow"><div class="t ell">${v.title}</div><div class="m ell">${v.artist || targetLabel(s.target)}${!v.here && bgShown() ? ' · in the background' : ''}</div></span></div>
 			${likable(v) && html`<${LikeBtn} v=${v} cls="ib" /><button class=${'ib' + (s.addOpen ? ' open' : '')} aria-label="Add to playlist" title="Add to playlist" aria-haspopup="dialog" aria-expanded=${!!s.addOpen} onClick=${e => addToPlaylist([v.path], v.title, e.currentTarget)}><${Icon} n="pl-add" k=${2} /></button>`}</div>
 		<div class="right">
 			<button class=${'ib opt' + (v.shuffled ? ' on' : '')} aria-label="Shuffle" title=${v.shuffled ? 'Shuffle: On' : 'Shuffle: Off'} aria-pressed=${!!v.shuffled} onClick=${ctl.shuffle} disabled=${off}><${Icon} n="shuffle" k=${2} /></button>

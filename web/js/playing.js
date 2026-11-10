@@ -163,14 +163,41 @@ export function TapToPlay({ floating }) {
 		<div class="tap-t ell">${self ? title : 'The handheld sent ' + title + ' here'}</div>
 		<div class="tap-s">Your browser needs one tap to start the sound</div></div>`;
 }
+/* the one <video> shows in one slot at a time: the newest on the page (the player's media box, or the small player
+   while a video plays here and the player isn't shown); with none it waits in #holder, still in the document (a media
+   element taken out of it is paused). A slot leaving gives it back before Preact takes the slot out (a ref is let go
+   first; an effect's cleanup comes after). The ASS canvas (assBox) goes only into a slot that asks for it (the big
+   box); the small one shows the picture alone: :root.vid-mini is set while the video sits in it, and style.css hides
+   the picture overlays then */
+const vslots = [];
+function dockVideo() {
+	const top = vslots[vslots.length - 1], holder = document.getElementById('holder'), host = top ? top.n : holder;
+	const was = !el.paused && !!el.getAttribute('src');
+	if (el.parentNode !== host) host.prepend(el);
+	if (top && top.ass) { if (el.nextSibling !== assBox) el.after(assBox); }
+	else if (assBox.parentNode !== holder) holder.appendChild(assBox);
+	document.documentElement.classList.toggle('vid-mini', !!top && !top.ass);
+	sizeCues();
+	// (WebKit may pause a playing video moved within the page: the same element was let play, so it goes on, unless
+	// the Session meanwhile says paused)
+	if (was) {
+		const on = () => { if (el.paused && B.active && !B.leaving && B.parked == null && el.getAttribute('src') && S.s && S.s.playing) el.play().catch(() => {}); };
+		on(); setTimeout(on, 0);
+	}
+}
+export function useVideoSlot(ass) {
+	const me = useRef(null);
+	return useCallback(n => {
+		const i = vslots.indexOf(me.current);
+		if (i >= 0) vslots.splice(i, 1);
+		me.current = n ? { n, ass } : null;
+		if (n) vslots.push(me.current);
+		dockVideo();
+	}, []);
+}
 function Media({ v, off, immersive, onCollapse }) {
 	const box = useRef();
-	// the one media element shows in the slot. It goes back to #holder as the slot leaves, before Preact takes the slot
-	// out (a ref is let go first; an effect's cleanup comes after): a media element out of the document is paused
-	const slot = useCallback(n => {
-		if (n) { n.prepend(el); el.after(assBox); sizeCues(); }
-		else if (el.parentNode && el.parentNode.id !== 'holder') { const h = document.getElementById('holder'); h.appendChild(el); h.appendChild(assBox); }
-	}, []);
+	const slot = useVideoSlot(true);
 	const live = v.here && v.kind === 'video';
 	const fsEl = useFullscreen(), fs = !!fsEl && fsEl === box.current;
 	const full = immersive || fs;

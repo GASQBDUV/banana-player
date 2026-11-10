@@ -12,7 +12,7 @@ namespace bp
 	{
 		int i = 0;						// what /api/subs takes: the embedded ones in stream order, then the files beside it
 		std::string label, lang, codec;	// label as the handheld's trackLabel; lang as stored ("eng"), "" when unknown
-		std::string kind;				// "text" | "image" (picture subtitles: the handheld only)
+		std::string kind;				// "text" | "picture" (VobSub/PGS/DVB: /api/picsubs) | "image" (other pictures: the handheld only)
 		bool external = false, isDefault = false, forced = false;
 		bool styled = false;			// ASS/SSA: the browser can draw it with libass (JASSUB) in its own look
 		int stream = -1;				// embedded: libavformat's stream index
@@ -37,6 +37,13 @@ namespace bp
 	// an ASS/SSA track as the whole script (header, styles, events) for JASSUB: an external file as it is, an embedded
 	// track read out of the file once (202 meanwhile, as subtitleVtt) and cached as .ass
 	SubsAnswer subtitleAss(const std::string& real, const SubEntry& sub);
+
+	// picture subtitles the page can show: drawn here into PNGs a window at a time (src/web/picsubs.cpp)
+	bool pictureCodec(const std::string& codec);
+	// the cues of a "picture" track showing during [from, to) (at most 120 s) as JSON: {from, to, w, h, eof, cues: [{s, e,
+	// r: [{x, y, w, h, png}]}]}: times in file seconds, rects in the w x h canvas, png base64. `to` is where it got to
+	// (short of what was asked when reading took too long or the answer grew too big): the page asks on from there
+	SubsAnswer pictureSubs(const std::string& real, const SubEntry& sub, double from, double to);
 
 	// the fonts a file carries (Matroska attachments) for its ASS subtitles; i is libavformat's stream index
 	struct FontAttachment { int i = 0; std::string name, mime; size_t size = 0; };

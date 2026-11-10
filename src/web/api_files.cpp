@@ -604,7 +604,7 @@ namespace bp
 					.key("kind").str(s.kind).key("external").boolean(s.external).key("styled").boolean(s.styled).end();
 			w.end();
 			// the subtitle to start with: the one the handheld remembers (resume.tsv's last language), else a forced
-			// track, else none. Only a text one can show
+			// track, else none. Only a text or picture one can show
 			std::string lastLang;
 			bool lastOff = false;
 			if (!subs.empty())
@@ -624,9 +624,9 @@ namespace bp
 			{
 				std::string want = languageName(lastLang);
 				for (auto& s : subs)
-					if (def < 0 && s.kind == "text" && !lastLang.empty() && !s.lang.empty() && languageName(s.lang) == want) def = s.i;
+					if (def < 0 && s.kind != "image" && !lastLang.empty() && !s.lang.empty() && languageName(s.lang) == want) def = s.i;
 				for (auto& s : subs)
-					if (def < 0 && s.kind == "text" && s.forced) def = s.i;
+					if (def < 0 && s.kind != "image" && s.forced) def = s.i;
 			}
 			w.key("subDefault").num(def).end();
 			WebServer::json(res, w.out());
@@ -666,6 +666,26 @@ namespace bp
 			res.set_header("Cache-Control", "no-store");
 			if (a.status == 200) res.set_content(a.body, a.type);
 			else WebServer::json(res, a.body, a.status);
+			res.status = a.status;
+		});
+
+		// picture subtitles (VobSub, PGS, DVB) a window at a time: /api/picsubs?p=&i=&from=&to= (seconds, at most 120 s)
+		svr.Get("/api/picsubs", [&ws](const httplib::Request& req, httplib::Response& res) {
+			std::string real;
+			if (!ws.resolve(req.get_param_value("p"), real, false, res)) return;
+			MediaInfo m;
+			if (!probeMedia(real, m)) return WebServer::fail(res, 422, "not a media file");
+			auto subs = listSubtitles(real, m);
+			std::string is = req.get_param_value("i");
+			int i = is.empty() || is.find_first_not_of("0123456789") != std::string::npos ? -1 : atoi(is.c_str());
+			if (i < 0 || i >= (int)subs.size()) return WebServer::fail(res, 404, "no such subtitle track");
+			auto num = [&](const char* k) {
+				std::string v = req.get_param_value(k);
+				return v.empty() || v.size() > 16 || v.find_first_not_of("0123456789.") != std::string::npos ? -1.0 : atof(v.c_str());
+			};
+			SubsAnswer a = pictureSubs(real, subs[i], num("from"), num("to"));
+			res.set_header("Cache-Control", "no-store");
+			WebServer::json(res, a.body, a.status);
 			res.status = a.status;
 		});
 

@@ -57,6 +57,8 @@ function navKind(a, b) {
 	// (not over this browser's own video: WebKit froze it for seconds after a View Transition took it along; the
 	// player's own slide then)
 	if (compact && has && (a.page === 'playing') !== (b.page === 'playing')) return videoHere() ? '' : b.page === 'playing' ? 'player-open' : 'player-close';
+	// (the same on a tablet or a computer: the video moves between the player and the bar's tile)
+	if (has && videoHere() && (a.page === 'playing') !== (b.page === 'playing')) return '';
 	if (a.page !== b.page) return 'fade';
 	if (b.page === 'files') return '';	// folder to folder: at once (a slide every step was too much while browsing)
 	const d = depth(b) - depth(a);

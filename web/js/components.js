@@ -1,6 +1,6 @@
 import { html, useState, useEffect, useRef } from '../vendor/htm-preact-standalone.module.js';
 import { view } from './browser-player.js';
-import { fmtSize, fmtTime } from './util.js';
+import { chapterTitle, fmtSize, fmtTime } from './util.js';
 import { Icon } from './icons.js';
 import { LIKED_ID } from './plshared.js';
 import { Q_WIDE, phoneNow, store } from './store.js';
@@ -57,12 +57,22 @@ export function Modal({ title, sub, label, onClose, actions, children, cls, pos,
 
 export function Seek({ view: v, onSeek, disabled }) {
 	useTick(500);
-	const ref = useRef(), [drag, setDrag] = useState(null);
+	const ref = useRef(), [drag, setDrag] = useState(null), [hover, setHover] = useState(null);
 	const dur = v.duration || 0, pos = drag != null ? drag : Math.min(v.pos(), dur || v.pos());
 	const frac = dur ? Math.max(0, Math.min(1, pos / dur)) : 0;
 	const at = e => { const r = ref.current.getBoundingClientRect(); return Math.max(0, Math.min(1, (e.clientX - r.left) / r.width)) * dur; };
 	const down = e => { if (disabled || !dur) return; ref.current.setPointerCapture(e.pointerId); setDrag(at(e)); };
-	const move = e => { if (drag != null) setDrag(at(e)); };
+	// a mouse over the bar: the time under it (and its chapter) in a tip above; touch shows it while dragging
+	const move = e => { if (drag != null) setDrag(at(e)); if (e.pointerType === 'mouse' && dur && !disabled) setHover(at(e)); };
+	const tipT = drag != null ? drag : hover;
+	let tip = null;
+	if (tipT != null && dur) {
+		const ch = v.chapters || [];
+		let k = -1;
+		for (let i = 0; i < ch.length; i++) if (ch[i].start <= tipT + 0.05) k = i;
+		const name = ch.length > 1 && k >= 0 ? chapterTitle(ch[k], k) : '';
+		tip = html`<div class="seek-tip" style=${'left:' + (tipT / dur * 100) + '%;transform:translateX(-' + (tipT / dur * 100) + '%)'} aria-hidden="true">${name && html`<span class="seek-tip-ch">${name}</span>`}<span class="seek-tip-t">${fmtTime(tipT)}</span></div>`;
+	}
 	const up = e => { if (drag != null) { const t = at(e); setDrag(null); onSeek(t); } };
 	const key = e => {
 		const d = { ArrowLeft: -5, ArrowRight: 10, ArrowDown: -5, ArrowUp: 10 }[e.key];
@@ -70,9 +80,10 @@ export function Seek({ view: v, onSeek, disabled }) {
 	};
 	return html`<div class="seek" ref=${ref} role="slider" tabindex=${disabled ? -1 : 0} aria-label="Seek" aria-valuemin="0" aria-valuemax=${Math.floor(dur)} aria-valuenow=${Math.floor(pos)}
 		aria-valuetext=${fmtTime(pos) + ' of ' + fmtTime(dur)} aria-disabled=${disabled ? 'true' : undefined}
-		onPointerDown=${down} onPointerMove=${move} onPointerUp=${up} onPointerCancel=${() => setDrag(null)} onKeyDown=${key}>
+		onPointerDown=${down} onPointerMove=${move} onPointerUp=${up} onPointerCancel=${() => setDrag(null)} onPointerLeave=${() => setHover(null)} onKeyDown=${key}>
+		${tip}
 		<div class="track"><div class="fill" style="width:${frac * 100}%"></div>
-			${dur > 0 && (v.chapters || []).slice(1).map(c => html`<i class="tick" style="left:${c.start / dur * 100}%"></i>`)}
+			${dur > 0 && (v.chapters || []).slice(1).map(c => html`<i class=${'tick' + (c.start <= pos ? ' past' : '')} style="left:${c.start / dur * 100}%"></i>`)}
 			${dur > 0 && html`<div class="thumb" style="left:${frac * 100}%"></div>`}</div></div>`;
 }
 

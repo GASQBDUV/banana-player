@@ -465,6 +465,9 @@ Three sections: **Playing**, **Files** and **Playlists**. On a phone they're the
 player floating over it; on a tablet an icon rail on the left and a player bar at the bottom; on a computer a sidebar
 (the sections, a shortcut list of playlists, and a card with the handheld's battery, free space and **Sign out**) and
 the player bar. On a phone, **Sign out** is behind the handheld button at the top right of Files and Playlists.
+A video playing in this browser goes on, picture and all, when you leave **Playing**: it plays in the small player's
+(or the player bar's) cover tile, without its subtitles; a tap on it opens **Playing** again, where it carries on
+full size.
 
 **Playing** controls the music or video. Where it plays is a two-part switch at the top (**Handheld** · **This
 browser**), and in the player bar a button that opens the same choice, saying what happens (for example "pauses the
@@ -532,8 +535,10 @@ handheld, carries on at 1:27"):
   - **Subtitles:** the file's text tracks (SRT, WebVTT, MP4 text) and the files beside it (`.srt`, `.vtt`); the first
     time an embedded one is chosen it's read out of the file (**Preparing subtitles… 40%**), then kept. Styled ones
     (ASS/SSA, inside or beside the video) are drawn in the browser with their own look, positions, effects and the
-    fonts the file carries. Picture subtitles (PGS, VobSub) say **Shows on the handheld only**. **Size** and
-    **Position** set how plain subtitles look in this browser; styled ones keep theirs.
+    fonts the file carries. Picture subtitles (Blu-ray PGS, DVD VobSub, DVB; inside the video, or a `.idx`/`.sup`
+    beside it) show too: the handheld turns about a minute of them at a time into pictures, ahead of where you are,
+    placed where the disc puts them on the picture (fullscreen too). After a jump they appear within a moment. **Size**
+    and **Position** set how plain subtitles look in this browser; styled and picture ones keep theirs.
   - **On the video** (inline and fullscreen, phone and computer): **CC** turns subtitles off, and on
     again with the ones you had (in the next file: the same ones, else the same language, never signs-only first);
     **C** on a keyboard does the same. The **gear** opens **Audio track ›**, **Subtitles ›** and **Speed ›** (0.5× to

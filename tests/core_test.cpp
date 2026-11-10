@@ -14,6 +14,9 @@ extern "C"
 #include "ftplist.h"
 #include "history.h"
 #include "photo.h"
+#include "picsubs.h"
+#include "png.h"
+#include <zlib.h>
 #include "update.h"
 #include "backlight.h"
 #include "playlist.h"
@@ -3632,8 +3635,96 @@ static void testSessionFuzz()
 	failures += bad;
 }
 
+// picture subtitles for the browser: the cue timing rules, the window a request may ask for, the paletted PNG
+static void testPicSubs()
+{
+	auto ev = [](double s, double e, bool clear, int id) { PicEvent x; x.start = s; x.end = e; x.clear = clear; x.id = id; return x; };
+	// PGS: no end times; an empty event ends the one before, the next picture replaces it
+	{
+		auto c = pictureCues({ev(10, -1, false, 0), ev(13, -1, true, 1), ev(20, -1, false, 2), ev(22, -1, false, 3), ev(25, -1, true, 4)}, 0, 60, 40, false);
+		CHECK_EQ(c.size(), (size_t)3);
+		CHECK_EQ(c[0].start, 10.0); CHECK_EQ(c[0].end, 13.0); CHECK_EQ(c[0].id, 0);
+		CHECK_EQ(c[1].end, 22.0); CHECK_EQ(c[2].end, 25.0); CHECK_EQ(c[2].id, 3);
+	}
+	// VobSub: its own stop time, cut short by a picture that comes sooner; read out of order, sorted
+	{
+		auto c = pictureCues({ev(5, 8, false, 1), ev(1, 4, false, 0), ev(7, 9, false, 2)}, 0, 60, 40, false);
+		CHECK_EQ(c.size(), (size_t)3);
+		CHECK_EQ(c[0].id, 0); CHECK_EQ(c[0].end, 4.0); CHECK_EQ(c[1].end, 7.0); CHECK_EQ(c[2].end, 9.0);
+	}
+	// no end and nothing after: on to where reading stopped (a later window says more), 5 s at the end of the file
+	{
+		auto c = pictureCues({ev(50, -1, false, 0)}, 0, 60, 70, false);
+		CHECK_EQ(c.size(), (size_t)1); CHECK_EQ(c[0].end, 70.0);
+		c = pictureCues({ev(50, -1, false, 0)}, 0, 60, 50, true);
+		CHECK_EQ(c[0].end, 55.0);
+		// never over maxShow (a VobSub stop of 4294967 s, as ffmpeg's conversions write)
+		c = pictureCues({ev(50, 50 + 4294967.295, false, 0)}, 0, 60, 70, false);
+		CHECK_EQ(c[0].end, 110.0);
+	}
+	// the window: a cue showing as it starts is in, one before it or from its end on is out; same time: the last wins
+	{
+		auto c = pictureCues({ev(5, 12, false, 0), ev(2, 4, false, 1), ev(60, 62, false, 2), ev(30, 31, false, 3), ev(30, 33, false, 4)}, 10, 60, 70, false);
+		CHECK_EQ(c.size(), (size_t)2);
+		CHECK_EQ(c[0].id, 0); CHECK_EQ(c[1].id, 4);
+	}
+	double f = 0, t = 0;
+	CHECK_EQ(pictureWindow(30, 90, 120, f, t), true); CHECK_EQ(f, 30.0); CHECK_EQ(t, 90.0);
+	CHECK_EQ(pictureWindow(-5, 500, 120, f, t), true); CHECK_EQ(f, 0.0); CHECK_EQ(t, 120.0);
+	CHECK_EQ(pictureWindow(90, 30, 120, f, t), false);
+	CHECK_EQ(pictureWindow(NAN, 30, 120, f, t), false);
+	CHECK_EQ(pictureWindow(2e6, 2e6 + 1, 120, f, t), false);
+
+	// the PNG: signature, chunks with good CRCs, a palette with alpha, and the rows back out of IDAT
+	{
+		const int W = 5, H = 3, STRIDE = 8;
+		uint8_t idx[STRIDE * H];
+		for (int i = 0; i < STRIDE * H; i++) idx[i] = (uint8_t)(i % 3);
+		uint32_t pal[3] = {0x00000000u, 0xffffffffu, 0x80102030u};
+		std::string png = pngIndexed(W, H, idx, STRIDE, pal, 3);
+		CHECK_EQ(png.compare(0, 8, std::string("\x89PNG\r\n\x1a\n", 8)), 0);
+		auto be = [&](size_t o) { return (uint32_t)(uint8_t)png[o] << 24 | (uint32_t)(uint8_t)png[o + 1] << 16 | (uint32_t)(uint8_t)png[o + 2] << 8 | (uint8_t)png[o + 3]; };
+		std::map<std::string, std::string> chunks;
+		std::vector<std::string> order;
+		size_t o = 8;
+		bool crcOk = true;
+		while (o + 12 <= png.size())
+		{
+			uint32_t n = be(o);
+			std::string type = png.substr(o + 4, 4);
+			if (crc32(0, (const Bytef*)png.data() + o + 4, n + 4) != be(o + 8 + n)) crcOk = false;
+			chunks[type] = png.substr(o + 8, n);
+			order.push_back(type);
+			o += 12 + n;
+		}
+		CHECK_EQ(crcOk, true);
+		CHECK_EQ(o, png.size());
+		CHECK_EQ(order.size(), (size_t)5);
+		CHECK_EQ(order.front(), std::string("IHDR")); CHECK_EQ(order.back(), std::string("IEND"));
+		CHECK_EQ(chunks["IHDR"].size(), (size_t)13);
+		CHECK_EQ((int)(uint8_t)chunks["IHDR"][9], 3);	// paletted
+		CHECK_EQ(chunks["PLTE"], std::string("\x00\x00\x00\xff\xff\xff\x10\x20\x30", 9));
+		CHECK_EQ(chunks["tRNS"], std::string("\x00\xff\x80", 3));
+		std::string raw((W + 1) * H, '\0');
+		uLongf n = raw.size();
+		CHECK_EQ(uncompress((Bytef*)&raw[0], &n, (const Bytef*)chunks["IDAT"].data(), chunks["IDAT"].size()), Z_OK);
+		CHECK_EQ((size_t)n, raw.size());
+		bool rows = true;
+		for (int y = 0; y < H; y++)
+		{
+			if (raw[y * (W + 1)] != 0) rows = false;
+			for (int x = 0; x < W; x++)
+				if ((uint8_t)raw[y * (W + 1) + 1 + x] != idx[y * STRIDE + x]) rows = false;
+		}
+		CHECK_EQ(rows, true);
+		CHECK_EQ(pngIndexed(0, 3, idx, STRIDE, pal, 3), std::string());
+		CHECK_EQ(pngIndexed(W, H, idx, 2, pal, 3), std::string());
+	}
+}
+
 int main()
 {
+	testPicSubs();
 	testSessionNamed();
 	testMatchVectors();
 	testSessionFuzz();

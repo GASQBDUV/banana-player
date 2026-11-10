@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(banana-player VERSION 0.5.7 LANGUAGES CXX)
+project(banana-player VERSION 0.5.8 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -34,7 +34,7 @@ find_package(OpenSSL REQUIRED)
 
 # what doesn't need a window: unit-tested on its own
 add_library(bpcore STATIC src/aspect.cpp src/tracks.cpp src/format.cpp src/substyle.cpp src/settings.cpp src/resume.cpp src/playlist.cpp src/browser.cpp src/history.cpp src/png.cpp src/battery.cpp src/photo.cpp src/update.cpp src/backlight.cpp src/netstore.cpp src/netpath.cpp src/servers.cpp src/secret.cpp src/sidecar.cpp src/ftplist.cpp src/keyboard.cpp src/eq.cpp src/soundfx.cpp src/playlists.cpp
-	src/webauth.cpp src/webpath.cpp src/json.cpp src/webmedia.cpp src/webstate.cpp src/crashlog.cpp src/session.cpp src/durations.cpp)
+	src/webauth.cpp src/webpath.cpp src/json.cpp src/webmedia.cpp src/webstate.cpp src/crashlog.cpp src/session.cpp src/durations.cpp src/picsubs.cpp)
 target_include_directories(bpcore PUBLIC src)
 target_link_libraries(bpcore PUBLIC PkgConfig::MPV PkgConfig::ZLIB OpenSSL::Crypto ${CMAKE_DL_LIBS})
 if(APPLE)
@@ -92,7 +92,7 @@ if(BP_WEB)
 	target_sources(banana-player PRIVATE
 		third_party/httplib/httplib.cc third_party/qrcodegen/qrcodegen.cpp
 		src/web/server.cpp src/web/netif.cpp src/web/api_files.cpp src/web/api_player.cpp src/web/api_playlists.cpp
-		src/web/probe.cpp src/web/subs.cpp src/web/remux.cpp ${CMAKE_BINARY_DIR}/web_assets.cpp)
+		src/web/probe.cpp src/web/subs.cpp src/web/picsubs.cpp src/web/remux.cpp ${CMAKE_BINARY_DIR}/web_assets.cpp)
 	target_include_directories(banana-player PRIVATE third_party/httplib third_party/qrcodegen)
 	# both split files of httplib read these: the keep-alive check every second, and form bodies up to 256 KB
 	target_compile_definitions(banana-player PRIVATE BP_WEB=1
