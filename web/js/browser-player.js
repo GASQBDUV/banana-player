@@ -276,7 +276,7 @@ export function toggleCaptions() {
 		|| text.find(x => !SIGNS.test(x.label)) || text[0];
 	lsSet('bpSubOff', '0'); chooseSub(pick.i);
 }
-// playback speed (the gear's Speed): it stays for the next file, as on YouTube
+// playback speed (the gear's Speed): it stays for the next file
 export const SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 2];
 export function setSpeed(r) { el.defaultPlaybackRate = r; el.playbackRate = r; notify(); }
 function restoreSubs() { const c = SUBS.chosen; if (c >= 0) { SUBS.chosen = -1; chooseSub(c, true); } }

@@ -36,7 +36,7 @@ There were four races, and any one of them was enough.
     Any other play (a tap, Continue here) also takes a new token. `browserStop` and `dropBrowser` cancel a pending
     navigation.
   - (Superseded: Previous now restarts a song 5 s or more in, everywhere, the handheld's L to the page included; see
-    "Previous as YouTube Music's" in 2026-11-10-background-playback.md.)
+    "Previous restarts the file" in 2026-11-10-background-playback.md.)
 - **Ordering** (`api_player.cpp`):
   - Every `browser-play` and `browser-pos` carries the tab id and a sequence number, `Date.now()*1000` plus a
     counter, so it still grows after a reload.

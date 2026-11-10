@@ -73,7 +73,7 @@ it here. Tested with a fake page (python: song to the page, AVI here, photo unto
 answers: the two late answers dropped) and once in headless Chrome. Not verified on the handheld or in Safari (an
 `el.play()` from an SSE event relies on the page's earlier gesture).
 
-## Later: Previous as YouTube Music's
+## Later: Previous restarts the file
 
 `Player::back()` (the handheld's L and its Prev button, the web's `prev` command): 5 s (`RESTART_S`) or more into a song
 or video, back to its start; else `prev()`. The Prev button is never dimmed. The page's `browserNext` does the same for

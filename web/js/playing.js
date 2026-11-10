@@ -132,7 +132,7 @@ function PanelTabs({ tabs, tab, open, onTab }) {
 	return html`<div class="ptabs" role="tablist" aria-label="More about what's playing">${tabs.map(([k, l]) => html`<button role="tab" id=${'pt-' + k} aria-controls="np-tabbody" aria-selected=${open !== false && tab === k} onClick=${() => onTab(k)}>${l}</button>`)}</div>`;
 }
 
-/* ---- the media: the video here, the cover, or the handheld's video as a poster; taps as on YouTube ---- */
+/* ---- the media: the video here, the cover, or the handheld's video as a poster; taps ---- */
 function useFullscreen() {
 	const [fs, setFs] = useState(null);
 	useEffect(() => { const f = () => setFs(document.fullscreenElement || document.webkitFullscreenElement || null); document.addEventListener('fullscreenchange', f); document.addEventListener('webkitfullscreenchange', f); return () => { document.removeEventListener('fullscreenchange', f); document.removeEventListener('webkitfullscreenchange', f); }; }, []);
@@ -176,14 +176,14 @@ function Media({ v, off, immersive, onCollapse }) {
 	const seek = (side) => { if (off) return; ctl.seekRel(side === 'l' ? -5 : 10); setRip(r => ({ side, id: ++t.current.n, n: r && r.side === side && Date.now() - r.at < 900 ? r.n + 1 : 1, at: Date.now() })); };
 	const up = e => {
 		if (e.button > 0 || e.target.closest('button,.seek,.vmenu') || box.current.dataset.swiped) return;
-		// a tap beside the open menu only closes it (as on YouTube)
+		// a tap beside the open menu only closes it
 		if (t.current.menu || Date.now() - t.current.closedAt < 350) { if (t.current.menu) setMenu(null); return; }
 		const r = box.current.getBoundingClientRect(), x = (e.clientX - r.left) / r.width;
 		const side = x < 1 / 3 ? 'l' : x > 2 / 3 ? 'r' : 'c', tt = t.current, now = Date.now();
-		// a mouse: a click plays or pauses at once, a double click is fullscreen (YouTube on a computer)
+		// a mouse: a click plays or pauses at once, a double click is fullscreen
 		if (e.pointerType === 'mouse') { if (now - tt.last < 300 && live) { tt.last = 0; toggleFullscreen(box.current); return; } tt.last = now; toggle(); return; }
 		// a finger: a double tap on the left or right third seeks; a single tap shows the overlay over a video, and is
-		// play / pause on a cover (YouTube on a phone)
+		// play / pause on a cover
 		if (now - tt.last < 300 && side !== 'c' && side === tt.side) { clearTimeout(tt.single); tt.last = now; seek(side); return; }
 		tt.last = now; tt.side = side;
 		clearTimeout(tt.single);
@@ -231,7 +231,7 @@ function Media({ v, off, immersive, onCollapse }) {
 		${rip && html`<div class=${'mrip ' + rip.side} key=${rip.id} aria-hidden="true"><span>${rip.side === 'l' ? '−' + 5 * rip.n + ' s' : '+' + 10 * rip.n + ' s'}</span></div>`}
 	</div>`;
 }
-/* ---- the gear's menu on the video (YouTube's): Audio track, Subtitles, Speed, each a page of its own. It lives in the
+/* ---- the gear's menu on the video: Audio track, Subtitles, Speed, each a page of its own. It lives in the
    media box, so it shows in fullscreen too. Arrows move, Enter picks, Left or Esc go back, Esc on the first page closes */
 // "Japanese · AAC Stereo · Commentary": the title first ("Commentary"), then "Japanese · AAC Stereo"
 const trackName = l => { const p = (l || '').split(' · '); return p.length > 2 ? [p.slice(2).join(' · '), p[0] + ' · ' + p[1]] : [p[0], p[1] || '']; };

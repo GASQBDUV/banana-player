@@ -58,7 +58,7 @@ under the header shows where you are (`share / Movies`), and the bottom line sho
 button's name in yellow, then what it does. See [Playlists](#playlists).
 
 Everything in a folder plays as one playlist: **L/R** go to the previous or next file, and the next one starts when
-the current one ends. **Previous** works as in YouTube Music: 5 seconds or more into a song or video, it goes back to
+the current one ends. **Previous**: 5 seconds or more into a song or video, it goes back to
 its start; before that, to the file before. On the first file in its first 5 seconds it does nothing (the top screen
 says **This is the first one**), so the Prev button is never greyed out. The web dashboard's Previous (both targets, and
 a headset's or the lock screen's) follows the same rule. Photos simply step back. Folders can mix videos and music. Photos are a list of their own: from a photo you step through
@@ -513,7 +513,7 @@ handheld, carries on at 1:27"):
     (ASS/SSA, inside or beside the video) are drawn in the browser with their own look, positions, effects and the
     fonts the file carries. Picture subtitles (PGS, VobSub) say **Shows on the handheld only**. **Size** and
     **Position** set how plain subtitles look in this browser; styled ones keep theirs.
-  - **On the video**, as on YouTube (inline and fullscreen, phone and computer): **CC** turns subtitles off, and on
+  - **On the video** (inline and fullscreen, phone and computer): **CC** turns subtitles off, and on
     again with the ones you had (in the next file: the same ones, else the same language, never signs-only first);
     **C** on a keyboard does the same. The **gear** opens **Audio track ›**, **Subtitles ›** and **Speed ›** (0.5× to
     2×, kept for the next file): the one playing is ticked, and the ones that can't play here are dimmed with the

@@ -523,7 +523,7 @@ video::cue { font-size: var(--cue, 18px); color: #fff; background: rgba(0, 0, 0,
 .mov-r { margin-left: auto; display: flex; align-items: center; flex: none; }
 .mov-fs, .mov-cc, .mov-gear { color: var(--cream); position: relative; }
 .mov-gear.on { color: var(--yellow); }
-/* CC on: a yellow bar under it (YouTube's red one) */
+/* CC on: a yellow bar under it */
 .mov-cc.on::after { content: ""; position: absolute; left: 12px; right: 12px; bottom: 8px; height: 3px; background: var(--yellow); border-radius: 2px; }
 /* the gear's menu: over the picture's bottom right, in the media box (so fullscreen keeps it) */
 .vmenu { position: absolute; right: var(--s2); bottom: 60px; z-index: 6; width: 300px; max-width: calc(100% - 2 * var(--s2)); max-height: calc(100% - 72px); overflow-y: auto; padding: 6px; overscroll-behavior: contain;
@@ -873,7 +873,7 @@ video::cue { font-size: var(--cue, 18px); color: #fff; background: rgba(0, 0, 0,
 @media (min-width: 1100px) and (max-width: 1279px) { .pbar .ptime { display: none; } }
 
 /* ================= iOS Safari (its toolbar at the bottom) and touch in general =================
-   The shell is fixed and its parts scroll inside (as YouTube Music's web app): the document itself never scrolls, so
+   The shell is fixed and its parts scroll inside: the document itself never scrolls, so
    Safari's toolbar stays put and nothing slides under it; heights follow the dynamic viewport (dvh), with a 100%
    chain from html for browsers without it. Each scroller keeps its scroll to itself; where a drag is the app's own
    (the sheet, the player's swipe down, the sliders, the equalizer), the browser doesn't take it. */
