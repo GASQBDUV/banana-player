@@ -380,6 +380,7 @@ int main(int argc, char** argv)
 		WebSnapshot webLast;
 		bool webForce = true;	// publish at the next turn whatever changed (a browser came, the handheld woke)
 		Uint32 webPublishedAt = 0;
+		int webRecentSent = -1;	// the Recent serial the pages were last told
 		int elsewhereShown = 0;	// the top panel's "Playing in your browser"
 #endif
 		Uint32 bottomId = bottom ? SDL_GetWindowID(bottom) : 0;
@@ -1018,8 +1019,10 @@ int main(int argc, char** argv)
 			// dashboard too
 			{
 				bool elsewhere = webServer && webServer->running() && ui.browserPlaying && player.playing() && player.paused;
-				int shown = elsewhere ? (ui.pagePlaying() ? 2 : 1) : 0;
-				if (shown != elsewhereShown) { player.showElsewhere(elsewhere, shown == 2); elsewhereShown = shown; }
+				// (+4: a song with the equalizer or an effect on, which the page doesn't play with: the card says so)
+				bool sound = player.playingAudio() && (player.settings.eqOn || player.settings.soundFx != SoundFx::None);
+				int shown = elsewhere ? (ui.pagePlaying() ? 2 : 1) + (sound ? 4 : 0) : 0;
+				if (shown != elsewhereShown) { player.showElsewhere(elsewhere, (shown & 3) == 2); elsewhereShown = shown; }
 			}
 			// the web dashboard's live state: made only while a browser watches, sent when something but the clock
 			// changed (or the clock drifted), at most 4 times a second
@@ -1069,6 +1072,12 @@ int main(int argc, char** argv)
 					ui.browserSeenPos = pos;
 				}
 				else ui.browserSeenPos = -1;
+				// the history or a kept place changed: the pages' Recent loads again
+				if (player.recentSerial() != webRecentSent)
+				{
+					if (webRecentSent >= 0) webServer->notify("recent", "{\"serial\":" + std::to_string(player.recentSerial()) + "}");
+					webRecentSent = player.recentSerial();
+				}
 				if (webServer->clients() > 0 && SDL_GetTicks() - webPublishedAt >= 250)
 				{
 					WebSnapshot snap = webSnapshot(*webServer, player, ui);

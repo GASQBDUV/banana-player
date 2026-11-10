@@ -209,6 +209,8 @@ namespace bp
 
 	void Player::open(const std::vector<std::string>& list, int index, const std::vector<std::string>& folderNames)
 	{
+		// the file playing keeps its place (the web's Play replaces it with no stop between: Recent lost it)
+		saveResume();
 		playlist = list;
 		current = index;
 		ghost = -1;
@@ -232,6 +234,7 @@ namespace bp
 
 	void Player::openPlaylist(const std::vector<std::string>& paths, int index, const PlaySource& source)
 	{
+		saveResume();
 		// (a playlist has none, but one written by hand could: the photo player is another thing)
 		playlist.clear();
 		int start = -1;
@@ -540,6 +543,7 @@ namespace bp
 		if (settings.keepHistory && !isPhoto && (settings.keepNetHistory || !isNet))
 		{
 			played.add(path);
+			recentSer++;
 			if (!opts.stateDir.empty()) writeFile(opts.stateDir + "/history.tsv", played.serialize());
 		}
 
@@ -1223,6 +1227,7 @@ namespace bp
 		{
 			size_t before = played.items().size();
 			played.removeIf([](const std::string& p) { return isNetPath(p); });
+			recentSer++;
 			if (played.items().size() != before && !opts.stateDir.empty())
 				writeFile(opts.stateDir + "/history.tsv", played.serialize());
 		}
@@ -1477,6 +1482,9 @@ namespace bp
 		std::string ev = "{\\an7\\pos(0,0)\\bord0\\shad0\\1c" + ass(TOP_CARD) + "\\1a&H00&\\p1}m 0 0 l 960 0 960 720 0 720{\\p0}\n";
 		ev += "{\\an5\\pos(480,320)\\bord0\\shad0\\fnPixelify Sans\\fs56\\1c" + ass(TOP_TITLE) + "}" + (playing ? "Playing" : "Paused") + " in your browser\n";
 		ev += "{\\an5\\pos(480,400)\\bord0\\shad0\\fnInter\\fs30\\1c" + ass(TOP_SUB) + "}Hold A to play here";
+		// a song with the equalizer or an effect on: the browser plays it without them (they're the handheld's)
+		if (isAudio && (settings.eqOn || settings.soundFx != SoundFx::None))
+			ev += "\n{\\an5\\pos(480,600)\\bord0\\shad0\\fnInter\\fs26\\1c" + ass(TOP_SUB) + "}Your equalizer and effects don't apply in the browser";
 		const char* cmd[] = {"osd-overlay", "6", "ass-events", ev.c_str(), "960", "720", "5", "no", "no", nullptr};
 		mpv_command_async(mpv, 0, cmd);
 	}
@@ -1711,6 +1719,7 @@ namespace bp
 		if (settings.rememberSubs && seenSid >= 0) e.sid = seenSid;
 		e.duration = duration;	// (Home's Recent cards: how far into it)
 		resume.put(e);
+		recentSer++;
 		writeFile(opts.stateDir + "/resume.tsv", resume.serialize());
 	}
 
@@ -1745,12 +1754,15 @@ namespace bp
 	void Player::clearHistory()
 	{
 		played.clear();
+		recentSer++;
 		if (!opts.stateDir.empty()) unlink((opts.stateDir + "/history.tsv").c_str());
 	}
 
 	void Player::removeFromHistory(const std::string& path)
 	{
-		if (played.remove(path) && !opts.stateDir.empty()) writeFile(opts.stateDir + "/history.tsv", played.serialize());
+		if (!played.remove(path)) return;
+		recentSer++;
+		if (!opts.stateDir.empty()) writeFile(opts.stateDir + "/history.tsv", played.serialize());
 	}
 
 	void Player::forgetPosition(const std::string& path)
@@ -1760,6 +1772,7 @@ namespace bp
 		ResumeEntry keep = *e;
 		keep.position = -1;
 		resume.put(keep);
+		recentSer++;
 		if (!opts.stateDir.empty()) writeFile(opts.stateDir + "/resume.tsv", resume.serialize());
 	}
 

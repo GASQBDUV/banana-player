@@ -185,6 +185,18 @@ n=$(grep -c '^event: state' "$T/sse"); [ "$n" -ge 6 ]; check "SSE saw >= 6 state
 grep '^data:' "$T/sse" | head -1 | sed 's/^data: *//' | jq -e '.eq' >/dev/null; check "SSE data is a snapshot" $?
 grep -q 'Sunny Peel' "$T/sse"; check "SSE carried the song" $?
 grep -q '^event: playlists' "$T/sse"; check "SSE saw a playlists event" $?
+grep -q '^event: recent' "$T/sse"; check "SSE saw a recent event" $?
+
+echo "== recent"
+get /api/recent; status_is "recent" 200
+jq_is "recent: song 1 newest, then song 2, as played" "(.items[0].p == \"$SONG\") and ([.items[].p] | index(\"$SONG2\")) != null and (.items[0].kind == \"audio\") and (.items[0].played == true)"
+jq_is "recent: no state folder, nothing hidden" '[.items[].p | select(test("/\\."))] | length == 0'
+post /api/recent/remove --data-urlencode "p=$SONG2"; status_is "remove from recent" 200
+get /api/recent; jq_is "song 2 gone from recent" "[.items[].p] | index(\"$SONG2\") == null"
+post /api/recent/remove --data-urlencode "p=$SONG2"; status_is "remove one not there" 404
+raw -X POST -b "$JAR" "$BASE/api/recent/clear"; status_is "clear without X-BP" 403
+post /api/recent/clear; status_is "clear recent" 200
+get /api/recent; jq_is "recent empty after clear" '.items | length == 0'
 
 echo "== cleanup"
 get /api/playlist --get --data-urlencode "id=$ID2"; status_is "open renamed playlist" 200

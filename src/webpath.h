@@ -17,6 +17,9 @@ namespace bp
 		std::string& real, bool forCreate);
 	// The virtual path of a real one ("0", "1/Music/a.mp3"); "" if it is outside every root.
 	std::string toVirtual(const std::vector<WebRoot>& roots, const std::string& real);
+	// toVirtual for a path the dashboard lists without being asked for it (Recent): "" also when it is under a `deny`
+	// prefix or has a part starting with "." (resolveVirtual would refuse it). The file need not exist (a gone one).
+	std::string servedVirtual(const std::vector<WebRoot>& roots, const std::vector<std::string>& deny, const std::string& real);
 
 	// 1-255 bytes; none of / \ < > : " | ? * or control characters; not blank; not "." or ".."
 	bool validName(const std::string& name);

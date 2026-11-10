@@ -11,6 +11,7 @@ import { Icon, dimsCache } from './js/icons.js';
 import { DevButton, LoopIcon, NowPlaying, closePanel, loopName, showTab, targetLabel } from './js/playing.js';
 import { cmpName, fmtTime, isIOS, throttled } from './js/util.js';
 import { Playlists } from './js/playlists.js';
+import { RECENT_ID } from './js/recent.js';
 import { dirLabel, entriesFromDrop, entriesFromInput, startUpload } from './js/uploads.js';
 import { Files, Lightbox, UploadFab } from './js/files.js';
 import { DownScreen } from './js/down.js';
@@ -92,7 +93,8 @@ function SidePls() {
 	return html`<div class="plblock" role="group" aria-label="Playlists">
 		<div class="plhead"><span class="kicker">Playlists</span><span class="num">${list.length}</span><span class="grow"></span><button class="ib sm" aria-label="New playlist" title="New playlist" onClick=${() => newPlaylistDialog(id => open(id))}><${Icon} n="plus" k=${1} /></button></div>
 		${liked && html`<button class="plnav" aria-current=${cur === liked.id ? 'page' : undefined} onClick=${() => open(liked.id)}><span class="y"><${Icon} n="heart" k=${1} /></span>Liked</button>`}
-		${!few && shown.length > 0 && html`<div class="kicker plsub">Recent</div>`}
+		<button class="plnav" aria-current=${cur === RECENT_ID ? 'page' : undefined} onClick=${() => go('#/recent')}><span class="y"><${Icon} n="clock" k=${1} /></span>Recent</button>
+		${!few && shown.length > 0 && html`<div class="kicker plsub">Recently used</div>`}
 		${shown.map(p => html`<button class="plnav side-pl" key=${p.id} aria-current=${cur === p.id ? 'page' : undefined} onClick=${() => open(p.id)}><${Icon} n="playlist" k=${1} /><span class="ell">${p.name}</span></button>`)}
 		${!few && html`<button class="plnav all" onClick=${() => go('#/playlists')}>All ${list.length} playlists<span class="grow"></span><${Icon} n="right" k=${1} /></button>`}</div>`;
 }

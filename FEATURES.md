@@ -506,10 +506,10 @@ handheld, carries on at 1:27"):
 **Playlists** are the same playlists as the handheld's Playlists section:
 
 - Create, rename, delete (the files stay where they are), and open a playlist. The page shows them as cards. Past 12
-  playlists: the ones played or added to lately in a **Recent** row, then **Find a playlist** (**/** on a computer;
+  playlists: the ones played or added to lately in a **Recently used** row, then **Find a playlist** (**/** on a computer;
   Enter opens the first match), a sort (**A–Z**, **Recent**, **Size**) and **List** or **Grid**. The list (the default
   there) has a letter heading for each letter. The browser remembers the sort and the view. The computer's sidebar
-  lists Liked and up to five recent playlists, then **All N playlists**.
+  lists Liked, Recent and up to five recently used playlists, then **All N playlists**.
 - Drag to change the order, remove items (with **Undo**), add files from **Files**.
 - **Play** or **Shuffle play**, on the handheld or in this browser.
 
@@ -529,6 +529,18 @@ handheld, carries on at 1:27"):
   it (with **Undo**, which puts it back at the top), and **⋯ › Select…** unlikes several at once. A network file in it
   plays on the handheld only, and a file gone from the card is marked **Gone**.
 - A like on the handheld shows up at once: the heart fills, and on the Liked page the new row comes in at the top, lit.
+
+**Recent** is the handheld's Home Recent strip, in the browser: pinned under Liked on the Playlists page (its play
+button resumes the latest), and right under Liked in a computer's sidebar.
+
+- Newest first, as on the handheld (up to 30). Each row says where the video was left (**0:27 / 0:52**, with a yellow
+  bar on its tile) or **Played**; what plays on the handheld is marked **Playing**, and a file gone from the card is
+  dimmed and marked **Gone**. Network files aren't listed.
+- **A tap** plays it where you last played (the handheld or this browser), from where it was left. **⋯** has **Play on
+  handheld**, **Play in this browser**, **Like** / **Unlike**, **Add to playlist…**, **Show in Files** and **Remove from
+  Recent** (the place it was left at is kept, as on the handheld).
+- **⋯ › Clear Recent** (asks first) empties it, on the handheld too; the places your videos were left at are kept.
+- It follows the handheld live: a file played, removed or cleared on either side shows on the other at once.
 
 Changes show up live on both sides: what you do on the handheld appears in the browser, and the other way round.
 

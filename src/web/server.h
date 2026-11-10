@@ -142,6 +142,8 @@ namespace bp
 		// last part may not exist yet (its parent is checked). false: a 404 already answered
 		bool resolve(const std::string& vpath, std::string& real, bool forCreate, httplib::Response& res) const;
 		std::string toVirtual(const std::string& real) const;
+		// toVirtual, but "" for what the web never serves (a denied folder, a hidden part): for lists it makes itself
+		std::string servedVirtual(const std::string& real) const;
 
 	private:
 		struct Event { uint64_t id; std::string name, data; };

@@ -42,13 +42,13 @@ namespace bp
 			if (dot != std::string::npos && dot > 0) it.name.erase(dot);
 			it.kind = isAudioFile(path) ? &G_NOTE : isPhotoFile(path) ? &G_PICTURE : &G_FILM;
 			// how far into it: where it was left (a song always starts at its start: played), of how long it is
-			const ResumeEntry* e = p.resumeStore().find(path);
-			double len = e ? e->duration : -1, pos = e && e->position >= 0 && !isAudioFile(path) ? e->position : -1;
-			if (pos >= 0)
+			RecentProgress rp = recentProgress(p.resumeStore().find(path), isAudioFile(path));
+			double len = rp.duration, pos = rp.position;
+			if (!rp.played)
 			{
 				it.at = formatTime(pos);
 				it.sub = len > 0 ? it.at + " / " + formatTime(len) : "at " + it.at;
-				it.frac = len > 0 ? std::clamp(pos / len, 0.0, 1.0) : 0;
+				it.frac = rp.frac;
 			}
 			else
 			{
@@ -63,6 +63,19 @@ namespace bp
 				it.where = w.substr(0, w.find(" / "));
 			}
 			recent.push_back(it);
+		}
+	}
+
+	void Ui::recentEdited(Player& p)
+	{
+		if (browseDir != HOMEDIR && browseDir != RECENT) return;
+		int c = cursor, s = scroll;
+		enterFolder(browseDir, p);
+		if (browseDir == RECENT)
+		{
+			cursor = c;
+			scroll = s;
+			fitList();
 		}
 	}
 

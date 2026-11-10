@@ -6,6 +6,7 @@
 // handheld, in another browser) answers 409 with code "rev" and the rev now, and the page reads it again.
 #include "web/server.h"
 #include "json.h"
+#include "browser.h"
 #include "netpath.h"
 #include "player.h"
 #include "playlist.h"
@@ -438,6 +439,81 @@ namespace bp
 				for (auto& e : pl.entries)
 					if (!isNetPath(e.path)) j.str(w->toVirtual(e.path));
 				return j.end().end().out();
+			}, 2000, status);
+			answer(res, body, status);
+		});
+
+		// Recent, as the handheld's Home strip lists it (history.tsv, newest first, with resume.tsv's places): {on (Keep
+		// history), serial (Player::recentSerial, as the "recent" event says), items: [{p, title, kind, position (-1:
+		// none kept), duration (-1: unknown), frac, played (no place kept: "Played"), playing (the handheld's file),
+		// gone (not on the card)}]}. Network files aren't in the web's tree, and what it never serves is left out
+		s.Get("/api/recent", [w](const httplib::Request&, httplib::Response& res) {
+			int status = 200;
+			std::string body = w->call([w](Player& p, Ui& u) {
+				JsonWriter j;
+				j.obj().key("on").boolean(p.settings.keepHistory).key("serial").num(p.recentSerial()).key("items").arr();
+				std::string cur = p.playing() ? p.currentPath() : "";
+				for (auto& path : p.history().items())
+				{
+					if (isNetPath(path)) continue;
+					struct stat st;
+					bool gone = stat(path.c_str(), &st) != 0;
+					if (!gone && !p.settings.showHiddenFolders && insideHiddenFolder(path)) continue;
+					std::string v = w->servedVirtual(path);
+					if (v.empty()) continue;
+					bool audio = isAudioFile(path), now = path == cur;
+					RecentProgress rp = recentProgress(p.resumeStore().find(path), audio);
+					// the file playing: where it is now (its kept place is from when it last stopped)
+					if (now && p.loaded && !audio && p.position >= 0 && p.duration > 0)
+					{
+						rp.position = p.position;
+						rp.duration = p.duration;
+						rp.frac = std::clamp(p.position / p.duration, 0.0, 1.0);
+						rp.played = false;
+					}
+					j.obj().key("p").str(v).key("title").str(webTitle(path)).key("kind").str(audio ? "audio" : "video")
+						.key("position").num(rp.position).key("duration").num(rp.duration).key("frac").num(rp.frac)
+						.key("played").boolean(rp.played).key("playing").boolean(now).key("gone").boolean(gone).end();
+				}
+				(void)u;
+				return j.end().end().out();
+			}, 2000, status);
+			answer(res, body, status);
+		});
+
+		// Remove from Recent (p: a virtual path), as the handheld's card menu: out of the history, its place kept
+		s.Post("/api/recent/remove", [w](const httplib::Request& req, httplib::Response& res) {
+			std::string v = value(req, "p");
+			if (v.empty())
+			{
+				WebServer::fail(res, 400, "No file");
+				return;
+			}
+			// (a gone file can't resolve: its path is matched by its virtual one instead)
+			int status = 200;
+			std::string body = w->call([w, v](Player& p, Ui& u) {
+				std::string path;
+				for (auto& h : p.history().items())
+					if (!isNetPath(h) && w->servedVirtual(h) == v) path = h;
+				if (path.empty())
+				{
+					WebCall::setStatus(404);
+					return error("Not in Recent", "missing");
+				}
+				p.removeFromHistory(path);
+				u.recentEdited(p);
+				return JsonWriter().obj().key("ok").boolean(true).key("serial").num(p.recentSerial()).end().out();
+			}, 2000, status);
+			answer(res, body, status);
+		});
+
+		// Clear Recent, as Home's menu: the history emptied, the places kept
+		s.Post("/api/recent/clear", [w](const httplib::Request&, httplib::Response& res) {
+			int status = 200;
+			std::string body = w->call([](Player& p, Ui& u) {
+				p.clearHistory();
+				u.recentEdited(p);
+				return JsonWriter().obj().key("ok").boolean(true).key("serial").num(p.recentSerial()).end().out();
 			}, 2000, status);
 			answer(res, body, status);
 		});

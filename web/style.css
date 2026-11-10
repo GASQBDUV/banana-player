@@ -919,3 +919,10 @@ input[type=range] { touch-action: pan-y; }
 	.toast .tring circle + circle { animation-duration: var(--ms, 4s) !important; }
 	.mpulse, .mrip { animation: fadeout .6s steps(1, end) forwards !important; transform: none; }
 }
+/* Recent: the clock on Liked's dark gold; pinned right under Liked; a row's place as a bar under its tile */
+.recent-art { background: radial-gradient(circle at 30% 20%, #5a4610, #120f07 75%); color: var(--yellow); display: grid; place-items: center; }
+.plcell.liked:has(+ .plcell.recent) { margin-bottom: var(--s3); }
+.pitem.recent .tile { position: relative; }
+.rprog { position: absolute; left: 4px; right: 4px; bottom: 4px; height: 3px; border-radius: 2px; background: rgba(0, 0, 0, .55); overflow: hidden; }
+.rprog i { display: block; height: 100%; background: var(--yellow); border-radius: 2px; }
+.dur.y { color: var(--yellow); }

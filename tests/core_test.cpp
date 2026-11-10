@@ -540,6 +540,21 @@ static void testResume()
 	CHECK_EQ(worthResuming(2, 1000), false);	// the first seconds
 	CHECK_EQ(worthResuming(500, 1000), true);
 	CHECK_EQ(worthResuming(990, 1000), false);	// the credits
+	{
+		// Recent's progress: a kept place, none (played), a song (always played), unknown length
+		ResumeEntry e;
+		e.position = 250; e.duration = 1000;
+		RecentProgress r = recentProgress(&e, false);
+		CHECK_EQ(r.played, false); CHECK_EQ(r.position, 250.0); CHECK_EQ(r.frac, 0.25);
+		r = recentProgress(&e, true);
+		CHECK_EQ(r.played, true); CHECK_EQ(r.position, -1.0); CHECK_EQ(r.frac, 1.0); CHECK_EQ(r.duration, 1000.0);
+		e.position = -1;
+		CHECK_EQ(recentProgress(&e, false).played, true);
+		e.position = 30; e.duration = -1;
+		r = recentProgress(&e, false);
+		CHECK_EQ(r.played, false); CHECK_EQ(r.frac, 0.0); CHECK_EQ(r.duration, -1.0);
+		CHECK_EQ(recentProgress(nullptr, false).played, true);
+	}
 	CHECK_EQ(worthResuming(120, -1), true);		// unknown length
 }
 
@@ -2054,6 +2069,13 @@ static void testWeb()
 		CHECK_EQ(toVirtual({}, card), std::string(""));
 		// the most specific root wins when one sits in another
 		CHECK_EQ(toVirtual({{"a", base + "/card"}, {"b", base + "/card/Music"}}, card + "/Music/a.mp3"), std::string("1/a.mp3"));
+		// servedVirtual (Recent): never the state folder, a hidden part or outside; a gone file still by name
+		CHECK_EQ(servedVirtual(roots, deny, card + "/Music/a.mp3"), std::string("0/Music/a.mp3"));
+		CHECK_EQ(servedVirtual(roots, deny, card + "/Music/gone.mp3"), std::string("0/Music/gone.mp3"));
+		CHECK_EQ(servedVirtual(roots, deny, card + "/state/x.mp3"), std::string(""));
+		CHECK_EQ(servedVirtual(roots, deny, card + "/.hidden/h.mp3"), std::string(""));
+		CHECK_EQ(servedVirtual(roots, deny, card + "/Music/tolink/web.conf"), std::string(""));
+		CHECK_EQ(servedVirtual(roots, deny, "/etc/passwd"), std::string(""));
 
 		sh("rm -rf '" + base + "'");
 	}

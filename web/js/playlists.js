@@ -10,10 +10,11 @@ import { ask, toast } from './toasts.js';
 import { Icon } from './icons.js';
 import { reduceMotion } from './playing.js';
 import { GLYPH } from './files.js';
+import { RECENT_ID, RecentArt, RecentView, clearRecent, playRecent, useRecent } from './recent.js';
 
 /* ================= playlists ================= */
 let uidSeq = 0;
-export function Playlists() { return store.route.id ? html`<${PlaylistView} id=${store.route.id} key=${store.route.id} />` : html`<${PlaylistList} />`; }
+export function Playlists() { return store.route.id === RECENT_ID ? html`<${RecentView} />` : store.route.id ? html`<${PlaylistView} id=${store.route.id} key=${store.route.id} />` : html`<${PlaylistList} />`; }
 
 // "1 h 38 min", "23 min"
 const fmtLong = t => { t = Math.round(t / 60); return t >= 60 ? Math.floor(t / 60) + ' h ' + (t % 60) + ' min' : Math.max(1, t) + ' min'; };
@@ -48,6 +49,10 @@ function PlaylistList() {
 	const create = () => newPlaylistDialog((id) => open(id));
 	// Liked: built in, pinned in a card of its own; played, never renamed or deleted
 	const liked = list && list.find(p => p.builtin), rest = list ? list.filter(p => !p.builtin) : [];
+	// Recent: the handheld's history, pinned under Liked
+	const rec = useRecent(), recItems = rec && rec.items || [];
+	const recLast = recItems.find(x => !x.gone);
+	const recentSheet = anchor => openSheet('Recent', 'clock', [{ label: 'Clear Recent…', icon: 'trash', danger: true, disabled: !recItems.length, fn: clearRecent }], { anchor });
 	const likedSheet = (p, anchor) => openSheet('Liked', 'heart', [
 		{ label: 'Play on handheld', icon: 'card', disabled: !p.count, fn: () => playFromPl(p, 'handheld', false) },
 		{ label: 'Play in this browser', icon: 'laptop', disabled: NO_HERE || !p.count, sub: NO_HERE ? NO_HERE_WHY : undefined, fn: () => playFromPl(p, 'browser', false) },
@@ -80,8 +85,12 @@ function PlaylistList() {
 				<span class="txt grow"><div class="kicker y">Pinned</div><div class="n">Liked</div><div class="c">${liked.count ? plural(liked.count, 'item', 'items') + ' · newest first' : 'Tap ♥ on anything playing'}</div></span></button>
 			<span class="plcell-acts"><button class="ib" aria-label="More about Liked" aria-haspopup="dialog" onClick=${e => likedSheet(liked, e.currentTarget)}><${MoreDots} /></button>
 				<button class="box yellow plplay" aria-label="Play Liked" disabled=${!liked.count} onClick=${() => playFromPl(liked, store.target, false)}><${Icon} n="play" k=${3} /></button></span></div>`}
+		${liked && html`<div class="plcell liked recent"><button class="box surface plcard liked" onClick=${() => go('#/recent')}><span class="cv"><${RecentArt} k=${4} /></span>
+				<span class="txt grow"><div class="kicker y">Pinned</div><div class="n">Recent</div><div class="c ell">${!rec || rec.error ? 'Played on the handheld or here' : rec.on === false ? 'Play history is off' : recLast ? 'Last: ' + recLast.title : 'Nothing played yet'}</div></span></button>
+			<span class="plcell-acts"><button class="ib" aria-label="More about Recent" aria-haspopup="dialog" onClick=${e => recentSheet(e.currentTarget)}><${MoreDots} /></button>
+				<button class="box yellow plplay" aria-label=${recLast ? 'Play ' + recLast.title + ' from where it was left' : 'Nothing to play'} title=${recLast ? 'Play the latest' : undefined} disabled=${!recLast} onClick=${() => playHere(t => playRecent(recLast, t), recLast.p)}><${Icon} n="play" k=${3} /></button></span></div>`}
 		${!list ? (slow ? html`<${Skeleton} />` : null) : rest.length === 0 ? html`<${Empty} icon="playlist" title="No playlists yet" sub="Make one, then add songs and videos from Files." button="New playlist" onClick=${create} />` : html`
-			${recent.length > 0 && html`<div class="band" style="margin-bottom:10px"><span class="kicker">Recent</span><span class="rule"></span><span class="dim" style="font-size:12px">played or added to</span></div>
+			${recent.length > 0 && html`<div class="band" style="margin-bottom:10px"><span class="kicker">Recently used</span><span class="rule"></span><span class="dim" style="font-size:12px">played or added to</span></div>
 				<div class="plstrip">${recent.map(card)}</div>`}
 			${many && html`<div class="pltools" ref=${tools}>
 				<label class="find"><${Icon} n="search" k=${2} /><input class="field" data-slash="1" value=${find} placeholder="Find a playlist" aria-label="Find a playlist" autocomplete="off" enterkeyhint="go"

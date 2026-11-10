@@ -200,6 +200,8 @@ namespace bp
 		const std::vector<std::string>& paths() const { return playlist; }
 		const ResumeStore& resumeStore() const { return resume; }
 		const PlayHistory& history() const { return played; }
+		// changes with the history or a place kept (the web's Recent is told)
+		int recentSerial() const { return recentSer; }
 		void clearHistory();
 		// Home's Recent: one taken out of the play history; one played from its start next time (its tracks kept)
 		void removeFromHistory(const std::string& path);
@@ -374,6 +376,7 @@ namespace bp
 		uint64_t seekingSince = 0;	// mpv's seeking since then, 0 when it isn't
 		ResumeStore resume;
 		PlayHistory played;
+		int recentSer = 0;
 		int64_t wantAid = 0, wantSid = 0;
 		// the tracks playing, as last seen while the file was open: at its end mpv has dropped its track list
 		int64_t seenAid = -1, seenSid = -1;

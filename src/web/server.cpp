@@ -240,6 +240,12 @@ namespace bp
 		return bp::toVirtual(cfg.roots, real);
 	}
 
+	std::string WebServer::servedVirtual(const std::string& real) const
+	{
+		std::lock_guard<std::mutex> g(lock);
+		return bp::servedVirtual(cfg.roots, denied, real);
+	}
+
 	void WebServer::setRoots(const std::vector<WebRoot>& r)
 	{
 		std::lock_guard<std::mutex> g(lock);

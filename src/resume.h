@@ -41,4 +41,10 @@ namespace bp
 
 	// a position worth coming back to: not the first seconds, not the credits
 	bool worthResuming(double position, double duration);
+
+	// a Recent card's progress (Home's strip, the web's Recent): where it was left (position, < 0: none kept; a song
+	// always starts at its start), of how long (duration, < 0: not known), how far (frac 0..1); played: none kept, so it
+	// was played through (or as good as) or only begun, which the card shows as "Played" with a full bar
+	struct RecentProgress { double position = -1, duration = -1, frac = 1; bool played = true; };
+	RecentProgress recentProgress(const ResumeEntry* e, bool audio);
 }

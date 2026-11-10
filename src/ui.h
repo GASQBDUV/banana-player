@@ -306,6 +306,8 @@ namespace bp
 		};
 		std::vector<RecentItem> recent;	// as listed with Home (or All recent)
 		void listRecent(Player& p);
+		// the history changed from elsewhere (the web): Home or All recent listed again, the focus kept
+		void recentEdited(Player& p);
 		enum HomeZone { HOME_STRIP, HOME_GRID };
 		int homeZone = HOME_STRIP, homeStrip = 0, homeGrid = 0, homeCol = 0;
 		bool homeFresh = true;	// not yet shown this run: the focus starts on the newest card (Files with none)

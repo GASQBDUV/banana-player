@@ -32,6 +32,8 @@ export function openSSE() {
 	on('ping', () => {});
 	on('fs', d => set({ fsTick: store.fsTick + 1, fsDir: d.dir }));
 	on('playlists', () => set({ plTick: store.plTick + 1, plExternal: true }));
+	// the handheld's history changed (played, removed, cleared, here or there): Recent loads again
+	on('recent', () => set({ recentTick: (store.recentTick || 0) + 1 }));
 	// started on the handheld from another page: this one's file goes, or Play here would bring two sounds back
 	// (not one about this page's own Play: the handheld opening the file paused can look like playing for a moment)
 	on('handheld-play', () => { if (B.active && Date.now() - (B.announcedAt || 0) > 1500 && (B.handheldQuiet || Date.now() - B.announcedAt > 8000)) handheldTookOver(); });

@@ -1,4 +1,5 @@
 #include "resume.h"
+#include <algorithm>
 #include <cstdlib>
 #include <sstream>
 
@@ -93,5 +94,18 @@ namespace bp
 		if (position < 5) return false;
 		if (duration > 0 && (position > duration - 15 || position > duration * 0.97)) return false;
 		return true;
+	}
+
+	RecentProgress recentProgress(const ResumeEntry* e, bool audio)
+	{
+		RecentProgress r;
+		r.duration = e && e->duration > 0 ? e->duration : -1;
+		if (e && e->position >= 0 && !audio)
+		{
+			r.position = e->position;
+			r.played = false;
+			r.frac = r.duration > 0 ? std::clamp(e->position / r.duration, 0.0, 1.0) : 0;
+		}
+		return r;
 	}
 }

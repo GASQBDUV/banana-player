@@ -434,6 +434,23 @@ export async function playPlaylist(id, name, items, index, shuffle, target, tapp
 		return true;
 	}
 }
+// one file from where it was left (Recent): the handheld finds its own place (/api/play), this browser starts at pos
+export async function playAt(p, pos, target, stay) {
+	target = target || store.target;
+	if (target === 'browser') {
+		if (!await browserPlay([{ p }], 0, { kind: 'playlist', title: 'Recent' }, pos > 0 ? pos : 0)) return false;
+		chooseTarget('browser');
+		if (!stay) go('#/playing');
+		return true;
+	}
+	const was = B.active && !el.paused; el.pause();
+	try { await post('/api/play', { p }); }
+	catch (e) { if (was && store.conn === 'ok') el.play().catch(() => {}); toast(e.status === 0 ? "Couldn't start it on your handheld" : errMsg(e)); return false; }
+	if (B.active) browserStop();
+	chooseTarget('handheld');
+	if (!stay) go('#/playing');
+	return true;
+}
 // a row's tap: it plays at once where the last choice was; one this browser can't play goes to the handheld (said so)
 export async function playHere(play, p, playable) {
 	if (store.target === 'browser') {

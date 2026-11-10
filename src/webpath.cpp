@@ -134,6 +134,16 @@ namespace bp
 		return std::to_string(best) + rel;
 	}
 
+	std::string servedVirtual(const std::vector<WebRoot>& roots, const std::vector<std::string>& deny, const std::string& real)
+	{
+		std::string v = toVirtual(roots, real);
+		if (v.empty()) return "";
+		if (v.find("/.") != std::string::npos) return "";
+		std::string r;
+		if (!realPath(real, r)) r = real;
+		return denied(deny, r) ? "" : v;
+	}
+
 	bool validName(const std::string& n)
 	{
 		if (n.empty() || n.size() > 255 || n == "." || n == "..") return false;
