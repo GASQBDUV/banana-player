@@ -21,6 +21,7 @@ namespace bp
 		{"keep-photo-zoom", &Settings::keepPhotoZoom},
 		{"check-updates", &Settings::checkUpdates},
 		{"same-brightness", &Settings::sameBrightness},
+		{"shuffle", &Settings::shuffle},	// (no row: the play mode, as loop)
 	};
 
 	static const char* SHOW_IDS[SHOWS] = {"art", "both", "visualizer", "none"};

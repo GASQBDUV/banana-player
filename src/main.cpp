@@ -1073,7 +1073,10 @@ int main(int argc, char** argv)
 				// (the page by name; waiting: it was refused the sound without a tap there, B plays here)
 				bool waiting = elsewhere && shadow.pageWaits();
 				std::string name = elsewhere ? ui.pageName() : "";
-				std::string shown = elsewhere ? std::to_string(ui.pagePlaying()) + std::to_string(sound) + std::to_string(waiting) + name : "";
+				// (sent again once the held copy has loaded, and for each file: the first one after a start could go to an
+				// mpv with no picture yet, and the card never showed till something else changed)
+				std::string shown = elsewhere ? std::to_string(ui.pagePlaying()) + std::to_string(sound) + std::to_string(waiting) + name +
+					(player.loaded ? "|L|" : "|-|") + player.currentPath() : "";
 				if (shown != elsewhereShown)
 				{
 					player.showElsewhere(elsewhere, ui.pagePlaying(), name, waiting, G_LAPTOP_ROWS, G_LAPTOP.h);

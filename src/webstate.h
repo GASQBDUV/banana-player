@@ -42,6 +42,7 @@ namespace bp
 		std::string fx;	// the sound effect's key
 		std::string loop;	// "no", "all", "one"
 		bool shuffled = false;
+		bool shuffleMode = false;	// the handheld's Shuffle setting (every list started plays shuffled)
 		std::vector<WebChapter> chapters;
 		int chapter = -1;	// the current one's index, -1 none
 		bool hasTracks = false;	// a video (tracks shown); else "tracks" is null

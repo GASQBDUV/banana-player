@@ -43,7 +43,7 @@ export async function clearRecent() {
 }
 
 export function RecentView() {
-	const r = useRecent(), v = view(), nowPath = v.has ? v.path : '';
+	const r = useRecent(), v = view(), nowPath = v.has && !v.finished ? v.path : '';
 	const slow = useLater(!r, 300);
 	const items = r && r.items || [];
 	const menu = anchor => openSheet('Recent', 'clock', [{ label: 'Clear Recent', icon: 'trash', danger: true, disabled: !items.length, fn: clearRecent }], { anchor });

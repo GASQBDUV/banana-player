@@ -2613,7 +2613,7 @@ static void testWeb()
 			"\"source\":{\"kind\":\"playlist\",\"title\":\"\",\"id\":\"Road.m3u\",\"index\":0,\"count\":2},\"screen\":\"browser\",\"loading\":false,"
 			"\"paused\":false,\"position\":1.5,\"positionAt\":42,\"duration\":0,\"speed\":1,\"volume\":0,"
 			"\"eq\":{\"on\":false,\"preset\":\"\",\"gains\":[-3,0,0,0,0,0,0,0,0,0]},\"fx\":\"\",\"loop\":\"one\","
-			"\"shuffled\":false,\"chapters\":[{\"title\":\"A\",\"start\":0}],\"chapter\":0,\"tracks\":null,"
+			"\"shuffled\":false,\"shuffleMode\":false,\"chapters\":[{\"title\":\"A\",\"start\":0}],\"chapter\":0,\"tracks\":null,"
 			"\"clients\":1,\"session\":{\"boot\":0,\"v\":0},\"playlistSerial\":0,\"liked\":false,\"showHiddenFolders\":false}"));
 
 		// the handheld's screen (its player left, or back to it) is news: the dashboard says "in the background"
@@ -3160,6 +3160,205 @@ static void testSessionNamed()
 		CHECK_EQ(all.s.index, 0);
 	}
 	{
+		// the end of a list keeps it (the pages offer it again); Stop puts it away; a pick, a Step-free Open, clears it
+		Sim m;
+		m.open(3, 2, "tabA");
+		m.report(IntentType::Loaded, "tabA", m.s.load);
+		Intent e = m.mk(IntentType::Ended, "tabA");
+		e.load = m.s.load;
+		m.go(e);
+		CHECK_EQ(m.s.index, -1);
+		CHECK_EQ(m.s.ended.index, 2);
+		CHECK_EQ(m.s.ended.queue.size(), (size_t)3);
+		CHECK_EQ(m.s.ended.source.title, std::string("Films"));
+		CHECK_EQ(m.s.ended.dur, 100.0);
+		CHECK_EQ(m.s.pref, browserOut("tabA"));
+		std::string js = sessionJson(m.s, m.now, [](const std::string& p) { return "0" + p; });
+		CHECK_EQ(js.find("\"ended\":{\"queue\":[\"0/m/00.mp4\",\"0/m/01.mp4\",\"0/m/02.mp4\"],\"index\":2") != std::string::npos, true);
+		// (its last item not served: nothing to show)
+		js = sessionJson(m.s, m.now, [](const std::string& p) { return p == "/m/02.mp4" ? std::string() : "0" + p; });
+		CHECK_EQ(js.find("\"ended\":null") != std::string::npos, true);
+		// Next / Play / Seek have nothing to act on; the switch of output keeps it
+		CHECK_EQ(m.step(1).reject, std::string("nothing"));
+		CHECK_EQ(m.go(m.mk(IntentType::Play)).reject, std::string("nothing"));
+		m.output(handheldOut(), "tabA", m.s.v);
+		CHECK_EQ(m.s.ended.index, 2);
+		// a row of it played again: an Open, and the finished list is gone
+		Intent o = m.mk(IntentType::Open, "tabA");
+		o.queue = m.s.ended.queue;
+		o.index = 1;
+		o.source = m.s.ended.source;
+		m.go(o);
+		CHECK_EQ(m.s.index, 1);
+		CHECK_EQ(m.s.ended.index, -1);
+		CHECK_EQ(m.s.playing, true);
+		// to its end again, then Stop: nothing playing, nothing offered; a second Stop has nothing to do
+		m.loaded();
+		m.report(IntentType::Ended, "hh", m.s.load);
+		CHECK_EQ(m.s.index, 2);
+		m.loaded();
+		m.report(IntentType::Ended, "hh", m.s.load);
+		CHECK_EQ(m.s.ended.index, 2);
+		uint64_t v = m.s.v;
+		CHECK_EQ(m.go(m.mk(IntentType::Stop, "tabA")).reject, std::string(""));
+		CHECK_EQ(m.s.ended.index, -1);
+		CHECK_EQ(m.s.v, v + 1);
+		CHECK_EQ(m.go(m.mk(IntentType::Stop)).reject, std::string("nothing"));
+		js = sessionJson(m.s, m.now, [](const std::string& p) { return p; });
+		CHECK_EQ(js.find("\"ended\":null") != std::string::npos, true);
+		// Stop of a list still playing: no finished list (Stop means stop)
+		Sim st;
+		st.open(2, 1);
+		st.loaded();
+		st.go(st.mk(IntentType::Stop));
+		CHECK_EQ(st.s.ended.index, -1);
+		// a loop never ends a list; an Ended in the middle steps on
+		Sim mid;
+		mid.open(3, 0);
+		mid.loaded();
+		mid.report(IntentType::Ended, "hh", mid.s.load);
+		CHECK_EQ(mid.s.index, 1);
+		CHECK_EQ(mid.s.ended.index, -1);
+		// a file of the finished list deleted: left out (the index follows); its last item deleted: gone
+		Sim g;
+		g.open(4, 3);
+		g.loaded();
+		g.report(IntentType::Ended, "hh", g.s.load);
+		Intent fg = g.mk(IntentType::FileGone);
+		fg.path = "/m/01.mp4";
+		g.go(fg);
+		CHECK_EQ(g.s.ended.queue.size(), (size_t)3);
+		CHECK_EQ(g.s.ended.index, 2);
+		CHECK_EQ(g.s.ended.queue[2], std::string("/m/03.mp4"));
+		fg = g.mk(IntentType::FileGone);
+		fg.path = "/m/03.mp4";
+		g.go(fg);
+		CHECK_EQ(g.s.ended.index, -1);
+		CHECK_EQ(g.s.ended.queue.empty(), true);
+	}
+	{
+		// Shuffle (§14): a hidden order from the item (the queue as it is), Next along it and Previous back, each item
+		// once a round; with Loop all a new round, with Loop off the end; independent of Loop; a new list keeps it
+		Sim m;
+		Intent on = m.mk(IntentType::SetShuffle);
+		on.on = true;
+		on.rnd = 42;
+		CHECK_EQ(m.go(on).reject, std::string(""));	// (nothing playing: the mode for the next list)
+		CHECK_EQ(m.s.shuffle, true);
+		CHECK_EQ(m.s.order.empty(), true);
+		auto openR = [&](Sim& x, int count, int index, uint64_t rnd) {
+			Intent i = x.mk(IntentType::Open);
+			for (int k = 0; k < count; k++) { char p[32]; snprintf(p, sizeof p, "/m/%02d.mp3", k); i.queue.push_back(p); }
+			i.index = index;
+			i.rnd = rnd;
+			return x.go(i);
+		};
+		openR(m, 6, 2, 7);
+		CHECK_EQ(m.s.index, 2);	// the item picked plays first
+		CHECK_EQ(m.s.queue[0], std::string("/m/00.mp3"));	// the queue keeps its order
+		CHECK_EQ(m.s.order.size(), (size_t)6);
+		CHECK_EQ(m.s.order[0], 2);
+		std::string js = sessionJson(m.s, m.now, [](const std::string& p) { return p; });
+		CHECK_EQ(js.find("\"shuffle\":true") != std::string::npos, true);
+		// to the end of a round: every item once, then (Loop off) the end, as In order
+		std::set<int> seen = {m.s.index};
+		std::vector<int> played = {m.s.index};
+		for (int k = 0; k < 5; k++)
+		{
+			m.loaded();
+			Intent e = m.mk(IntentType::Ended);
+			e.load = m.s.load;
+			e.rnd = 100 + k;
+			m.go(e);
+			seen.insert(m.s.index);
+			played.push_back(m.s.index);
+		}
+		CHECK_EQ(seen.size(), (size_t)6);
+		CHECK_EQ(played == m.s.order, true);
+		// Previous goes back in it, Next forward again
+		m.step(-1);
+		CHECK_EQ(m.s.index, played[4]);
+		m.step(1);
+		CHECK_EQ(m.s.index, played[5]);
+		CHECK_EQ(m.step(1).reject, std::string("last"));
+		m.loaded();
+		Intent e = m.mk(IntentType::Ended);
+		e.load = m.s.load;
+		m.go(e);
+		CHECK_EQ(m.s.index, -1);
+		CHECK_EQ(m.s.ended.index, played[5]);
+		CHECK_EQ(m.s.shuffle, true);	// (the setting stays)
+		// Loop all: rounds go on for ever, a new order each, never the last one twice in a row
+		Sim a;
+		{ Intent sh = a.mk(IntentType::SetShuffle); sh.on = true; sh.rnd = 42; a.go(sh); }
+		Intent lp = a.mk(IntentType::SetLoop);
+		lp.loop = SESSION_LOOP_ALL;
+		a.go(lp);
+		CHECK_EQ(a.s.shuffle, true);	// (independent)
+		openR(a, 4, 0, 3);
+		int ends = 0;
+		for (int k = 0; k < 20; k++)
+		{
+			int was = a.s.index;
+			a.loaded();
+			Intent x = a.mk(IntentType::Ended);
+			x.load = a.s.load;
+			x.rnd = 1000 + k;
+			a.go(x);
+			CHECK_EQ(a.s.index >= 0, true);
+			CHECK_EQ(a.s.index != was, true);
+			ends++;
+		}
+		CHECK_EQ(ends, 20);
+		CHECK_EQ(checkInvariants(a.s), std::string(""));
+		// Next past a round with Loop all: a new round too
+		uint64_t load = a.s.load;
+		for (int k = 0; k < 6; k++) CHECK_EQ(a.step(1).reject, std::string(""));
+		CHECK_EQ(a.s.load > load, true);
+		// Loop one with Shuffle: the same song again
+		Sim o;
+		{ Intent sh = o.mk(IntentType::SetShuffle); sh.on = true; sh.rnd = 42; o.go(sh); }
+		Intent one = o.mk(IntentType::SetLoop);
+		one.loop = SESSION_LOOP_ONE;
+		o.go(one);
+		openR(o, 5, 1, 9);
+		o.loaded();
+		Intent x = o.mk(IntentType::Ended);
+		x.load = o.s.load;
+		o.go(x);
+		CHECK_EQ(o.s.index, 1);
+		// another list opened: Shuffle and Loop both kept, a new order from its item
+		openR(o, 3, 2, 5);
+		CHECK_EQ(o.s.shuffle, true);
+		CHECK_EQ(o.s.loop, SESSION_LOOP_ONE);
+		CHECK_EQ(o.s.order[0], 2);
+		// Shuffle off mid-list: no reload, Next in the queue's order; on again: a new order from the item, no reload
+		Sim f;
+		{ Intent sh = f.mk(IntentType::SetShuffle); sh.on = true; sh.rnd = 42; f.go(sh); }
+		openR(f, 5, 3, 1);
+		f.loaded();
+		load = f.s.load;
+		Intent off = f.mk(IntentType::SetShuffle);
+		f.go(off);
+		CHECK_EQ(f.s.load, load);
+		CHECK_EQ(f.s.order.empty(), true);
+		f.step(1);
+		CHECK_EQ(f.s.index, 4);
+		load = f.s.load;
+		Intent on2 = f.mk(IntentType::SetShuffle);
+		on2.on = true;
+		on2.rnd = 77;
+		f.go(on2);
+		CHECK_EQ(f.s.load, load);
+		CHECK_EQ(f.s.order[0], 4);
+		// a file gone: out of the hidden order, its places renumbered
+		Intent fg = f.mk(IntentType::FileGone);
+		fg.path = "/m/01.mp3";
+		f.go(fg);
+		CHECK_EQ(f.s.order.size(), (size_t)4);
+		CHECK_EQ(checkInvariants(f.s), std::string(""));
+	}
+	{
 		// handheld Stop with the browser as output stops the page; the next pick goes to the browser (pref)
 		Sim m;
 		m.open(5, 0, "tabA");
@@ -3410,9 +3609,12 @@ static void testSessionNamed()
 
 // the property test: a model network (delay, reordering, 10 % duplicates, 5 % drops retried with the same seq), model
 // renderers for the output, random intents of every kind; I1–I10 after every apply, liveness once it all settles
+static int fuzzEnded = 0;	// sessions the fuzz left with a finished list (it must get there to test it)
+static int fuzzShuffled = 0, fuzzUnshuffled = 0, fuzzRounds = 0;	// Shuffle turned on / off while playing; new rounds
 static bool fuzzSession(uint32_t seed, int steps)
 {
 	std::mt19937 rng(seed);
+	std::mt19937_64 rr(seed * 7919 + 1);	// (Shuffle's random numbers: a stream of their own)
 	auto pick = [&](int n) { return (int)(rng() % (uint32_t)n); };
 	Session s;
 	s.boot = seed + 1;
@@ -3435,6 +3637,13 @@ static bool fuzzSession(uint32_t seed, int steps)
 			if (!again.dup || again.reject != r.reject || !again.fx.empty() || again.s.v != r.s.v) bad = "I10: a repeat wasn't a dup";
 		}
 		if (!bad.empty() && why.empty()) why = bad + " (" + intentName(i.type) + " from " + i.origin + ", step " + std::to_string(at) + ")";
+		if (s.ended.index < 0 && r.s.ended.index >= 0) fuzzEnded++;
+		if (i.type == IntentType::SetShuffle && r.reject.empty() && !r.dup && s.index >= 0)
+			(r.s.shuffle ? fuzzShuffled : fuzzUnshuffled) += s.shuffle != r.s.shuffle;
+		// a shuffled round that went on past its end (Loop all: a new round)
+		if (i.type == IntentType::Ended && r.reject.empty() && !r.dup && s.shuffle && s.index >= 0 && r.s.index >= 0 &&
+			shufflePlace(s) + 1 == (int)s.order.size() && s.order.size() > 1)
+			fuzzRounds++;
 		s = r.s;
 	};
 	auto userIntent = [&](const std::string& origin) {
@@ -3445,7 +3654,7 @@ static bool fuzzSession(uint32_t seed, int steps)
 		static const IntentType KINDS[] = {IntentType::Open, IntentType::Play, IntentType::Pause, IntentType::Seek,
 			IntentType::SeekBy, IntentType::Step, IntentType::Step, IntentType::Step, IntentType::SetAudio, IntentType::SetSub,
 			IntentType::SetSpeed, IntentType::SetLoop, IntentType::SetOutput, IntentType::SetOutput, IntentType::Stop,
-			IntentType::PhotoPark, IntentType::PhotoResume, IntentType::FileGone};
+			IntentType::PhotoPark, IntentType::PhotoResume, IntentType::FileGone, IntentType::SetShuffle};
 		i.type = KINDS[pick((int)(sizeof KINDS / sizeof KINDS[0]))];
 		switch (i.type)
 		{
@@ -3456,6 +3665,7 @@ static bool fuzzSession(uint32_t seed, int steps)
 			i.index = pick(n + 1) - (pick(10) == 0 ? 1 : 0);
 			i.t = pick(4) ? 0 : pick(200);
 			i.browserCan = pick(5) != 0;
+			i.rnd = rr();
 			if (pick(2))
 			{
 				i.hasOut = true;
@@ -3466,7 +3676,7 @@ static bool fuzzSession(uint32_t seed, int steps)
 		}
 		case IntentType::Seek: i.t = pick(400) - 50; break;
 		case IntentType::SeekBy: i.t = pick(60) - 30; break;
-		case IntentType::Step: i.n = pick(9) - 4; i.browserCan = pick(5) != 0; break;
+		case IntentType::Step: i.n = pick(9) - 4; i.browserCan = pick(5) != 0; i.rnd = rr(); break;
 		case IntentType::SetAudio: case IntentType::SetSub:
 			i.audio = i.sub = {pick(4) - 1, pick(4), "eng", "Track " + std::to_string(pick(3)), false, true};
 			break;
@@ -3481,6 +3691,7 @@ static bool fuzzSession(uint32_t seed, int steps)
 			break;
 		}
 		case IntentType::PhotoPark: if (pick(2)) { i.hasT = true; i.t = pick(300); } break;
+		case IntentType::SetShuffle: i.on = pick(3) == 0; i.rnd = rr(); break;
 		case IntentType::FileGone: i.path = pick(6) ? FILES[pick(7)] : "/m"; break;
 		default: break;
 		}
@@ -3505,6 +3716,7 @@ static bool fuzzSession(uint32_t seed, int steps)
 		i.playing = pick(4) ? v.playing : !v.playing;
 		static const char* REASONS[] = {"format", "net", "error", "timeout"};
 		i.reason = REASONS[pick(4)];
+		i.rnd = rr();
 		if (origin == "hh") run(i);
 		else net.push_back({i, now + pick(2000)});
 		return true;
@@ -3633,6 +3845,10 @@ static void testSessionFuzz()
 	for (int k = 0; k < runs && bad < 5; k++)
 		if (!fuzzSession(1000 + k, 200)) bad++;
 	failures += bad;
+	// (Shuffle, a lasting mode, makes a list's end rarer: every item once first)
+	CHECK_EQ(fuzzEnded > runs / 40, true);
+	CHECK_EQ(fuzzShuffled > runs / 20 && fuzzUnshuffled > runs / 40, true);
+	CHECK_EQ(fuzzRounds > 0, true);
 }
 
 // picture subtitles for the browser: the cue timing rules, the window a request may ask for, the paletted PNG

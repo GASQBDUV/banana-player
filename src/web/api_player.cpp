@@ -122,6 +122,13 @@ namespace bp
 		{
 			index = 0;
 			if (!p.playing()) return {};
+			// the session's list when it has this file: the order it plays in (shuffled or not)
+			const Session& ss = SessionHost::get().session();
+			if (ss.index >= 0 && !p.playingPhoto() && ss.queue[ss.index] == p.currentPath())
+			{
+				index = ss.index;
+				return ss.queue;
+			}
 			const PlaySource& src = p.source();
 			if (src.kind == SourceKind::Playlist && !src.id.empty())
 			{
@@ -188,7 +195,7 @@ namespace bp
 					s.position = std::max(0.0, k.pos);
 					s.duration = std::max(0.0, k.dur);
 					s.speed = 1;
-					s.shuffled = src.shuffled;
+					s.shuffled = p.settings.shuffle;	// (the setting: the page shows it)
 				}
 			}
 			else if (p.playing())
@@ -213,7 +220,7 @@ namespace bp
 				s.position = std::max(0.0, p.position);
 				s.duration = std::max(0.0, p.duration);
 				s.speed = p.speed;
-				s.shuffled = src.shuffled;
+				s.shuffled = p.settings.shuffle;	// (the setting: the page shows it)
 				// "Chapter 4", not mpv's "(unnamed)" (as the handheld's list says it)
 				for (size_t i = 0; i < p.chapters.size(); i++) s.chapters.push_back({chapterLabel(p.chapters[i], (int)i + 1), p.chapters[i].time});
 				s.chapter = p.chapters.empty() ? -1 : p.currentChapter();
@@ -241,6 +248,7 @@ namespace bp
 			for (int i = 0; i < EQ_BANDS; i++) s.eqGains[i] = p.settings.eqGains[i];
 			s.fx = soundFxKey(p.settings.soundFx);
 			s.loop = p.settings.loop == LOOP_ALL ? "all" : p.settings.loop == LOOP_ONE ? "one" : "no";
+			s.shuffleMode = p.settings.shuffle;
 			const SessionHost& sh = SessionHost::get();
 			s.sessionBoot = sh.boot();
 			s.sessionV = sh.version();
@@ -323,22 +331,20 @@ namespace bp
 		static void openSelection(Player& p, Ui& u, std::vector<std::string> paths, const std::string& title, bool shuffle)
 		{
 			u.flushPlaylist(p);
-			if (shuffle)
-			{
-				std::random_device rd;
-				std::vector<int> order = shuffleOrder((int)paths.size(), -1, ((uint64_t)rd() << 32) ^ rd() ^ SDL_GetTicks());
-				std::vector<std::string> out;
-				for (int i : order) out.push_back(paths[i]);
-				paths.swap(out);
-			}
 			PlaySource src;
 			src.kind = SourceKind::Playlist;
 			src.title = title;
-			src.shuffled = shuffle;
 			u.webSelection = paths;
 			u.playRequest = {};
 			u.playRequest.paths = paths;
 			u.playRequest.source = src;
+			if (shuffle && !paths.empty())
+			{
+				// Shuffle play: Shuffle on (it lasts), from a random one; the list keeps its order
+				std::random_device rd;
+				u.playRequest.index = (int)(rd() % (unsigned)paths.size());
+				SessionHost::get().setShuffle(true, "web");
+			}
 		}
 
 		// a saved playlist from item index (shuffled: from a random one), at t if given
@@ -554,10 +560,21 @@ namespace bp
 						WebCall::setStatus(400);
 						return error("Loop is no, all or one");
 					}
+					// (the setting, which the session follows; Shuffle stays as it is)
 					Settings st = p.settings;
 					st.loop = loop;
 					p.setSettings(st);
-					if (p.playingAudio()) p.osd(loopLabel(loop));
+					if (p.playingAudio()) p.osd(u.modeLabel(p));
+					return "{\"ok\":true}";
+				}
+				if (c == "shuffle")
+				{
+					// Shuffle on or off (v=on|off, else the other): the setting (nothing playing too), Loop as it is.
+					// What plays plays on; Next follows a hidden random order of the list (or its own again)
+					SessionHost& sh = SessionHost::get();
+					bool on = v == "on" || v == "1" ? true : v == "off" || v == "0" ? false : !sh.shuffleMode();
+					sh.setShuffle(on, "web");
+					if (p.playingAudio()) p.osd(u.modeLabel(p));
 					return "{\"ok\":true}";
 				}
 				if (!p.playing())
@@ -620,17 +637,6 @@ namespace bp
 					}
 					p.seekChapter(i);
 					p.showChapterCard(i);
-				}
-				else if (c == "shuffle")
-				{
-					// the source again in a new order, from its first
-					const PlaySource& src = p.source();
-					if (src.kind == SourceKind::Playlist && !src.id.empty())
-						return WebPlayerGlue::playPlaylist(p, u, playlistId(src.id), 0, true, 0);
-					int at = 0;
-					std::vector<std::string> q = WebPlayerGlue::queue(p, u, at);
-					std::string title = src.title;
-					WebPlayerGlue::openSelection(p, u, q, title, true);
 				}
 				return "{\"ok\":true}";
 			}, 2000, status);
@@ -843,7 +849,7 @@ namespace bp
 				{"Ended", IntentType::Ended}, {"Pos", IntentType::Pos}, {"Play", IntentType::Play}, {"Pause", IntentType::Pause},
 				{"Stop", IntentType::Stop}, {"SetOutput", IntentType::SetOutput},
 				{"SetAudio", IntentType::SetAudio}, {"SetSub", IntentType::SetSub}, {"Loaded", IntentType::Loaded},
-				{"CantPlay", IntentType::CantPlay}, {"Blocked", IntentType::Blocked}};
+				{"CantPlay", IntentType::CantPlay}, {"Blocked", IntentType::Blocked}, {"SetShuffle", IntentType::SetShuffle}};
 			Intent i;
 			bool known = false;
 			for (auto& t : TYPES)
@@ -858,6 +864,8 @@ namespace bp
 			i.basis = strtoull(value(req, "basis").c_str(), nullptr, 10);
 			i.load = strtoull(value(req, "load").c_str(), nullptr, 10);
 			i.dur = atof(value(req, "dur").c_str());
+			// (Loaded: a song, which Loop all goes round; a video plays its list once, as on the handheld)
+			i.audioOnly = value(req, "audio") == "1";
 			i.reason = value(req, "reason");
 			if (i.type == IntentType::Pos)
 			{
@@ -885,6 +893,7 @@ namespace bp
 					i.out = to == "handheld" ? handheldOut() : browserOut(tab);
 				}
 			}
+			if (i.type == IntentType::SetShuffle) i.on = value(req, "on") == "1";
 			if (i.type == IntentType::Step) i.n = std::clamp(atoi(value(req, "n").c_str()), -1000, 1000);
 			if (i.type == IntentType::SetOutput)
 			{

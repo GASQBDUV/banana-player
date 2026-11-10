@@ -89,7 +89,8 @@ def snap():
 	i = 0 if S["path"] else -1
 	S["session"] = dict(boot=SS["boot"], v=SS["v"], out=SS["out"], pref=SS["pref"], load=SS["v"], loaded=True, index=i, file=S["path"],
 		queue=[S["path"]] if S["path"] else [], qindex=i, playing=bool(S["path"]) and not S["paused"], pos=cur_pos(), dur=S["duration"],
-		speed=S["speed"], audio=NOPICK, sub=NOPICK, parked=False, error="")
+		speed=S["speed"], audio=NOPICK, sub=NOPICK, parked=False, error="", shuffle=bool(S.get("shuffleMode")),
+		source=dict(kind=(S.get("source") or {}).get("kind", "folder"), title=(S.get("source") or {}).get("title", ""), id=(S.get("source") or {}).get("id", "")))
 	return S
 
 def cur_pos():
@@ -353,6 +354,7 @@ class H(http.server.BaseHTTPRequestHandler):
 					play_list(qs, int(g("index", "0")), {"kind": g("skind", "folder"), "title": g("stitle"), "id": g("sid")}, float(g("t", "0")))
 					S["paused"] = True; set_out("browser", g("tab")); push()
 				if g("type") == "Stop": reset_state("x"); push()
+				if g("type") == "SetShuffle": S["shuffleMode"] = S["shuffled"] = g("on") == "1"; SS["v"] += 1; push()
 				return self.send_json({"ok": True, "v": SS["v"], "session": snap()["session"]})
 			if path == "/api/cmd":
 				c = g("c")

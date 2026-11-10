@@ -1,5 +1,5 @@
 import { html, render, useState, useEffect, useLayoutEffect, useRef, useMemo, useCallback } from '../vendor/htm-preact-standalone.module.js';
-import { intent, B, S, playBlocked, CUE_SIZES, SPEEDS, SUBS, assBox, setSpeed, toggleCaptions, browserPlay, chooseAudio, chooseSub, directAudio, nativeAudio, playingAudio, streamWhy, continueHere, ctl, cueStyle, el, handoffToHandheld, playParked, probe1, probeOK, setBrowserVol, setCueStyle, setTarget, sizeCues, view } from './browser-player.js';
+import { intent, B, S, clearFinished, finishedList, playFinished, playBlocked, CUE_SIZES, SPEEDS, SUBS, assBox, setSpeed, toggleCaptions, browserPlay, chooseAudio, chooseSub, directAudio, nativeAudio, playingAudio, streamWhy, continueHere, ctl, cueStyle, el, handoffToHandheld, playParked, probe1, probeOK, setBrowserVol, setCueStyle, setTarget, sizeCues, view } from './browser-player.js';
 import { AppMenu, Art, Empty, MoreDots, Seek, coverUrl, openSheet, palOf, useHeld, useMedia, useTick } from './components.js';
 import { NO_HERE, NO_HERE_WHY, Q_DESK, Q_WIDE, lsGet, lsSet, notify, phoneNow, set, store, useStore } from './store.js';
 import { baseName, chapterTitle, dirName, fmtDate, fmtSize, fmtTime, isIOS, kindOfName, throttled, titleFor, touchOnly, userTap } from './util.js';
@@ -71,9 +71,9 @@ function DevBubble({ pos, onClose }) {
 		const k = e => { if (e.key === 'Escape') { e.preventDefault(); onClose(); } };
 		document.addEventListener('keydown', k); return () => document.removeEventListener('keydown', k);
 	}, []);
-	const at = v.has ? fmtTime(v.pos()) : '';
-	const hereSub = NO_HERE ? NO_HERE_WHY : noHereFor() ? 'Plays on the handheld only' : t === 'handheld' && v.has && v.kind !== 'photo' ? 'Pauses the handheld, carries on at ' + at : 'This phone or computer';
-	const hhSub = t === 'browser' && v.has ? 'Pauses this browser, carries on there at ' + at : "The handheld's speakers or headphones";
+	const at = v.has ? fmtTime(v.pos()) : '', live = v.has && !v.finished;
+	const hereSub = NO_HERE ? NO_HERE_WHY : noHereFor() ? 'Plays on the handheld only' : t === 'handheld' && live && v.kind !== 'photo' ? 'Pauses the handheld, carries on at ' + at : 'This phone or computer';
+	const hhSub = t === 'browser' && live ? 'Pauses this browser, carries on there at ' + at : "The handheld's speakers or headphones";
 	const pick = x => { onClose(); setTarget(x); };
 	return html`<div class="popcatch" onMouseDown=${onClose}></div>
 		<div class="bubble box surface" role="dialog" aria-label="Play on" ref=${ref} style=${pos}>
@@ -247,7 +247,7 @@ function Media({ v, off, immersive, onCollapse }) {
 	return html`<div class=${'media ' + (live ? 'is-video' : v.kind === 'video' ? 'is-poster' : 'is-cover') + (full ? ' full' : '') + (shown ? ' ov' : '')} ref=${box}
 		onPointerUp=${up} onPointerMove=${move} onMouseLeave=${() => { if (!view().paused && !t.current.menu) setOv(false); }} role="group" aria-label=${v.title}>
 		${live ? html`<div class="mvideo" ref=${slot}></div>` : html`<div class=${'mart ' + trackClass(v.path)} key=${v.path}><${Art} src=${coverUrl(cover)} seed=${v.path} kind=${v.kind} k=${v.kind === 'video' ? 6 : 10} /></div>`}
-		${!live && v.kind === 'video' && html`<div class="poster-tag"><${Icon} n="card" k=${2} />Playing on your handheld</div>`}
+		${!live && v.kind === 'video' && !v.finished && html`<div class="poster-tag"><${Icon} n="card" k=${2} />Playing on your handheld</div>`}
 		${!live && v.kind === 'video' && v.paused && !v.loading && html`<div class="mpaused" aria-hidden="true"><${Icon} n="play" k=${5} /></div>`}
 		${live && html`<div class="mov" aria-hidden=${shown ? undefined : 'true'}>
 			${full && html`<div class="mov-top">
@@ -259,7 +259,7 @@ function Media({ v, off, immersive, onCollapse }) {
 				<button class="mov-play" aria-label=${v.paused ? 'Play' : 'Pause'} onClick=${toggle} disabled=${off}><${Icon} n=${v.paused ? 'play' : 'pause'} k=${4} /></button>
 				${full && html`<button class="mov-s" aria-label="Next" onClick=${ctl.next} disabled=${off}><${Icon} n="next" k=${3} /></button>`}</div>
 			<div class="mov-bot">
-				${full && html`<div class="mov-seek"><${Seek} view=${v} onSeek=${ctl.seek} disabled=${off} /><${Times} v=${v} /></div>`}
+				${full && html`<div class="mov-seek"><${Seek} view=${v} onSeek=${ctl.seek} disabled=${off || v.finished} /><${Times} v=${v} /></div>`}
 				<div class="mov-r">
 					${hasSubs && html`<button class=${'ib mov-cc' + (ccOn ? ' on' : '')} aria-label="Subtitles" title=${'Subtitles: ' + (subChip(v) || 'Off') + ' (C)'} aria-pressed=${ccOn} onClick=${() => { toggleCaptions(); showOv(); }}><${Icon} n="cc" k=${2} /></button>`}
 					<button class=${'ib mov-gear' + (menu ? ' on' : '')} aria-label="Settings" title="Settings" aria-haspopup="menu" aria-expanded=${!!menu} onClick=${() => setMenu(menu ? null : 'main')}><${Icon} n="gear" k=${2} /></button>
@@ -390,12 +390,15 @@ export function LoopIcon({ loop, k }) {
 	return html`<span class="loopic"><${Icon} n="loop" k=${k} />${loop === 'one' && html`<b>1</b>`}</span>`;
 }
 export const loopName = l => 'Loop: ' + (l === 'one' ? 'One' : l === 'all' ? 'All' : 'Off');
+// (a finished list: Play is the list again, Previous its last one again; Next has nothing to act on. Shuffle and Loop
+// still set their settings: with Shuffle on, Play starts at a random row)
 function Transport({ v, off }) {
+	const fin = off || !!v.finished;
 	return html`<div class="tp">
 		<button class=${'tp-s' + (v.shuffled ? ' on' : '')} aria-label="Shuffle" title=${v.shuffled ? 'Shuffle: On' : 'Shuffle: Off'} aria-pressed=${!!v.shuffled} onClick=${ctl.shuffle} disabled=${off}><${Icon} n="shuffle" k=${2} /></button>
-		<button class="tp-m" aria-label="Previous" onClick=${ctl.prev} disabled=${off}><${Icon} n="prev" k=${3} /></button>
-		<button class="box yellow tp-play" aria-label=${v.paused ? 'Play' : 'Pause'} onClick=${ctl.toggle} disabled=${off}><${Icon} n=${v.paused ? 'play' : 'pause'} k=${4} /></button>
-		<button class="tp-m" aria-label="Next" onClick=${ctl.next} disabled=${off}><${Icon} n="next" k=${3} /></button>
+		<button class="tp-m" aria-label=${v.finished ? 'Play the last one again' : 'Previous'} onClick=${ctl.prev} disabled=${off}><${Icon} n="prev" k=${3} /></button>
+		<button class="box yellow tp-play" aria-label=${v.finished ? 'Play the list again' : v.paused ? 'Play' : 'Pause'} onClick=${ctl.toggle} disabled=${off}><${Icon} n=${v.paused ? 'play' : 'pause'} k=${4} /></button>
+		<button class="tp-m" aria-label="Next" onClick=${ctl.next} disabled=${fin}><${Icon} n="next" k=${3} /></button>
 		<button class=${'tp-s' + (v.loop !== 'no' ? ' on' : '')} aria-label=${loopName(v.loop)} title=${loopName(v.loop)} aria-pressed=${v.loop !== 'no'} onClick=${ctl.loop} disabled=${off}><${LoopIcon} loop=${v.loop} k=${2} /></button></div>`;
 }
 // the volume as a speaker button that opens a small slider
@@ -413,7 +416,11 @@ function VolButton() {
 }
 
 function Strips({ v, other, sn }) {
-	return html`${v.here && v.parked != null && html`<div class="strip box surface"><span>Stopped when the connection to your handheld dropped.</span><button class="btn sm primary" onClick=${playParked}><${Icon} n="play" k=${2} />Play here from ${fmtTime(v.parked)}</button></div>`}
+	// (the list that ended: Play plays it again, Up next any row of it; Clear puts it away)
+	const src = v.finished && v.source && v.source.title;
+	return html`${v.finished && html`<div class="strip box surface"><span>${src ? html`The end of <b>${src}</b>` : 'The end of the list'}</span>
+			<button class="btn sm" onClick=${clearFinished}>Clear</button></div>`}
+		${v.here && v.parked != null && html`<div class="strip box surface"><span>Stopped when the connection to your handheld dropped.</span><button class="btn sm primary" onClick=${playParked}><${Icon} n="play" k=${2} />Play here from ${fmtTime(v.parked)}</button></div>`}
 		${other && !NO_HERE && html`<div class="strip box surface"><span>Your handheld is playing <b>${titleFor(sn.path, sn.title)}</b></span><button class="btn sm primary" onClick=${continueHere}>Continue here</button></div>`}`;
 }
 
@@ -429,7 +436,10 @@ export function NowPlaying() {
 		<div class="np-idlehead"><span class="kicker">Now playing</span><${AppMenu} /></div>
 		<div style="display:flex;justify-content:center"><${DevSwitch} /></div>
 		<${Strips} v=${v} other=${other} sn=${sn} />
-		<${Empty} icon="note" title="Nothing playing" sub="Pick something in Files or Playlists." button="Open Files" onClick=${() => go(filesHash(store.lastDir || ''))} /></div>`;
+		<${Empty} icon="note" title="Nothing playing" sub="Pick something in Files or Playlists." button="Open Files" onClick=${() => go(filesHash(store.lastDir || ''))} />
+		${!wide && html`<div class="tp" style="justify-content:center;gap:24px" aria-label="Play mode for the next list">
+			<button class=${'tp-s' + (v.shuffled ? ' on' : '')} aria-label="Shuffle" title=${v.shuffled ? 'Shuffle: On' : 'Shuffle: Off'} aria-pressed=${!!v.shuffled} onClick=${ctl.shuffle} disabled=${off}><${Icon} n="shuffle" k=${2} /></button>
+			<button class=${'tp-s' + (v.loop !== 'no' ? ' on' : '')} aria-label=${loopName(v.loop)} title=${loopName(v.loop)} aria-pressed=${v.loop !== 'no'} onClick=${ctl.loop} disabled=${off}><${LoopIcon} loop=${v.loop} k=${2} /></button></div>`}</div>`;
 	const tabs = npTabs(v), tab = tabs.some(x => x[0] === s.npTab) ? s.npTab : 'queue';
 	const vid = v.kind === 'video';
 	const panel = html`<${PanelTabs} tabs=${tabs} tab=${tab} onTab=${k => set({ npTab: k })} />
@@ -442,7 +452,7 @@ export function NowPlaying() {
 	if (wide) return html`<div class=${'np wide' + (vid ? ' vid' : '')}><${Glow} v=${v} />${top}
 		<${Strips} v=${v} other=${other} sn=${sn} />
 		<div class="np-hero"><${Media} v=${v} off=${off} />
-			<div class="np-side"><${NpMeta} v=${v} /><div class="np-seek"><${Seek} view=${v} onSeek=${ctl.seek} disabled=${off} /><${Times} v=${v} skip=${true} off=${off} /></div><${Transport} v=${v} off=${off} /></div></div>
+			<div class="np-side"><${NpMeta} v=${v} /><div class="np-seek"><${Seek} view=${v} onSeek=${ctl.seek} disabled=${off || v.finished} /><${Times} v=${v} skip=${true} off=${off || v.finished} /></div><${Transport} v=${v} off=${off} /></div></div>
 		<section class="np-card box surface" aria-label="Queue and more">${panel}</section></div>`;
 	return html`<${FullPlayer} v=${v} off=${off} other=${other} sn=${sn} tabs=${tabs} tab=${tab} />`;
 }
@@ -502,7 +512,7 @@ function FullPlayer({ v, off, other, sn, tabs, tab }) {
 			<div class="fp-media"><${Media} v=${v} off=${off} immersive=${immersive} onCollapse=${collapse} /></div>
 			<div class="np-ctl">
 				<${NpMeta} v=${v} acts=${true} />
-				<div class="np-seek"><${Seek} view=${v} onSeek=${ctl.seek} disabled=${off} /><${Times} v=${v} skip=${true} off=${off} /></div>
+				<div class="np-seek"><${Seek} view=${v} onSeek=${ctl.seek} disabled=${off || v.finished} /><${Times} v=${v} skip=${true} off=${off || v.finished} /></div>
 				<${Transport} v=${v} off=${off} />
 				<div class="np-tabs">${threeKeys(v, tabs).map(([k, l]) => html`<button class="btn" aria-haspopup="dialog" onClick=${() => showTab(k)}><${Icon} n=${NP_GLYPH[k]} k=${2} />${l}</button>`)}</div></div></section>
 		<${Sheet} v=${v} tabs=${tabs} tab=${tab} />
@@ -612,8 +622,10 @@ function UpNext({ v }) {
 	const s = store, sn = s.snap;
 	const [items, setItems] = useState(null), [idx, setIdx] = useState(0);
 	const box = useRef();
-	const key = v.here ? B.queue.length + ':' + B.index + ':' + (B.queue[0] && B.queue[0].p) : (sn && sn.path) + '|' + s.epoch + '|' + s.plTick;
+	const fin = v.finished && finishedList();
+	const key = fin ? 'fin|' + fin.index + '|' + fin.queue.join('|') : v.here ? B.queue.length + ':' + B.index + ':' + (B.queue[0] && B.queue[0].p) : (sn && sn.path) + '|' + s.epoch + '|' + s.plTick;
 	useEffect(() => {
+		if (fin) { setItems(fin.queue.map(p => ({ p, title: titleFor(p) }))); setIdx(fin.index); return; }
 		if (v.here) { setItems(B.queue.map(q => ({ p: q.p, title: titleFor(q.p, q.title), duration: q.duration }))); setIdx(B.index); return; }
 		let dead = false;
 		get('/api/source').then(r => { if (!dead) { setItems((r.items || []).map(q => ({ p: q.p, title: titleFor(q.p, q.title), duration: q.duration }))); setIdx(r.index); } }).catch(() => { if (!dead) setItems([]); });
@@ -631,9 +643,12 @@ function UpNext({ v }) {
 		sc.scrollTop = Math.max(0, sc.scrollTop + r.top - v2.top - 8 - (c.offsetHeight || 0));
 	}, [idx, items]);
 	if (items === null) return html`<div class="skel" aria-hidden="true"></div>`;
-	if (items.length < 2) return html`<p class="note pad">Nothing else is queued. Play a folder or a playlist to fill it.</p>`;
+	if (items.length < 2 && !fin) return html`<p class="note pad">Nothing else is queued. Play a folder or a playlist to fill it.</p>`;
 	const play = async i => {
 		if (!userTap()) return;
+		// (a finished list: from that row, where picks go)
+		if (fin) return playFinished(i);
+		// (with Shuffle on, what follows the row is random again: the session's new order from it)
 		if (v.here) return browserPlay(B.queue, i, B.source, 0);
 		const src = sn.source;
 		try { if (src && src.kind === 'playlist' && src.id) await post('/api/play', { playlist: src.id, index: i }); else await post('/api/play', { p: items[i].p }); } catch (e) { toast(errMsg(e)); }
@@ -643,7 +658,7 @@ function UpNext({ v }) {
 		<div class="upnext list-lines" ref=${box}>
 		${items.map((it, i) => { const d = it.duration > 0 ? it.duration : durationOf(it.p); return html`<button class="line ${i === idx ? 'cur' : ''} ${i < idx ? 'past' : ''}" data-dur=${!d && durable(it.p) ? it.p : undefined} onClick=${() => play(i)} aria-current=${i === idx ? 'true' : undefined}>
 			<span class="tile sm"><${Art} src=${kindOfName(it.p) === 'audio' ? coverUrl(it.p) : ''} seed=${it.p} kind=${kindOfName(it.p)} k=${1} /></span>
-			<span class="tt"><span class="ell" style="display:block">${it.title}</span>${i === idx && html`<span class="m"><span class="chip y tiny"><${Icon} n="play" k=${1} />Now</span></span>`}</span>
+			<span class="tt"><span class="ell" style="display:block">${it.title}</span>${i === idx && html`<span class="m">${fin ? html`<span class="chip tiny">Finished</span>` : html`<span class="chip y tiny"><${Icon} n="play" k=${1} />Now</span>`}</span>`}</span>
 			${d > 0 && html`<span class="tm">${fmtTime(d)}</span>`}</button>`; })}</div></section>`;
 }
 

@@ -676,6 +676,9 @@ namespace bp
 		// music playing: X loop, Y chapters (none: nothing), SELECT the Display popup (a video: audio, subtitles,
 		// picture size)
 		bool musicKey(Button b, Player& p);
+		// the music key's mode: MODE_SHUFFLE when Shuffle is on (with whichever Loop), else the Loop (LOOP_*)
+		int playMode(const Player& p) const;
+		std::string modeLabel(const Player& p) const;	// what the screen says as X changes it
 		// Display, over a song's page (SELECT): what the top panel shows, and the visualizer's style; each change
 		// applied at once (the player rebuilds the graph once the changes stop)
 		bool displayOpen = false;

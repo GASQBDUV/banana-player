@@ -116,8 +116,9 @@ folders. Playlists have a section of their own, between Files and Network.
 
 - **A** on an item plays the playlist from there. **Play all** (the playlist's **X** menu) starts at the top, and
   **Play from here** (an item's **Y** menu) starts at that item.
-- **Shuffle play** plays the items in a random order, once. Nothing is saved: the next Shuffle play is shuffled again.
-  With **Loop all**, the same shuffled order plays again.
+- **Shuffle play** turns **Shuffle** on and starts at a random item; the rest follow in a random order (the list keeps
+  its own order where it's shown). Shuffle stays on for what you play next, till you turn it off (**X** on the music
+  screen, or the web's Shuffle button).
 - **L / R** go to the previous or next item, as in a folder. For music on **Loop all**, the playlist starts again after
   its last item. Videos never loop.
 
@@ -195,7 +196,7 @@ Like a song or a video to keep it in **Liked**, a playlist of its own. Photos an
 | **L / R** | Previous (5 s or more in: back to the start) / next file in the folder |
 | **L2 / R2** | Previous / next chapter (**F + L2** is still the screenshot) |
 | **UP / DOWN** | Faster / slower (0.5x, 1x, 1.5x, 2x, 2.5x); the speed button becomes a yellow key when it isn't 1x |
-| **X** | Video: audio and subtitles (one page, two tabs: **Y** / **X** or **L / R** switch them) · Music: No loop → Loop all → Loop one |
+| **X** | Video: audio and subtitles (one page, two tabs: **Y** / **X** or **L / R** switch them) · Music: In order → Loop all → Loop one → Shuffle (with Loop all) |
 | **Y** | Video: chapters · Music: chapters, for a song or audiobook that has them (on other songs it does nothing) |
 | **SELECT** | Video: Fit → Fill → Stretch · Music: the Display popup (what's shown, and the visualizer's style) |
 | **START** | Menu, on its **Playing** tab: Like, Add to playlist…, Show in folder, Info, Stop |
@@ -221,9 +222,9 @@ Like a song or a video to keep it in **Liked**, a playlist of its own. Photos an
 Under the progress bar you'll see the time played, the time left (at the current speed) and the total length.
 
 The top line of the Main page shows what's playing from: the folder (`Videos / Movies`), or a playlist (its name, with a
-list icon), then the card or the server it's on: **Local** or the server's name. For a shuffled playlist the status line
-says **Playing · Shuffle**. On the right of the status line, `3 / 12` is the file's place in its folder or playlist (in a
-shuffled playlist, its place in the shuffled order).
+list icon), then the card or the server it's on: **Local** or the server's name. With Shuffle on the status line says
+**Playing · Shuffle**. On the right of the status line, `3 / 12` is the file's place in its folder or playlist (with
+Shuffle on too: the list keeps its order).
 
 ### Looking at a photo
 
@@ -333,8 +334,18 @@ Songs show their title, artist and album on the top screen. While a song plays:
   can be inside the song file or a `cover.jpg` in the same folder.
 - **Y: chapters.** A song or audiobook with chapters opens its **Chapters** page, as on a video. On other songs **Y**
   does nothing.
-- **X: looping.** **No loop**, **Loop all** (the folder starts again after its last song) or **Loop one** (the same
-  song again). Videos never loop.
+- **X: Shuffle and Loop**, in turn: **In order** (the key says **Off** by the loop mark), **Loop all** (**All**: the
+  folder starts again after its last song), **Loop one** (**One**: the same song again) and **Shuffle** (**On** by the
+  shuffle mark: Shuffle with Loop all, so it never stops), then In order again. The screen says which as it changes.
+  - **Shuffle** never reorders what you see (the folder, the playlist, Up next keep their order): **Next** and a song's
+    end go to a random one not played yet in this round, **Previous** goes back the way it came. The song playing when
+    you turn it on (or off) plays on.
+  - With **Loop all**, each round is followed by a new random one (never the same song twice in a row); with Loop off
+    the list stops once every song has played; with **Loop one** the song repeats.
+  - Shuffle and Loop are settings: they stay as they are for every folder, playlist or file you play next, here or from
+    the web, and after a restart. The web sets them separately; a pair the key doesn't list shows the shuffle mark with
+    **One** (Loop one) or **Once** (no loop), and the next press goes to In order.
+  - Videos never loop.
 
 Settings › Music has the same two choices as **Music display** and **Visualizer**.
 
@@ -474,7 +485,7 @@ browser**), and in the player bar a button that opens the same choice, saying wh
 handheld, carries on at 1:27"):
 
 - **On handheld** (the default): controls what the handheld plays. Play and pause, previous and next, seeking, back 5
-  seconds and forward 10, loop, shuffle, volume, the equalizer (presets and bands), the sound effects, chapters, and what's
+  seconds and forward 10, loop, shuffle (see below), volume, the equalizer (presets and bands), the sound effects, chapters, and what's
   up next.
 - **In this browser**: plays the file on the phone or computer, and pauses the handheld. Here there's no equalizer,
   effects or handheld volume (a volume slider for the browser instead), and the chapters are the browser's own.
@@ -554,6 +565,19 @@ handheld, carries on at 1:27"):
   they're a card under the player; on a computer a column beside it, while the controls are in the player bar.
   **Up next** shows each item's length: a playlist's own, else (a folder, this browser's queue) asked of the handheld
   for the rows as they scroll into view.
+- **When a list ends** (a folder, a playlist, Recent with its folder, a selection; played to its last item with Loop
+  off, in this browser or on the handheld), the player doesn't go blank: it keeps the last item, at its end, with **The
+  end of <list>** and **Clear** above it. **Play** plays the list again from its first item, **Previous** the last one
+  again (**Next** has nothing to go to), and **Up next** keeps the whole list, the last one marked **Finished**: a tap
+  on any row plays the list from there. It plays where you play (this browser, or the handheld). The player bar and the
+  phone's small player show it too (**Finished · <list>**; a tap opens the player). Nothing starts by itself; **Clear**,
+  or **Stop** on the handheld, leaves **Nothing playing**. The handheld's own screens go back to the list as before.
+  **Shuffle** and **Loop** still work there; with Shuffle on, **Play** starts the list again at a random song.
+- **Shuffle and Loop** are the handheld's two settings, whichever side plays, and every page and the handheld show the
+  same (even with nothing playing: the buttons stay in the player bar or the phone's empty player). **Shuffle** turns
+  it on or off without a break in what plays; **Loop** goes off → all → one. They combine freely: Shuffle with Loop
+  all plays on for ever, a new random round each time; Shuffle with Loop off stops after every song once. Up next keeps
+  the list's own order; a row tapped plays from there, random again after it.
 
 **Files** lists the card's folders:
 

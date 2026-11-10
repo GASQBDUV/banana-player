@@ -22,7 +22,7 @@ namespace bp
 		j.key("eq").obj().key("on").boolean(s.eqOn).key("preset").str(s.eqPreset).key("gains").arr();
 		for (double g : s.eqGains) j.num(g);
 		j.end().end();
-		j.key("fx").str(s.fx).key("loop").str(s.loop).key("shuffled").boolean(s.shuffled);
+		j.key("fx").str(s.fx).key("loop").str(s.loop).key("shuffled").boolean(s.shuffled).key("shuffleMode").boolean(s.shuffleMode);
 		j.key("chapters").arr();
 		for (auto& c : s.chapters) j.obj().key("title").str(c.title).key("start").num(c.start).end();
 		j.end();
@@ -57,7 +57,7 @@ namespace bp
 			a.sourceKind != b.sourceKind || a.sourceTitle != b.sourceTitle || a.sourceId != b.sourceId ||
 			a.index != b.index || a.count != b.count || a.loading != b.loading || a.paused != b.paused ||
 			a.duration != b.duration || a.speed != b.speed || a.volume != b.volume || a.eqOn != b.eqOn ||
-			a.eqPreset != b.eqPreset || a.eqGains != b.eqGains || a.fx != b.fx || a.loop != b.loop ||
+			a.eqPreset != b.eqPreset || a.eqGains != b.eqGains || a.fx != b.fx || a.loop != b.loop || a.shuffleMode != b.shuffleMode ||
 			a.shuffled != b.shuffled || a.chapter != b.chapter || a.sessionV != b.sessionV || a.sessionBoot != b.sessionBoot ||
 			a.clients != b.clients || a.playlistSerial != b.playlistSerial || a.liked != b.liked || a.showHiddenFolders != b.showHiddenFolders || a.chapters.size() != b.chapters.size() ||
 			a.hasTracks != b.hasTracks || a.audioTracks != b.audioTracks || a.subTracks != b.subTracks || a.aid != b.aid ||

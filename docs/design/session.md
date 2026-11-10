@@ -201,6 +201,7 @@ New route: `POST /api/intent` (JSON `{origin, seq, basis, type, …}`) → `{ok,
   so the handheld reloads at `pos`. Any `Open` clears `parked`.
 - **End of list**: `Ended` on the last item, no loop → `index = -1`, `playing = false`, `Note "Finished"` / `PageToast
   "End of <source>"`; the last item and place go to Recent as today (`saveResume`). Loop one: `seekN++`. Loop all: wrap.
+  The list is kept as `ended` for the pages to offer again (§13).
 - **Stop** (any origin, guarded): clears the item everywhere (`index = -1`), the page unloads too; `pref` survives,
   so the next pick still goes to the browser. (Today the handheld's Stop leaves the page playing; see §8 Q1.)
 - **Output tab gone** (`TabGone` while it's the output): grace 10 s (an SSE reconnect, a reload with the same
@@ -229,6 +230,8 @@ New route: `POST /api/intent` (JSON `{origin, seq, basis, type, …}`) → `{ok,
 | I9 | `0 ≤ posNow ≤ dur` once `dur` known; `playing ⇒ index ≥ 0 && !parked-on-handheld` | clamps in `posNow`/reducer |
 | I10 | Same `(origin, seq)` twice ⇒ same result, one effect set | rule 1 |
 | I11 | `blocked ⇒ playing && out = Browser && index ≥ 0 && loaded` | `Blocked` only then; cleared after any apply that pauses, reloads or moves the output (§12) |
+| I12 | `ended` (a finished list) `⇒ index < 0`, its index within its queue | set only by `Ended` at the end; cleared after any apply that leaves an item, and by `Stop` (§13) |
+| I13 | `order` (Shuffle's hidden play order) non-empty `⇔ shuffle && index ≥ 0`, and then each place of `queue` once | made by `Open` / `SetShuffle` on, `Ended`/`Step` past a round with Loop all (a new one); cleared by Shuffle off and a stop; `FileGone` renumbers it (§14) |
 
 ### Failure modes
 
@@ -496,3 +499,60 @@ What moved, what went, and the choices made (the code and tests follow these):
   paused session, still report `Pos` as before.
 - Tests: three named cases in core-test (waits and ends with the tap; B plays here with `aoReload`; pause, Next and the
   tab gone end it) and `Blocked` in the fuzz test's renderer reports.
+
+## 13. A list that ended (2026-11-10)
+
+- **`ended`** (`Session::ended`, a `Finished`: `queue` (real paths), `index` (its last item), `source`, `dur`,
+  `audioOnly`; `index -1` none). The dashboard keeps showing a list that played to its end by itself instead of
+  "Nothing playing", so its rows can be played again.
+- **Set only** by `Ended` on the last item with loop off (the path that `stopItem()`s and notes "Finished"; everything
+  else about that path is unchanged: `index = -1`, `HhUnload`, the handheld's screens go back as before).
+- **Cleared** by any apply that leaves an item (`index >= 0`: Open, Play over a photo, …; one rule after the reducer,
+  next to `blocked`'s), and by **`Stop`**: with nothing playing and a finished list, `Stop` is accepted and only clears
+  it (else still `nothing`). A Stop of a list still playing leaves no finished list: Stop means stop. `FileGone` drops
+  the gone files from it (its index follows); its last item gone, it's cleared. `SetOutput`, `Tick`, `Woke`… keep it.
+- **I12**: `ended.index >= 0 ⇒ index < 0`, `ended.index` within `ended.queue` (and `-1 ⇒` empty queue). Checked by
+  `checkInvariants`, so by the fuzz test; `checkTransition` adds: a finished list appears only by `Ended`, an applied
+  `Stop` leaves none. The fuzz counts the sessions that reach one (it must, to test it). Named case in core-test: "the
+  end of a list keeps it…" (published JSON, Next/Play rejected, SetOutput keeps it, an Open from a row clears it, Stop
+  clears it, FileGone).
+- **Published** as `session.ended`: `null`, or `{queue (virtual, unserved files left out), index, source {kind
+  folder|net|playlist, title, id}, dur, audio}`; `null` too when its last item isn't served.
+- **Page** (`browser-player.js`): `finishedList()`; `view()` gives a `finished` view after the page's own and the
+  handheld's (`has`, `finished`, `here: false`, paused at `dur`, the title/cover probed once, `source` with the folder's
+  name when the session has no title). `playFinished(i)` is an `Open` of that list from row `i`: `browserPlay` when this
+  tab is where picks go, else an `Open` with `to=handheld` (pref the handheld) or none (pref another tab). `ctl`: Play
+  = `playFinished(0)` (Shuffle on: a random row), Prev = the last item again, Next/seek do nothing (disabled in the UI);
+  Shuffle and Loop set their settings (§14). Up next lists
+  it (the last row "Finished"), the strip says "The end of <list>" with **Clear** (`clearFinished()`: the `Stop`
+  intent). Files/Playlists/Recent don't mark its last item as playing; a headset's Play doesn't restart it.
+
+## 14. Shuffle (2026-11-10)
+
+- **Two settings**, independent and lasting (settings.conf `shuffle = yes|no`, `loop = off|all|one`; never reset by an
+  Open from anywhere): `Session::shuffle` and `Session::loop` follow them each pass (`SessionHost::pass`). The web's
+  Shuffle sends `SetShuffle {on}` (the host sets the setting first); its Loop `/api/cmd loop`; `/api/cmd shuffle`
+  (v=on|off) sets Shuffle too. Published: `session.shuffle`, and the snapshot's `shuffleMode` (the setting), which
+  the page's buttons show even with nothing playing.
+- **Nothing visible is reordered**: `queue` keeps the list's own order (Up next, the handheld's list, `3 / 12`).
+  `Session::order` is the hidden play order: the queue's places, each once, the item picked first
+  (`shuffleOrder(n, index, rnd)`), made by `Open` and by `SetShuffle` on (from the item playing: no reload, no effect).
+- **Next / Ended** go to the next place in `order`; **Previous** back (after the RESTART_S rule, as before). Past the
+  last place: Loop all → a new round (`shuffleOrder(n, -1, rnd)`, its first not the item just played), Loop off →
+  Step says "last" and Ended ends the list (the finished state, §13), Loop one → Ended repeats the item (unchanged).
+  In order is as before. `hasNext()` gives the handheld's Next key its dimmed state.
+- **Randomness** comes on the intent (`Intent::rnd`): the host draws it for `Open`, `SetShuffle`, `Step` and `Ended`
+  (`make()`, and `fromPage` for a page's), so `apply` stays pure and a seed replays exactly.
+- **The handheld** keeps its own list in order: the session's `HhLoad` of the picked item moves it (`jumpTo`); its own
+  end-of-file goes through `ended()` while it holds the session's item, so mpv never advances in order by itself.
+  The X key cycles In order → Loop all → Loop one → Shuffle (shuffle on + Loop all) → In order; any Shuffle pair goes to
+  In order next. It shows the shuffle mark with On / One / Once when Shuffle is on, else the loop mark with
+  Off / All / One (`Ui::playMode`, `Ui::modeLabel`).
+- **Shuffle play** (a playlist's menu, the web's): Shuffle on, from a random item; the list in its own order.
+- **Page**: `view().shuffled` is the setting; a finished list's Play with Shuffle on starts at a random row; Up next
+  rows play as before (with Shuffle on, a new order from that row).
+- Tests: a named case in core-test (the order from the item, every item once a round then the end, Previous back,
+  Loop all's rounds with no repeat at the seam, Next past a round, Loop one, another Open keeps both settings, Shuffle
+  off/on mid-list without a reload, FileGone), and `SetShuffle` / `rnd` in the fuzz (which must turn Shuffle on and off
+  while playing and reach a new round). The fuzz's finished-list floor went from runs/20 to runs/40: Shuffle, a lasting
+  setting there too, makes a list's end rarer.

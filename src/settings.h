@@ -67,6 +67,9 @@ namespace bp
 		// or a hand), the menus' and the browser's buttons still work
 		bool buttonHotkeys = true;
 		int musicShow = SHOW_ART, visualizer = VIS_PEAKS, loop = LOOP_OFF;
+		// the play mode Shuffle (the music key, the web's Shuffle): every list started plays shuffled from the item
+		// picked, till it's turned off; loop is off meanwhile (four modes). No Settings row: those keys are its switch
+		bool shuffle = false;
 		// folders with a ".hidden" file in them: listed (and their videos in Recent) only when this is on
 		bool showHiddenFolders = false;
 		// the battery's percent beside its icon on the bottom panel (the icon is always there)

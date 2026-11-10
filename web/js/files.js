@@ -168,7 +168,7 @@ export function Files() {
 	}
 	const playOn = (target, paths) => playPaths(paths, store.knownFolders, target);
 	const playRow = (it, p) => playHere(t => playPaths([p], store.knownFolders, t, true), p, it.playable);
-	const nowV = view(), nowPath = nowV.has ? nowV.path : '';
+	const nowV = view(), nowPath = nowV.has && !nowV.finished ? nowV.path : '';
 	function rowClick(it) {
 		if (lp.current.fired) { lp.current.fired = false; return; }
 		const p = full(it.name);

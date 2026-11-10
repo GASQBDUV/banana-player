@@ -22,6 +22,21 @@ namespace bp
 
 	static std::string base(const std::string& p) { return p.empty() ? "-" : p.substr(p.rfind('/') + 1); }
 
+	static uint64_t randomSeed()
+	{
+		std::random_device rd;
+		return ((uint64_t)rd() << 32) ^ rd() ^ SDL_GetTicks();
+	}
+
+	// the Shuffle setting (it lasts, as Loop: settings.conf)
+	static void shuffleSetting(Player* p, bool on)
+	{
+		if (!p || p->settings.shuffle == on) return;
+		Settings st = p->settings;
+		st.shuffle = on;
+		p->setSettings(st);
+	}
+
 	TrackPick pickOf(const std::vector<Track>& list, int64_t selectedId)
 	{
 		TrackPick k;
@@ -58,6 +73,7 @@ namespace bp
 			if (e.origin == origin) last = std::max(last, e.seq);
 		i.seq = host ? 0 : (seqs[origin] = last + 1);
 		i.basis = legacyBasis ? publishedV : s.v;
+		if (t == IntentType::Open || t == IntentType::SetShuffle || t == IntentType::Step || t == IntentType::Ended) i.rnd = randomSeed();
 		return i;
 	}
 
@@ -223,8 +239,16 @@ namespace bp
 			}
 	}
 
-	Result SessionHost::fromPage(const Intent& i)
+	Result SessionHost::fromPage(const Intent& in)
 	{
+		Intent i = in;
+		if (i.type == IntentType::SetShuffle)
+		{
+			shuffleSetting(player, i.on);	// (the mode is the setting)
+		}
+		// (the reducer is deterministic: the host draws Shuffle's orders)
+		if (i.type == IntentType::SetShuffle || i.type == IntentType::Open || i.type == IntentType::Step || i.type == IntentType::Ended)
+			i.rnd = randomSeed();
 		if (i.type == IntentType::SetOutput && i.hasOut && i.out.kind != OutKind::Handheld) reportHere();
 		// a page sends the handheld its file: its screens show it, as an /api/play did
 		if ((i.type == IntentType::SetOutput || i.type == IntentType::Open) && i.hasOut && i.out.kind == OutKind::Handheld) showHere = true;
@@ -304,6 +328,18 @@ namespace bp
 			i.out = *out;
 		}
 		submit(i, live);
+	}
+
+	bool SessionHost::shuffleMode() const { return player ? player->settings.shuffle : s.shuffle; }
+
+
+	void SessionHost::setShuffle(bool on, const std::string& origin)
+	{
+		shuffleSetting(player, on);
+		if (s.shuffle == on) return;
+		Intent i = make(IntentType::SetShuffle, origin);
+		i.on = on;
+		submit(i, true);
 	}
 
 	Result SessionHost::step(int n, const std::string& origin)
@@ -443,6 +479,13 @@ namespace bp
 			}
 		}
 		else soundingSince = 0;
+		// the handheld's Shuffle (its settings, as Loop) is the session's
+		if (p.settings.shuffle != s.shuffle)
+		{
+			Intent i = make(IntentType::SetShuffle);
+			i.on = p.settings.shuffle;
+			submit(i, true);
+		}
 		// the handheld's Loop (its settings; Loop all is the music's) is the session's
 		int loop = p.settings.loop == LOOP_ALL && s.index >= 0 && !s.audioOnly ? SESSION_LOOP_OFF : p.settings.loop;
 		if (loop != s.loop)

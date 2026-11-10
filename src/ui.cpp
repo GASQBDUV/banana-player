@@ -1069,7 +1069,8 @@ namespace bp
 		// where it plays (the Playing tab's Play on row, the picker, the status line), and the pages it could
 		{
 			SessionHost& sh = SessionHost::get();
-			photo += "|out" + outputName() + (sh.pageWaits() ? "w" : "") + " " + std::to_string(playOnOpen) + std::to_string(playOnCursor) +
+			// (the play mode's Shuffle: the music key, the status line)
+			photo += "|out" + outputName() + (sh.pageWaits() ? "w" : "") + (sh.session().shuffle ? "S" : "") + " " + std::to_string(playOnOpen) + std::to_string(playOnCursor) +
 				" " + std::to_string(playOnScroll);
 			if (page == Page::Playing || playOnOpen)
 				for (auto& c : outChoices()) photo += "," + c.name;

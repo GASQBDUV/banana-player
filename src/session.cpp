@@ -1,5 +1,6 @@
 #include "session.h"
 #include "photo.h"
+#include "playlists.h"
 #include "json.h"
 #include <algorithm>
 #include <cmath>
@@ -11,7 +12,7 @@ namespace bp
 	{
 		static const char* NAMES[] = {"Open", "Play", "Pause", "Seek", "SeekBy", "Step", "SetAudio", "SetSub", "SetSpeed",
 			"SetLoop", "SetOutput", "Stop", "PhotoPark", "PhotoResume", "FileGone", "Loaded", "Pos", "Ended", "CantPlay",
-			"Tick", "TabGone", "TabBack", "Slept", "Woke", "Blocked"};
+			"Tick", "TabGone", "TabBack", "Slept", "Woke", "Blocked", "SetShuffle"};
 		return NAMES[(int)t];
 	}
 
@@ -60,6 +61,19 @@ namespace bp
 		return std::max(0.0, p);
 	}
 
+	int shufflePlace(const Session& s)
+	{
+		auto it = std::find(s.order.begin(), s.order.end(), s.index);
+		return s.index < 0 || it == s.order.end() ? -1 : (int)(it - s.order.begin());
+	}
+
+	bool hasNext(const Session& s)
+	{
+		if (s.index < 0) return false;
+		if (s.shuffle && s.order.size() == s.queue.size()) return shufflePlace(s) + 1 < (int)s.order.size() || s.loop == SESSION_LOOP_ALL;
+		return s.index + 1 < (int)s.queue.size() || s.loop == SESSION_LOOP_ALL;
+	}
+
 	std::string outOrigin(const Session& s) { return s.out.kind == OutKind::Handheld ? "hh" : s.out.tab; }
 
 	namespace
@@ -67,11 +81,11 @@ namespace bp
 		// what a client sees change: everything but the clock (pos, posAt), the host's timers, the seen store and v
 		bool samePublished(const Session& a, const Session& b)
 		{
-			return a.queue == b.queue && a.index == b.index && a.source == b.source && a.load == b.load &&
+			return a.queue == b.queue && a.index == b.index && a.source == b.source && a.shuffle == b.shuffle && a.order == b.order && a.load == b.load &&
 				a.playing == b.playing && a.speed == b.speed && a.loop == b.loop && a.audio == b.audio && a.sub == b.sub &&
 				a.out == b.out && a.pref == b.pref && a.outV == b.outV && a.itemV == b.itemV && a.playV == b.playV &&
 				a.seekN == b.seekN && a.parked == b.parked && a.error == b.error && a.dur == b.dur &&
-				a.audioOnly == b.audioOnly && a.loaded == b.loaded && a.blocked == b.blocked && a.boot == b.boot;
+				a.audioOnly == b.audioOnly && a.loaded == b.loaded && a.blocked == b.blocked && a.ended == b.ended && a.boot == b.boot;
 		}
 
 		bool sameAll(const Session& a, const Session& b)
@@ -174,8 +188,24 @@ namespace bp
 				fx.push_back(e);
 				if (hhShouldPlay(n)) effect(Effect::HhPlay);
 			}
+			// Shuffle's hidden order from the item (first), or none
+			void newOrder()
+			{
+				n.order.clear();
+				if (n.shuffle && n.index >= 0) n.order = shuffleOrder((int)n.queue.size(), n.index, i.rnd);
+			}
+			// Shuffle with Loop all, its round played: a new round (not the one just played first, as a player would
+			// never play one song twice in a row), from its first
+			int newRound()
+			{
+				int size = (int)s.queue.size();
+				n.order = shuffleOrder(size, -1, i.rnd ^ 0x5DEECE66Dull);
+				if (size > 1 && n.order[0] == s.index) std::swap(n.order[0], n.order[1]);
+				return n.order[0];
+			}
 			void stopItem()
 			{
+				n.order.clear();
 				n.queue.clear();
 				n.index = -1;
 				setPlaying(false);
@@ -240,6 +270,7 @@ namespace bp
 					n.queue = q;
 					n.source = i.source;
 					newItem(index);
+					newOrder();	// (Shuffle: a new hidden order, from the item picked)
 					n.pos = clampPos(n, i.t);
 					n.playing = true;
 					n.playV = nv;
@@ -298,7 +329,16 @@ namespace bp
 					if (k == 0) return "";
 					int size = (int)s.queue.size();
 					int to = s.index + k;
-					if (s.loop == SESSION_LOOP_ALL) to = ((to % size) + size) % size;
+					bool round = false;
+					if (s.shuffle && (int)s.order.size() == size)
+					{
+						// Shuffle: along the hidden order (Previous back in it), to its ends; Next past its end with
+						// Loop all: a new round
+						int at = shufflePlace(s);
+						if (at + k >= size && k > 0 && s.loop == SESSION_LOOP_ALL) round = true;
+						else to = s.order[std::clamp(at + k, 0, size - 1)];
+					}
+					else if (s.loop == SESSION_LOOP_ALL) to = ((to % size) + size) % size;
 					else to = std::clamp(to, 0, size - 1);
 					if (to == s.index)
 					{
@@ -307,6 +347,7 @@ namespace bp
 						return k < 0 ? "first" : "last";
 					}
 					bool wasError = !s.error.empty();
+					if (round) to = newRound();
 					newItem(to);
 					if (wasError) setPlaying(true);	// stepping away from a file that failed: the next one plays
 					route();
@@ -336,6 +377,13 @@ namespace bp
 				case IntentType::SetLoop:
 					if (i.loop < SESSION_LOOP_OFF || i.loop > SESSION_LOOP_ONE) return "bad-loop";
 					n.loop = i.loop;
+					return "";
+				case IntentType::SetShuffle:
+					// the setting (nothing playing too: the next list's); what plays plays on, Next follows a new
+					// hidden order from it (on) or the queue's (off)
+					if (i.on == s.shuffle) return "";
+					n.shuffle = i.on;
+					newOrder();
 					return "";
 				case IntentType::SetOutput:
 				{
@@ -374,7 +422,13 @@ namespace bp
 				}
 				case IntentType::Stop:
 					if (guardedStale()) return "stale";
-					if (s.index < 0) return "nothing";
+					if (s.index < 0)
+					{
+						// a list that ended by itself, still offered: Stop puts it away (nothing playing)
+						if (s.ended.index < 0) return "nothing";
+						n.ended = Finished();
+						return "";
+					}
 					stopItem();
 					return "";
 				case IntentType::PhotoPark:
@@ -405,6 +459,22 @@ namespace bp
 					if (i.path.empty()) return "nothing";
 					std::string dir = i.path.back() == '/' ? i.path : i.path + "/";
 					auto gone = [&](const std::string& p) { return p == i.path || p.compare(0, dir.size(), dir) == 0; };
+					if (s.ended.index >= 0)
+					{
+						// the list that ended: without what went; its last item gone, nothing to show
+						if (gone(s.ended.queue[s.ended.index])) n.ended = Finished();
+						else
+						{
+							Finished f = s.ended;
+							f.queue.clear();
+							for (int k = 0; k < (int)s.ended.queue.size(); k++)
+							{
+								if (!gone(s.ended.queue[k])) f.queue.push_back(s.ended.queue[k]);
+								else if (k < s.ended.index) f.index--;
+							}
+							n.ended = f;
+						}
+					}
 					if (s.index >= 0 && gone(s.queue[s.index]))
 					{
 						stopItem();
@@ -420,6 +490,13 @@ namespace bp
 					}
 					n.queue = q;
 					n.index = index;
+					// the hidden order without them, its places renumbered
+					std::vector<int> to(s.queue.size(), -1);
+					for (int k = 0, m = 0; k < (int)s.queue.size(); k++)
+						if (!gone(s.queue[k])) to[k] = m++;
+					n.order.clear();
+					for (int k : s.order)
+						if (k >= 0 && k < (int)to.size() && to[k] >= 0) n.order.push_back(to[k]);
 					return "";
 				}
 				case IntentType::Loaded:
@@ -459,7 +536,21 @@ namespace bp
 						return "";
 					}
 					int size = (int)s.queue.size();
-					if (s.index + 1 < size || s.loop == SESSION_LOOP_ALL)
+					if (s.shuffle && (int)s.order.size() == size)
+					{
+						// Shuffle: the next of the hidden order; its last played, a new round with Loop all, else the
+						// end as In order
+						int at = shufflePlace(s);
+						if (at + 1 < size || s.loop == SESSION_LOOP_ALL)
+						{
+							int to = at + 1 < size ? s.order[at + 1] : newRound();
+							newItem(to);
+							route();
+							loadHere();
+							return "";
+						}
+					}
+					else if (s.index + 1 < size || s.loop == SESSION_LOOP_ALL)
 					{
 						newItem(s.index + 1 < size ? s.index + 1 : 0);
 						route();
@@ -468,6 +559,12 @@ namespace bp
 					}
 					std::string title = s.source.title;
 					stopItem();
+					// kept for the pages: the list and its last item, to play again from any row (nothing autoplays)
+					n.ended.queue = s.queue;
+					n.ended.index = s.index;
+					n.ended.source = s.source;
+					n.ended.dur = s.dur;
+					n.ended.audioOnly = s.audioOnly;
 					note("Finished", false);
 					Effect e;
 					e.kind = Effect::PageToast;
@@ -601,6 +698,8 @@ namespace bp
 		// reload (Next, a hand-off), another output or a stop end it (a new load reports again if it must)
 		Session& w = r.s;
 		if (w.blocked && (!w.playing || w.out != s.out || w.index < 0 || w.load != s.load)) w.blocked = false;
+		// the list that ended is only offered while nothing plays: anything that plays an item ends it
+		if (w.index >= 0 && w.ended.index >= 0) w.ended = Finished();
 		if (!why.empty())
 		{
 			// all or nothing: the old session (only what it says may go out)
@@ -623,6 +722,7 @@ namespace bp
 		int last = -1, lastPlay = -1;
 		for (int k = 0; k < (int)fx.size(); k++)
 		{
+
 			if (fx[k].kind == Effect::HhLoad || fx[k].kind == Effect::HhUnload) last = k;
 			if (fx[k].kind == Effect::HhPlay || fx[k].kind == Effect::HhPause) lastPlay = k;
 		}
@@ -658,6 +758,18 @@ namespace bp
 		if (s.playing && s.parked && s.out.kind == OutKind::Handheld) return "I9: playing while parked on the handheld";
 		if (s.blocked && (!s.playing || s.out.kind != OutKind::Browser || s.index < 0 || !s.loaded))
 			return "I11: waiting for a tap, yet not a browser output that should play";
+		if (s.ended.index >= 0 && s.index >= 0) return "I12: a finished list kept while an item plays";
+		if (s.ended.index >= (int)s.ended.queue.size() || (s.ended.index < 0 && !s.ended.queue.empty()))
+			return "I12: the finished list's index out of its queue";
+		// I13: Shuffle's hidden order: each place of the queue once, while an item plays with Shuffle on
+		if (!s.order.empty() || (s.shuffle && s.index >= 0))
+		{
+			if (!s.shuffle || s.index < 0 || s.order.size() != s.queue.size()) return "I13: a hidden order that doesn't fit the list";
+			std::vector<int> o = s.order;
+			std::sort(o.begin(), o.end());
+			for (int k = 0; k < (int)o.size(); k++)
+				if (o[k] != k) return "I13: the hidden order isn't each place once";
+		}
 		if (s.seen.size() > SEEN_MAX) return "I10: the seen store over its size";
 		return "";
 	}
@@ -685,6 +797,9 @@ namespace bp
 		if (r.s.pref != old.pref && i.type != IntentType::SetOutput && !(i.type == IntentType::Open && i.hasOut) &&
 			i.type != IntentType::Tick)
 			return std::string("pref: moved by ") + intentName(i.type);
+		// the finished list: made only by a list's own end, put away by a Stop
+		if (old.ended.index < 0 && r.s.ended.index >= 0 && i.type != IntentType::Ended) return std::string("I12: a finished list made by ") + intentName(i.type);
+		if (i.type == IntentType::Stop && r.reject.empty() && !r.dup && r.s.ended.index >= 0) return "I12: a Stop kept the finished list";
 		bool report = i.type == IntentType::Loaded || i.type == IntentType::Pos || i.type == IntentType::Ended ||
 			i.type == IntentType::CantPlay || i.type == IntentType::Blocked;
 		if (report && r.reject.empty() && (i.origin != outOrigin(old) || i.load != old.load)) return "I8: a report from elsewhere taken";
@@ -738,11 +853,35 @@ namespace bp
 			n++;
 		}
 		j.end().key("qindex").num(qindex);
+		j.key("source").obj().key("kind").str(s.source.kind == 2 ? "playlist" : s.source.kind == 1 ? "net" : "folder")
+			.key("title").str(s.source.title).key("id").str(s.source.id).end();
+		j.key("shuffle").boolean(s.shuffle);
 		j.key("playing").boolean(s.playing).key("pos").num(posNow(s, now)).key("dur").num(s.dur).key("speed").num(s.speed);
 		pick("audio", s.audio);
 		pick("sub", s.sub);
 		j.key("playV").num(s.playV).key("seekN").num(s.seekN);
 		j.key("parked").boolean(s.parked).key("blocked").boolean(s.blocked).key("error").str(s.error);
+		// the list that ended by itself, as the queue is published (its unserved files left out)
+		std::string last = s.ended.index >= 0 ? virt(s.ended.queue[s.ended.index]) : "";
+		if (last.empty()) j.key("ended").null();
+		else
+		{
+			int at = -1;
+			n = 0;
+			j.key("ended").obj().key("queue").arr();
+			for (int k = 0; k < (int)s.ended.queue.size(); k++)
+			{
+				std::string v = k == s.ended.index ? last : virt(s.ended.queue[k]);
+				if (v.empty()) continue;
+				if (k == s.ended.index) at = n;
+				j.str(v);
+				n++;
+			}
+			const SessionSource& src = s.ended.source;
+			j.end().key("index").num(at).key("source").obj().key("kind").str(src.kind == 2 ? "playlist" : src.kind == 1 ? "net" : "folder")
+				.key("title").str(src.title).key("id").str(src.id).end();
+			j.key("dur").num(s.ended.dur).key("audio").boolean(s.ended.audioOnly).end();
+		}
 		return j.end().out();
 	}
 }

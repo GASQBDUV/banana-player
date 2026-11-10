@@ -73,6 +73,11 @@ namespace bp
 		// where (the page's Play here / Play in this browser); else the session's pref decides
 		void open(const std::vector<std::string>& paths, int index, int sourceKind, const std::string& title,
 			const std::string& origin, const Output* out, double t, bool live = false);
+		// Shuffle on or off (the handheld's mode key, a page's Shuffle, a Shuffle play): the setting (it lasts, as
+		// Loop: every list from now) and the session's (what plays plays on; Next follows a hidden random order)
+		void setShuffle(bool on, const std::string& origin = "hh");
+		// Shuffle is on (the setting)
+		bool shuffleMode() const;
 		// Next / Previous (n: how many; Previous RESTART_S in restarts first), live: the handheld follows in its own list
 		Result step(int n, const std::string& origin = "hh");
 		// a Play / Pause or a seek of what a page plays (the handheld's A, its bar, a remote tab): live, the page follows

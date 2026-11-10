@@ -1,6 +1,6 @@
 // Banana Player web dashboard: the entry point (shell, app and boot). Preact + htm, no build step; the rest is in js/.
 import { html, render, useEffect, useMemo } from './vendor/htm-preact-standalone.module.js';
-import { B, SUBS, browserPlay, browserStop, continueHere, ctl, el, hereNow, setBrowserVol, setTarget, toggleCaptions, view } from './js/browser-player.js';
+import { B, S, SUBS, browserPlay, browserStop, continueHere, ctl, el, hereNow, setBrowserVol, setTarget, toggleCaptions, view } from './js/browser-player.js';
 import { applySnap, closeSSE, openSSE } from './js/events.js';
 import { fetchT, get, post } from './js/api.js';
 import { Q_DESK, Q_WIDE, notify, set, store, useStore } from './js/store.js';
@@ -36,26 +36,30 @@ function MiniPlayer() {
 	const frac = v.duration ? Math.min(1, v.pos() / v.duration) : 0;
 	return html`<div class="mini box surface" onClick=${() => go('#/playing')} role="region" aria-label="Now playing">
 		${vidHere(v) ? html`<div class="tile art-sm vthumb" key="v" ref=${slot}></div>` : html`<div class="tile art-sm" key="a"><${Art} src=${coverUrl(v.kind === 'video' ? v.path : v.cover)} seed=${v.path} kind=${v.kind} /></div>`}
-		<div class="meta"><div class="t ell">${v.title}</div><div class="m ell">${v.here ? 'In this browser' : html`<span class="y">On handheld</span>`}${!v.here && bgShown() ? ' · in the background' : v.artist ? ' · ' + v.artist : ''}</div></div>
+		<div class="meta"><div class="t ell">${v.title}</div><div class="m ell">${v.finished ? html`<span class="dim">Finished</span>${v.source && v.source.title ? ' · ' + v.source.title : ''}` : v.here ? 'In this browser' : html`<span class="y">On handheld</span>`}${!v.here && bgShown() ? ' · in the background' : v.artist ? ' · ' + v.artist : ''}</div></div>
 		${likable(v) && html`<${LikeBtn} v=${v} cls="ib" />`}
-		<button class="ib play" aria-label=${v.paused ? 'Play' : 'Pause'} onClick=${e => { e.stopPropagation(); ctl.toggle(); }}><${Icon} n=${v.paused ? 'play' : 'pause'} k=${2} /></button>
+		<button class="ib play" aria-label=${v.finished ? 'Play the list again' : v.paused ? 'Play' : 'Pause'} onClick=${e => { e.stopPropagation(); ctl.toggle(); }}><${Icon} n=${v.paused ? 'play' : 'pause'} k=${2} /></button>
 		<div class="prog" aria-hidden="true"><i style=${'width:' + frac * 100 + '%'}></i></div></div>`;
 }
 // the tablet's and the computer's player bar, on every page (on Playing too: on a computer the transport lives here)
 function PlayerBar() {
 	const v = view(), s = store, slot = useVideoSlot(false); useTick(1000);
-	if (!v.has) return html`<div class="pbar idle" role="region" aria-label="Player"><span class="dim" style="font-size:14px">Nothing playing</span><div class="right"><${DevButton} /></div></div>`;
-	const off = s.reconnecting && !v.here, onPage = s.route.page === 'playing';
+	// (nothing playing: Shuffle and Loop still show and set the settings the next list plays with)
+	if (!v.has) return html`<div class="pbar idle" role="region" aria-label="Player"><span class="dim" style="font-size:14px">Nothing playing</span><div class="right">
+		<button class=${'ib opt' + (v.shuffled ? ' on' : '')} aria-label="Shuffle" title=${v.shuffled ? 'Shuffle: On' : 'Shuffle: Off'} aria-pressed=${!!v.shuffled} onClick=${ctl.shuffle} disabled=${s.reconnecting}><${Icon} n="shuffle" k=${2} /></button>
+		<button class=${'ib opt' + (v.loop !== 'no' ? ' on' : '')} aria-label=${loopName(v.loop)} title=${loopName(v.loop)} aria-pressed=${v.loop !== 'no'} onClick=${ctl.loop} disabled=${s.reconnecting}><${LoopIcon} loop=${v.loop} k=${2} /></button>
+		<${DevButton} /></div></div>`;
+	const off = s.reconnecting && !v.here, onPage = s.route.page === 'playing', fin = !!v.finished;
 	const open = () => { if (!onPage) go('#/playing'); };
 	return html`<div class="pbar" role="region" aria-label="Player">
-		<div class="pb-seek"><${Seek} view=${v} onSeek=${ctl.seek} disabled=${off} /></div>
-		<div class="tx"><button class="ib" aria-label="Previous" onClick=${ctl.prev} disabled=${off}><${Icon} n="prev" k=${2} /></button>
-			<button class="box yellow play" aria-label=${v.paused ? 'Play' : 'Pause'} onClick=${ctl.toggle} disabled=${off}><${Icon} n=${v.paused ? 'play' : 'pause'} k=${3} /></button>
-			<button class="ib" aria-label="Next" onClick=${ctl.next} disabled=${off}><${Icon} n="next" k=${2} /></button>
-			<span class="ptime">${fmtTime(v.pos())} / ${fmtTime(v.duration)}</span></div>
+		<div class="pb-seek"><${Seek} view=${v} onSeek=${ctl.seek} disabled=${off || fin} /></div>
+		<div class="tx"><button class="ib" aria-label=${fin ? 'Play the last one again' : 'Previous'} onClick=${ctl.prev} disabled=${off}><${Icon} n="prev" k=${2} /></button>
+			<button class="box yellow play" aria-label=${fin ? 'Play the list again' : v.paused ? 'Play' : 'Pause'} onClick=${ctl.toggle} disabled=${off}><${Icon} n=${v.paused ? 'play' : 'pause'} k=${3} /></button>
+			<button class="ib" aria-label="Next" onClick=${ctl.next} disabled=${off || fin}><${Icon} n="next" k=${2} /></button>
+			<span class="ptime">${fin ? html`<span class="dim">Finished</span>` : html`${fmtTime(v.pos())} / ${fmtTime(v.duration)}`}</span></div>
 		<div class=${'pb-now' + (onPage ? ' here' : '')}>
 			<div class="go" onClick=${open} role=${onPage ? undefined : 'link'} tabindex=${onPage ? undefined : 0} aria-label=${onPage ? undefined : 'Open the player'} onKeyDown=${e => { if (e.key === 'Enter') open(); }}>
-				${vidHere(v) && !onPage ? html`<span class="tile art-sm vthumb" key="v" ref=${slot}></span>` : html`<span class="tile art-sm" key="a"><${Art} src=${coverUrl(v.kind === 'video' ? v.path : v.cover)} seed=${v.path} kind=${v.kind} /></span>`}<span class="grow"><div class="t ell">${v.title}</div><div class="m ell">${v.artist || targetLabel(s.target)}${!v.here && bgShown() ? ' · in the background' : ''}</div></span></div>
+				${vidHere(v) && !onPage ? html`<span class="tile art-sm vthumb" key="v" ref=${slot}></span>` : html`<span class="tile art-sm" key="a"><${Art} src=${coverUrl(v.kind === 'video' ? v.path : v.cover)} seed=${v.path} kind=${v.kind} /></span>`}<span class="grow"><div class="t ell">${v.title}</div><div class="m ell">${fin ? 'Finished' + (v.source && v.source.title ? ' · ' + v.source.title : '') : v.artist || targetLabel(s.target)}${!v.here && bgShown() ? ' · in the background' : ''}</div></span></div>
 			${likable(v) && html`<${LikeBtn} v=${v} cls="ib" /><button class=${'ib' + (s.addOpen ? ' open' : '')} aria-label="Add to playlist" title="Add to playlist" aria-haspopup="dialog" aria-expanded=${!!s.addOpen} onClick=${e => addToPlaylist([v.path], v.title, e.currentTarget)}><${Icon} n="pl-add" k=${2} /></button>`}</div>
 		<div class="right">
 			<button class=${'ib opt' + (v.shuffled ? ' on' : '')} aria-label="Shuffle" title=${v.shuffled ? 'Shuffle: On' : 'Shuffle: Off'} aria-pressed=${!!v.shuffled} onClick=${ctl.shuffle} disabled=${off}><${Icon} n="shuffle" k=${2} /></button>
@@ -211,7 +215,7 @@ if (location.search.includes('debug')) {
 		else if (k === 'click') { const b = [...document.querySelectorAll('button')].find(x => x.offsetParent && (x.textContent.trim() === v || x.getAttribute('aria-label') === v)); if (b) b.click(); }
 	}, 2500 + i * 1500));
 }
-if (location.search.includes('debug')) window.__bp = { store, set, closePanel, setTarget, continueHere, B, C, SUBS, startUpload, entriesFromDrop, browserPlay, toast, go, goDown, connFail, el, ctl };	// for the headless tests
+if (location.search.includes('debug')) window.__bp = { store, set, closePanel, setTarget, continueHere, B, C, SUBS, startUpload, entriesFromDrop, browserPlay, toast, go, goDown, connFail, el, ctl, view, S };	// for the headless tests
 // the icons first (their sizes come from the sprite), but never a blank page waiting for them
 (async () => {
 	let rendered = false;

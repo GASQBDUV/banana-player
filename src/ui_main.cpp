@@ -112,11 +112,28 @@ namespace bp
 			return true;
 		}
 		if (b != Button::X) return false;
+		// X: round In order → Loop all → Loop one → Shuffle (Shuffle with Loop all: it never stops) → In order. Shuffle
+		// and Loop are two settings (the web sets each on its own): any Shuffle goes to In order next
+		// (docs/design/session.md §14). The song playing plays on; Next follows the hidden order
+		SessionHost& sh = SessionHost::get();
 		Settings s = p.settings;
-		s.loop = (s.loop + 1) % LOOPS;
+		bool shuffle = !s.shuffle && s.loop == LOOP_ONE;
+		s.loop = s.shuffle ? LOOP_OFF : shuffle ? LOOP_ALL : s.loop + 1;
 		p.setSettings(s);
-		p.osd(loopLabel(s.loop));
+		sh.setShuffle(shuffle);
+		p.osd(modeLabel(p));
 		return true;
+	}
+
+	int Ui::playMode(const Player& p) const
+	{
+		return p.settings.shuffle ? MODE_SHUFFLE : std::clamp(p.settings.loop, 0, LOOPS - 1);
+	}
+
+	std::string Ui::modeLabel(const Player& p) const
+	{
+		if (!p.settings.shuffle) return p.settings.loop == LOOP_OFF ? "In order" : loopLabel(p.settings.loop);
+		return p.settings.loop == LOOP_ALL ? "Shuffle" : p.settings.loop == LOOP_ONE ? "Shuffle \xC2\xB7 Loop one" : "Shuffle \xC2\xB7 Once through";
 	}
 
 	bool Ui::photoKey(Button b, Player& p)
@@ -372,7 +389,7 @@ namespace bp
 		{
 			std::string status = p.loading() ? "Loading" + std::string(SDL_GetTicks() / 400 % 4, '.') : predicting(p) ? (SessionHost::get().pageWaits() ? "Waiting for " : pagePlaying() ? "Playing in " : "Paused in ") + pageName()
 				: p.paused ? "Paused" : "Playing";
-			if (p.source().shuffled) status += " \xC2\xB7 Shuffle";
+			if (p.settings.shuffle) status += " \xC2\xB7 Shuffle";
 			if (std::fabs(p.speed - 1) > 1e-6) status += " \xC2\xB7 " + speedLabel(p.speed);
 			if (!hotkeys) status += " \xC2\xB7 buttons off";
 			int x = 24;
@@ -466,10 +483,25 @@ namespace bp
 					break;
 				}
 				case Button::None: label = "Add"; g = addFlashUntil && SDL_GetTicks() < addFlashUntil ? &G_CHECK : &G_PL_ADD; off = !actions; break;
-				case Button::R: label = "Next"; g = &G_NEXT; off = p.index() + 1 >= p.count(); break;
+				case Button::R:
+				{
+					// (Shuffle: the last of its hidden order, with no Loop all, has no Next)
+					const Session& ss = SessionHost::get().session();
+					label = "Next";
+					g = &G_NEXT;
+					off = ss.index >= 0 && ss.shuffle && p.currentPath() == ss.queue[ss.index] ? !hasNext(ss) : p.index() + 1 >= p.count();
+					break;
+				}
 				// music: loop, Sound (or chapters), the Display popup; a video: audio, subtitles, picture size
 				case Button::X:
-					if (p.playingAudio()) { label = LOOP_SHORT[std::clamp(p.settings.loop, 0, LOOPS - 1)]; g = &G_LOOP; }
+					if (p.playingAudio())
+					{
+						// (the mode: the Loop's mark and word, or Shuffle's mark and "On" (Shuffle with Loop all), "One" or
+						// "Once" for the pairs the web can set; "Shuffle" doesn't fit beside it)
+						int mode = playMode(p);
+						label = mode != MODE_SHUFFLE ? LOOP_SHORT[mode] : p.settings.loop == LOOP_ALL ? "On" : p.settings.loop == LOOP_ONE ? "One" : "Once";
+						g = mode == MODE_SHUFFLE ? &G_SHUFFLE : &G_LOOP;
+					}
 					break;
 				case Button::Select:
 					if (!p.playingAudio()) { label = aspectName(p.aspect); break; }

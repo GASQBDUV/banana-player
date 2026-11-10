@@ -199,7 +199,7 @@ function PlaylistView({ id }) {
 		it.p && { label: 'Show in Files', icon: 'folder', fn: () => showInFiles(it.p) }], { anchor, seed: it.p || it.net, kind: kindOfName(it.p || it.net || '') });
 	if (err) return html`<div class="page"><${Empty} icon="alert" title="Couldn't open this playlist" sub=${err} button="Try again" onClick=${() => load(false)} /></div>`;
 	if (!pl) return html`<div class="page">${slow ? html`<${Skeleton} />` : null}</div>`;
-	const nowV = view(), nowPath = nowV.has ? nowV.path : '';
+	const nowV = view(), nowPath = nowV.has && !nowV.finished ? nowV.path : '';
 	const toggleSel = uid => setSel(x => { const n = new Set(x); n.has(uid) ? n.delete(uid) : n.add(uid); return n; });
 	return html`<div class=${'page ' + (selMode ? 'pl-sel' : '')}>
 		<div class="phead" style="padding-bottom:0"><div class="crumbs"><nav><button aria-label="Back to playlists" onClick=${() => go('#/playlists')}><${Icon} n="left" k=${1} />Playlists</button></nav></div></div>

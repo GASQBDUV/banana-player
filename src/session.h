@@ -48,11 +48,25 @@ namespace bp
 	{
 		int kind = 0;
 		std::string title, id;
-		bool shuffled = false;
-		bool operator==(const SessionSource& o) const { return kind == o.kind && title == o.title && id == o.id && shuffled == o.shuffled; }
+		bool operator==(const SessionSource& o) const { return kind == o.kind && title == o.title && id == o.id; }
 	};
 
 	// the last word of one origin (the idempotency store): a retry with a seq at or under it gets this back
+	// a list that played to its end by itself (Ended on its last item, no loop): what the pages keep showing (the last
+	// item, the list to play again from any row) instead of nothing. index -1: none
+	struct Finished
+	{
+		std::vector<std::string> queue;	// real paths, the list as it played
+		int index = -1;	// its last item's place in queue
+		SessionSource source;
+		double dur = 0;	// that item's length, as its output said
+		bool audioOnly = false;
+		bool operator==(const Finished& o) const
+		{
+			return queue == o.queue && index == o.index && source == o.source && dur == o.dur && audioOnly == o.audioOnly;
+		}
+	};
+
 	struct OriginSeen
 	{
 		std::string origin;
@@ -79,6 +93,12 @@ namespace bp
 		int64_t posAt = 0;
 		double speed = 1;
 		int loop = SESSION_LOOP_OFF;
+		// the play mode Shuffle (the handheld's setting, as loop; one of four modes, so loop is off with it, I13). The
+		// queue keeps its own order (what everyone sees); order is the hidden play order while shuffled: the queue's
+		// places, each once, the item picked first (made by an Open, Shuffle on). Next and an item's end go along it,
+		// Previous back; its last played, the list ends as In order. Empty with Shuffle off or nothing playing
+		bool shuffle = false;
+		std::vector<int> order;
 		TrackPick audio, sub;
 		Output out, pref;	// out: plays now; pref: where picks go (a browser that couldn't play one stays pref)
 		uint64_t outV = 0, itemV = 0, playV = 0, seekN = 0;	// the v of the last output / item / play-state change
@@ -90,12 +110,18 @@ namespace bp
 		// the output (a browser) was refused the sound without a tap (its autoplay rule): it waits for one there, the
 		// wish still to play, the place frozen. Cleared by its play (Pos playing), a pause, a reload or another output
 		bool blocked = false;
+		// the list that just ended by itself (nothing plays meanwhile: index -1). Set only by Ended at the end of a list;
+		// gone once anything plays (any apply that leaves an item) and by Stop (Stop means stop)
+		Finished ended;
 		// host timers (not published, not a change of v): when this load was asked for; the output's tab gone since
 		int64_t loadAt = 0, goneAt = 0;
 		std::string goneTab;
 		std::vector<OriginSeen> seen;	// the last SEEN_MAX origins, least recently used first
 	};
 
+	// with Shuffle: where the item is in the hidden order (-1 none). Next has somewhere to go (either mode)
+	int shufflePlace(const Session& s);
+	bool hasNext(const Session& s);
 	// where it has got to by now: pos, run on while it plays on a loaded output (not one waiting for a tap), within the
 	// item's length
 	double posNow(const Session& s, int64_t now);
@@ -109,7 +135,7 @@ namespace bp
 	enum class IntentType
 	{
 		Open, Play, Pause, Seek, SeekBy, Step, SetAudio, SetSub, SetSpeed, SetLoop, SetOutput, Stop, PhotoPark,
-		PhotoResume, FileGone, Loaded, Pos, Ended, CantPlay, Tick, TabGone, TabBack, Slept, Woke, Blocked
+		PhotoResume, FileGone, Loaded, Pos, Ended, CantPlay, Tick, TabGone, TabBack, Slept, Woke, Blocked, SetShuffle
 	};
 	const char* intentName(IntentType t);
 
@@ -136,6 +162,9 @@ namespace bp
 		int n = 0;	// Step
 		double speed = 1;	// SetSpeed
 		int loop = 0;	// SetLoop
+		bool on = false;	// SetShuffle: the mode on or off (nothing reloads)
+		// Open, SetShuffle: the host's random number for Shuffle's order (the reducer stays deterministic)
+		uint64_t rnd = 0;
 		std::string path;	// FileGone; TabGone / TabBack: the tab
 		uint64_t load = 0;	// reports
 		double dur = 0;	// Loaded
@@ -179,8 +208,9 @@ namespace bp
 	// "v3→v4 fx=[HhLoad,HhPlay]" or "rejected (stale)": a log line's tail
 	std::string describe(const Session& old, const Intent& i, const Result& r);
 	// the session as the pages get it (the state's "session"): {boot, v, out {kind, tab}, pref, load, loaded, index,
-	// file, queue, qindex, playing, pos, dur, speed, audio, sub (picks: {set, ord, of, lang, label, external}), parked,
-	// error}. Paths go through virt; one it gives "" for (the web doesn't serve it) is left out of queue (qindex: the
+	// file, queue, qindex, source {kind, title, id}, shuffle (the mode), playing, pos, dur, speed, audio, sub (picks: {set, ord, of, lang, label, external}), parked,
+	// error, ended (null, or {queue, index, source {kind, title, id}, dur, audio}: the list that ended by
+	// itself; null too when its last item isn't served)}. Paths go through virt; one it gives "" for (the web doesn't serve it) is left out of queue (qindex: the
 	// item's place in what's left, -1 if it went). pos is posNow at now
 	std::string sessionJson(const Session& s, int64_t now, const std::function<std::string(const std::string&)>& virt);
 }

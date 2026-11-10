@@ -1,4 +1,5 @@
 #include "ui.h"
+#include "session_host.h"
 #include "format.h"
 #include "playlist.h"
 #include "netpath.h"
@@ -107,10 +108,11 @@ namespace bp
 		for (int i = 0; i < n; i++) order[i] = i;
 		if (shuffle)
 		{
-			// a one-off order (Loop all plays it again as it is)
+			// Shuffle play: the play mode Shuffle (it lasts: the songs after are picked at random, each once), from a
+			// random item; the list keeps its own order (docs/design/session.md §14)
 			std::random_device rd;
-			order = shuffleOrder(n, -1, ((uint64_t)rd() << 32) ^ rd() ^ SDL_GetTicks());
-			index = 0;
+			index = (int)(rd() % (unsigned)n);
+			SessionHost::get().setShuffle(true);
 		}
 		playRequest = {};
 		for (int i : order) playRequest.paths.push_back(pl.entries[i].path);
@@ -118,7 +120,6 @@ namespace bp
 		playRequest.source.kind = SourceKind::Playlist;
 		playRequest.source.title = pl.name;
 		playRequest.source.id = pl.file;
-		playRequest.source.shuffled = shuffle;
 		plOrder = order;
 		plOrderId = pl.file;
 		sideAsked.clear();
