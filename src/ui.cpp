@@ -583,7 +583,8 @@ namespace bp
 		// the select mode's bar: its keys' (Cancel leaves from any folder)
 		if (id == SEL_ALL) { selKey(Button::Select, p); return false; }
 		if (id == SEL_MOVE) { selKey(Button::Y, p); return false; }
-		if (id == SEL_ACT) { selKey(Button::X, p); return false; }
+		// (the act itself, not its key: adding, X is Cancel and Y adds)
+		if (id == SEL_ACT) { removeArmed = removeArmed && selMode == SEL_EDIT; dropArmed = 0; selAct(p); return false; }
 		// (Cancel shows X's key, so it asks twice as X does; the header's ✕ leaves at once)
 		if (id == SEL_CANCEL) { selBack(p, false); return false; }
 		if (id == MOVE_CANCEL || id == MOVE_DONE) { moveEnd(id == MOVE_DONE, p); return false; }

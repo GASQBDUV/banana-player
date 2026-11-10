@@ -49,7 +49,8 @@ twice quits (while something plays, **B** does nothing on Home and **SELECT** go
 
 Inside a section the header reads its name with four markers beside it, the open one lit: **L/R** go to the section
 before or after, or tap a marker. Each section opens where you left it (its top if that folder or playlist is gone),
-from L/R, a marker or its tile on Home. **B** goes up a folder, and from the section's top back to Home, on its
+from L/R, a marker or its tile on Home; the **Playlists** tile on Home always opens the list of playlists, the cursor on
+the one you were in. **B** goes up a folder, and from the section's top back to Home, on its
 tile.
 
 Folders come first, then files in natural order (episode 2 before episode 10). Each row has an icon (folder, video,
