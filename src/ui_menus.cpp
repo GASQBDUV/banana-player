@@ -197,6 +197,7 @@ namespace bp
 	void Ui::closeMenu(Player& p)
 	{
 		inMenu = false;
+		playOnOpen = false;
 		// (over what plays behind the browser: back to the browser)
 		if (playerShown(p)) { page = Page::Main; return; }
 		// the browser, back in its folder (and on its row), listed again (a setting can change what it lists)
@@ -876,9 +877,154 @@ namespace bp
 
 	std::vector<int> Ui::playingRows() const
 	{
-		// behind the browser: Now playing first (back to the player); Stop last, either way
-		if (bgPlay) return {PR_NOW, PR_LIKE, PR_ADD, PR_SHOW, PR_INFO, PR_STOP};
-		return {PR_LIKE, PR_ADD, PR_SHOW, PR_INFO, PR_STOP};
+		// behind the browser: Now playing first (back to the player); Play on while a page could play it; Stop last
+		std::vector<int> r;
+		if (bgPlay) r.push_back(PR_NOW);
+		r.insert(r.end(), {PR_LIKE, PR_ADD});
+		if (playOnShown()) r.push_back(PR_PLAYON);
+		r.insert(r.end(), {PR_SHOW, PR_INFO, PR_STOP});
+		return r;
+	}
+
+	// ---- Play on: where it plays (the Session's output), chosen here ----
+
+	std::vector<Ui::OutChoice> Ui::outChoices() const
+	{
+		std::vector<OutChoice> out{{"", "Handheld"}};
+#ifdef BP_WEB
+		if (web && web->running())
+			for (auto& t : web->playTabs()) out.push_back({t.id, t.name});
+#endif
+		// (the output's page gone a moment, in its grace: still there to pick, or to leave)
+		const Session& s = SessionHost::get().session();
+		if (s.out.kind == OutKind::Browser && std::none_of(out.begin(), out.end(), [&](const OutChoice& c) { return c.tab == s.out.tab; }))
+			out.push_back({s.out.tab, pageName()});
+		return out;
+	}
+
+	bool Ui::playOnShown() const { return outChoices().size() > 1; }
+
+	std::string Ui::pageName() const
+	{
+		const Session& s = SessionHost::get().session();
+#ifdef BP_WEB
+		if (web && s.out.kind == OutKind::Browser) return web->tabName(s.out.tab);
+#endif
+		return "Browser";
+	}
+
+	std::string Ui::outputName() const { return SessionHost::get().pageIsOutput() ? pageName() : "Handheld"; }
+
+	void Ui::openPlayOn()
+	{
+		playOnOpen = true;
+		pressedBtn = -1;
+		// on the first that isn't where it plays (the one wanted, most of the time)
+		auto list = outChoices();
+		const Session& s = SessionHost::get().session();
+		std::string cur = SessionHost::get().pageIsOutput() ? s.out.tab : "";
+		playOnCursor = 0;
+		for (int i = 0; i < (int)list.size(); i++)
+			if (list[i].tab != cur) { playOnCursor = i; break; }
+		playOnScroll = std::max(0, playOnCursor - PLAYON_SHOWN + 1);
+	}
+
+	void Ui::playOnChoose(int i, Player& p)
+	{
+		auto list = outChoices();
+		playOnOpen = false;
+		pressedBtn = -1;
+		if (i < 0 || i >= (int)list.size()) return;
+		SessionHost& sh = SessionHost::get();
+		std::string cur = sh.pageIsOutput() ? sh.session().out.tab : "";
+		if (list[i].tab == cur) return;	// where it plays already: just closed
+		fprintf(stderr, "ui: play on %s\n", list[i].tab.empty() ? "the handheld" : list[i].tab.c_str());
+		sh.sendTo(list[i].tab.empty() ? handheldOut() : browserOut(list[i].tab));
+		if (list[i].tab.empty()) p.osd(sh.session().playing ? "Playing on the handheld" : "On the handheld");
+		// on the playing screen, where what it does next shows (the top panel names the page)
+		closeMenu(p);
+		showPlayer();
+	}
+
+	bool Ui::playOnKey(Button b, Player& p)
+	{
+		int n = (int)outChoices().size();
+		playOnCursor = std::min(playOnCursor, n - 1);
+		switch (b)
+		{
+		case Button::Up: playOnCursor = (playOnCursor + n - 1) % n; break;
+		case Button::Down: playOnCursor = (playOnCursor + 1) % n; break;
+		case Button::A: playOnChoose(playOnCursor, p); return true;
+		case Button::B: case Button::Start: playOnOpen = false; return true;
+		default: return true;
+		}
+		if (playOnCursor < playOnScroll) playOnScroll = playOnCursor;
+		if (playOnCursor >= playOnScroll + PLAYON_SHOWN) playOnScroll = playOnCursor - PLAYON_SHOWN + 1;
+		return true;
+	}
+
+	bool Ui::playOnPointer(const Pointer& pt, int x, int y, Player& p)
+	{
+		int n = (int)outChoices().size();
+		if (pt.kind == Pointer::Down)
+		{
+			// outside the box: closed; a row: chosen as the finger lifts on it
+			if (!playOnBox().hit(x, y)) { playOnOpen = false; swallowTouch = true; return false; }
+			pressedBtn = -1;
+			for (int i = playOnScroll; i < n && i < playOnScroll + PLAYON_SHOWN; i++)
+				if (playOnRow(i).hit(x, y)) pressedBtn = PLAYON_ROW + i;
+			return false;
+		}
+		if (pt.kind == Pointer::Up)
+		{
+			int id = pressedBtn;
+			pressedBtn = -1;
+			if (id >= PLAYON_ROW && id < PLAYON_ROW + n && playOnRow(id - PLAYON_ROW).hit(x, y))
+			{
+				playOnCursor = id - PLAYON_ROW;
+				playOnChoose(playOnCursor, p);
+			}
+		}
+		return false;
+	}
+
+	void Ui::drawPlayOn(const Player& p)
+	{
+		auto list = outChoices();
+		int n = (int)list.size();
+		playOnCursor = std::min(playOnCursor, n - 1);
+		Rect box = playOnBox();
+		drawDialog(box, "Play on");
+		std::string title = !p.title.empty() ? p.title : entryTitle(p.currentPath());
+		drawTextMid("Where " + title + " plays.", 0, DIM, box.x + box.w / 2, box.y + 58, box.w - 40, 2);
+		drawTextMid("Its place and tracks come along.", 0, DIM, box.x + box.w / 2, box.y + 80, box.w - 40, 2);
+		SessionHost& sh = SessionHost::get();
+		std::string cur = sh.pageIsOutput() ? sh.session().out.tab : "";
+		for (int i = playOnScroll; i < n && i < playOnScroll + PLAYON_SHOWN; i++)
+		{
+			Rect r = playOnRow(i);
+			bool at = i == playOnCursor, here = list[i].tab == cur;
+			if (pressedBtn == PLAYON_ROW + i) drawBox(r, PRESSED, R_BUTTON);
+			else if (at) drawFocus(r);
+			SDL_Color ink = at ? ACCENT : TEXT;
+			int mid = r.y + r.h / 2;
+			const Glyph& g = list[i].tab.empty() ? G_CARD : G_LAPTOP;
+			drawGlyphMid(g, r.x + 30, mid, ink);
+			int right = here ? 48 : 12;
+			if (here)
+			{
+				// where it plays now: ticked, and said under its name
+				drawGlyphMid(G_CHECK, r.x + r.w - 26, mid, ACCENT, 3);
+				bool hh = list[i].tab.empty();
+				std::string what = !hh && sh.pageWaits() ? "Waiting for a tap there"
+					: (hh ? !p.paused : sh.session().playing) ? "Playing now" : hh ? "Paused here" : "Paused there";
+				drawTextMid(list[i].name, 1, ink, r.x + 58, mid - 10, r.w - 58 - right);
+				drawTextMid(what, 0, at ? DIM_ON : DIM, r.x + 58, mid + 14, r.w - 58 - right);
+			}
+			else drawTextMid(list[i].name, 1, ink, r.x + 58, mid, r.w - 58 - right);
+		}
+		drawScrollBar(box.y + 106, PLAYON_SHOWN * 60 - 6, playOnScroll, PLAYON_SHOWN, n);
+		drawHints({{"UP/DOWN", "Move"}, {"A", "Play there"}, {"B", "Back"}});
 	}
 
 	bool Ui::playingKey(Button b, Player& p)
@@ -904,6 +1050,7 @@ namespace bp
 		case PR_LIKE: likeNow(p); return false;	// (the tab stays: the row says what it is now)
 		case PR_ADD: openAddOne(p.currentPath(), p.title, p.loaded ? p.duration : -1, p); return false;
 		case PR_NOW: showPlayer(); return false;
+		case PR_PLAYON: openPlayOn(); return false;
 		case PR_STOP:
 			// main stops it (the place kept); the menu closed first, so it lands where Stop leads
 			closeMenu(p);
@@ -984,6 +1131,11 @@ namespace bp
 				label = "Stop";
 				note.clear();	// (the default note is Info's)
 				ink = DANGER;
+				break;
+			case PR_PLAYON:
+				g = &G_LAPTOP;
+				label = "Play on";
+				note = outputName() + " \xE2\x80\xBA";
 				break;
 			case PR_SHOW:
 				g = &G_FOLDER;

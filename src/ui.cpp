@@ -121,8 +121,22 @@ namespace bp
 			pickerKey(b, p);
 			return false;
 		}
+		// Play on, over START › Playing
+		playOnOpen = playOnOpen && inMenu && page == Page::Playing && playingTabShown(p);
+		if (playOnOpen)
+		{
+			playOnKey(b, p);
+			return false;
+		}
 		displayOpen = displayOpen && displayShown(p);	// (the song gone under it: closed)
 		if (displayOpen) return displayKey(b, p);
+		// a page the output waits for a tap there to start the sound (the top panel says so): B plays here instead
+		if (b == Button::B && !inMenu && (page == Page::Main || page == Page::Browse) && SessionHost::get().pageWaits() &&
+			!ctxOpen && !pickerOpen && !popupShown(p) && selMode == SEL_NONE && !addPending.serial)
+		{
+			takeOver(p);
+			return false;
+		}
 		// Button hotkeys off: the buttons do nothing over a playing video (touch does it all); the pages opened from
 		// there by touch still take them
 		if (page == Page::Main && !p.settings.buttonHotkeys) return false;
@@ -570,7 +584,7 @@ namespace bp
 			if (p.playing()) openAddOne(p.currentPath(), p.title, p.loaded ? p.duration : -1, p);
 			return false;
 		}
-		if (id >= PLAY_ROW && id < PLAY_ROW + 6) return playingChoose(id - PLAY_ROW, p);
+		if (id >= PLAY_ROW && id < PLAY_ROW + 7) return playingChoose(id - PLAY_ROW, p);
 		// a song's line under the buttons, and its Sound button (Y's place, a song with no chapters): the Sound page
 		if (page == Page::Main && p.playingAudio() && (id == LINE1_BTN || (id == 6 && p.chapters.empty() && p.error.empty())))
 		{
@@ -646,6 +660,8 @@ namespace bp
 		if (quickOpen) return quickPointer(pt, x, y, p);
 		// Add to... over what plays (or the Playing tab) as over the browser
 		if (pickerOpen) return pickerPointer(pt, x, y, p);
+		playOnOpen = playOnOpen && inMenu && page == Page::Playing && playingTabShown(p);
+		if (playOnOpen) return playOnPointer(pt, x, y, p);
 		displayOpen = displayOpen && displayShown(p);
 		if (displayOpen) return displayPointer(pt, x, y, p);
 		// the header's web dashboard mark: its page, as the finger lifts on it
@@ -1050,6 +1066,14 @@ namespace bp
 				(p.netWaiting() ? "w" : "") + src.title + "|" + src.id;
 		}
 		photo += webSig(p);
+		// where it plays (the Playing tab's Play on row, the picker, the status line), and the pages it could
+		{
+			SessionHost& sh = SessionHost::get();
+			photo += "|out" + outputName() + (sh.pageWaits() ? "w" : "") + " " + std::to_string(playOnOpen) + std::to_string(playOnCursor) +
+				" " + std::to_string(playOnScroll);
+			if (page == Page::Playing || playOnOpen)
+				for (auto& c : outChoices()) photo += "," + c.name;
+		}
 		// Like: the heart's pop, the Add square's check, the picker's one file and its question
 		{
 			Uint32 now = SDL_GetTicks();

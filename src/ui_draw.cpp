@@ -439,6 +439,7 @@ namespace bp
 		if (inMenu) drawTabs(p);
 		if (ctxOpen && page == Page::Browse) drawBrowseMenu(p);
 		if (pickerOpen) drawPicker();
+		if (playOnOpen && inMenu && page == Page::Playing) drawPlayOn(p);
 		if (addPending.serial && page == Page::Browse) drawBusy();
 		if (popupShown(p)) drawUpdatePopup();
 		if (quickOpen) drawQuick(p);

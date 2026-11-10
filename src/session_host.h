@@ -54,6 +54,12 @@ namespace bp
 		// a page's "Play on handheld" of a new pick (/api/play to=handheld): the handheld the selected output before it
 		// opens (not run: what plays now is replaced, not moved)
 		void chooseOutput(const Output& to, const std::string& origin);
+		// the handheld's own "Play on" (START › Playing): the output moved where it says, as a page's switch moves it
+		// (SetOutput from "hh", live). Leaving the handheld, its place and tracks are reported first, so the page starts
+		// there with them; back here, it plays here if the session plays (a page waiting for a tap: B)
+		void sendTo(const Output& to);
+		// a browser is the output and waits for a tap there to start the sound (its autoplay rule refused it)
+		bool pageWaits() const { return pageIsOutput() && s.blocked; }
 		// the page sent a pick never answered it, or one it said it can't play: CantPlay for it (the handheld plays)
 		void pageCant(const std::string& reason);
 		// a track chosen on the handheld (its Audio & Subtitles page, the web's /api/track): the session's pick

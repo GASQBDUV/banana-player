@@ -12,6 +12,7 @@
 #include "levelwatch.h"
 #include "touch.h"
 #include "ui.h"
+#include "ui_glyphs.h"
 #include "session_host.h"
 #include "updater.h"
 #include "netstore.h"
@@ -403,7 +404,7 @@ int main(int argc, char** argv)
 		bool webForce = true;	// publish at the next turn whatever changed (a browser came, the handheld woke)
 		Uint32 webPublishedAt = 0;
 		int webRecentSent = -1;	// the Recent serial the pages were last told
-		int elsewhereShown = 0;	// the top panel's "Playing in your browser"
+		std::string elsewhereShown;	// the top panel's "Playing in Chrome on Mac" as drawn ("" none)
 #endif
 		Uint32 bottomId = bottom ? SDL_GetWindowID(bottom) : 0;
 
@@ -1069,8 +1070,15 @@ int main(int argc, char** argv)
 				bool elsewhere = webServer && webServer->running() && ui.pageIsOut() && player.playing() && player.paused;
 				// (+4: a song with the equalizer or an effect on, which the page doesn't play with: the card says so)
 				bool sound = player.playingAudio() && (player.settings.eqOn || player.settings.soundFx != SoundFx::None);
-				int shown = elsewhere ? (ui.pagePlaying() ? 2 : 1) + (sound ? 4 : 0) : 0;
-				if (shown != elsewhereShown) { player.showElsewhere(elsewhere, (shown & 3) == 2); elsewhereShown = shown; }
+				// (the page by name; waiting: it was refused the sound without a tap there, B plays here)
+				bool waiting = elsewhere && shadow.pageWaits();
+				std::string name = elsewhere ? ui.pageName() : "";
+				std::string shown = elsewhere ? std::to_string(ui.pagePlaying()) + std::to_string(sound) + std::to_string(waiting) + name : "";
+				if (shown != elsewhereShown)
+				{
+					player.showElsewhere(elsewhere, ui.pagePlaying(), name, waiting, G_LAPTOP_ROWS, G_LAPTOP.h);
+					elsewhereShown = shown;
+				}
 			}
 			// the web dashboard's live state: made only while a browser watches, sent when something but the clock
 			// changed (or the clock drifted), at most 4 times a second

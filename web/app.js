@@ -8,7 +8,7 @@ import { Art, Modal, Seek, Storage, coverUrl, useHeld, useLater, useMedia, useTi
 import { depth, filesHash, go } from './js/router.js';
 import { LikeBtn, addToPlaylist, likable, loadLikes, newPlaylistDialog, plUsed } from './js/plshared.js';
 import { Icon, dimsCache } from './js/icons.js';
-import { DevButton, LoopIcon, NowPlaying, closePanel, loopName, showTab, targetLabel } from './js/playing.js';
+import { DevButton, LoopIcon, NowPlaying, TapToPlay, closePanel, loopName, showTab, targetLabel } from './js/playing.js';
 import { cmpName, fmtTime, isIOS, throttled } from './js/util.js';
 import { Playlists } from './js/playlists.js';
 import { RECENT_ID } from './js/recent.js';
@@ -179,6 +179,7 @@ function Shell() {
 		${wide && html`<${PlayerBar} />`}
 		<input type="file" multiple hidden id="up-files" onChange=${upIn} />
 		<input type="file" hidden webkitdirectory id="up-dir" onChange=${upIn} />
+		${B.blocked && r.page !== 'playing' && html`<${TapToPlay} floating=${true} />`}
 		${s.lightbox && html`<${Lightbox} />`}
 		${s.help && html`<${HelpOverlay} />`}
 		${s.modals.map(m => html`<div class=${'mwrap' + (m.out ? ' out' : '')} key=${m.id}>${m.render(m.close)}</div>`)}

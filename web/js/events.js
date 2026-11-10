@@ -1,4 +1,4 @@
-import { TAB_ID, set, store } from './store.js';
+import { DEVICE_NAME, NO_HERE, TAB_ID, set, store } from './store.js';
 import { B, el, isPref, onSession, updateMediaSession } from './browser-player.js';
 import { markUsed } from './plshared.js';
 import { C, connFail, goDown, signOutHere } from './connection.js';
@@ -20,7 +20,8 @@ export function openSSE() {
 	// hidden, the page listens only while it plays, or while it's where picks go (a song picked on the handheld comes
 	// here, a locked phone too): the handheld taking over must stop it (two sounds otherwise)
 	if (es || (document.hidden && !playingHere() && !isPref()) || !store.authed || store.conn !== 'ok') return;
-	const me = es = new EventSource('/api/events?tab=' + TAB_ID);
+	// (its name and whether it can play: the handheld's Play on lists it)
+	const me = es = new EventSource('/api/events?' + new URLSearchParams({ tab: TAB_ID, name: DEVICE_NAME, play: NO_HERE ? '0' : '1' }));
 	let heard = false;
 	C.lastEvent = Date.now();
 	const on = (name, fn) => es.addEventListener(name, e => { heard = true; C.sseRetry = 0; C.lastEvent = Date.now(); let d = {}; try { d = JSON.parse(e.data || '{}'); } catch (x) {} fn(d); });

@@ -235,7 +235,7 @@ namespace bp
 		if (id == BUSY_CANCEL) return {152, 224, 336, 46};
 		if (id == WEB_NEWPIN) return {296, 384, 152, 52};
 		if (id == WEB_OFF) return {464, 384, 152, 52};
-		if (id >= PLAY_ROW && id < PLAY_ROW + 6) return playingRowRect(id - PLAY_ROW);
+		if (id >= PLAY_ROW && id < PLAY_ROW + 7) return playingRowRect(id - PLAY_ROW);
 		if (id == MINI_PP) return {MINI_BOX.x, MINI_BOX.y, 44, MINI_BOX.h};
 		if (id == MINI_BAR) return {MINI_BOX.x + 44, MINI_BOX.y, MINI_BOX.w - 44, MINI_BOX.h};
 		if (id >= PHOTO_BTN) return {0, 0, 0, 0};	// photoBtn's: they move with the pan area
@@ -370,7 +370,7 @@ namespace bp
 		}
 		else
 		{
-			std::string status = p.loading() ? "Loading" + std::string(SDL_GetTicks() / 400 % 4, '.') : predicting(p) ? (pagePlaying() ? "Playing in your browser" : "Paused in your browser")
+			std::string status = p.loading() ? "Loading" + std::string(SDL_GetTicks() / 400 % 4, '.') : predicting(p) ? (SessionHost::get().pageWaits() ? "Waiting for " : pagePlaying() ? "Playing in " : "Paused in ") + pageName()
 				: p.paused ? "Paused" : "Playing";
 			if (p.source().shuffled) status += " \xC2\xB7 Shuffle";
 			if (std::fabs(p.speed - 1) > 1e-6) status += " \xC2\xB7 " + speedLabel(p.speed);

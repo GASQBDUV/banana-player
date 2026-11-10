@@ -834,15 +834,16 @@ namespace bp
 		// a page's intent (docs/design/session.md §3): type, tab (its origin), seq, basis, and the type's fields.
 		// Open (q[]: the queue's virtual paths, index, t, skind folder|playlist, stitle, sid; to=browser|handheld when
 		// the pick says where), Step (n), SetOutput (to=handheld|browser, at), SetAudio / SetSub (a pick: ord, of, lang,
-		// label, external; off=1 subtitles off), and the reports Loaded (load, dur), Ended (load) and CantPlay (load,
-		// reason). The answer: {ok|rejected|dup, reason, v, session}
+		// label, external; off=1 subtitles off), and the reports Loaded (load, dur), Ended (load), CantPlay (load,
+		// reason) and Blocked (load, t: its play() refused without a tap; it waits for one). The answer:
+		// {ok|rejected|dup, reason, v, session}
 		s.Post("/api/intent", [w](const httplib::Request& req, httplib::Response& res) {
 			std::string type = value(req, "type"), tab = value(req, "tab");
 			static const std::pair<const char*, IntentType> TYPES[] = {{"Open", IntentType::Open}, {"Step", IntentType::Step},
 				{"Ended", IntentType::Ended}, {"Pos", IntentType::Pos}, {"Play", IntentType::Play}, {"Pause", IntentType::Pause},
 				{"Stop", IntentType::Stop}, {"SetOutput", IntentType::SetOutput},
 				{"SetAudio", IntentType::SetAudio}, {"SetSub", IntentType::SetSub}, {"Loaded", IntentType::Loaded},
-				{"CantPlay", IntentType::CantPlay}};
+				{"CantPlay", IntentType::CantPlay}, {"Blocked", IntentType::Blocked}};
 			Intent i;
 			bool known = false;
 			for (auto& t : TYPES)
@@ -862,6 +863,11 @@ namespace bp
 			{
 				i.t = std::max(0.0, atof(value(req, "t").c_str()));
 				i.playing = value(req, "playing") == "1";
+			}
+			if (i.type == IntentType::Blocked && req.has_param("t"))
+			{
+				i.hasT = true;
+				i.t = std::max(0.0, atof(value(req, "t").c_str()));
 			}
 			if (i.type == IntentType::Open)
 			{

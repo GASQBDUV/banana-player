@@ -1488,7 +1488,9 @@ namespace bp
 		mpv_command_async(mpv, 0, cmd);
 	}
 
-	void Player::showElsewhere(bool on, bool playing)
+	static std::string assText(std::string s);
+
+	void Player::showElsewhere(bool on, bool playing, const std::string& where, bool waiting, const char* const* glyph, int glyphH)
 	{
 		if (!on)
 		{
@@ -1497,8 +1499,39 @@ namespace bp
 			return;
 		}
 		std::string ev = "{\\an7\\pos(0,0)\\bord0\\shad0\\1c" + ass(TOP_CARD) + "\\1a&H00&\\p1}m 0 0 l 960 0 960 720 0 720{\\p0}\n";
-		ev += "{\\an5\\pos(480,320)\\bord0\\shad0\\fnPixelify Sans\\fs56\\1c" + ass(TOP_TITLE) + "}" + (playing ? "Playing" : "Paused") + " in your browser\n";
-		ev += "{\\an5\\pos(480,400)\\bord0\\shad0\\fnInter\\fs30\\1c" + ass(TOP_SUB) + "}Hold A to play here";
+		// the page's mark over the title (its cells 12 units square, centred on 480, 236)
+		if (glyph && glyphH > 0)
+		{
+			int w = 0;
+			std::string path;
+			for (int y = 0; y < glyphH; y++)
+			{
+				w = std::max(w, (int)strlen(glyph[y]));
+				for (int x = 0; glyph[y][x];)
+				{
+					if (glyph[y][x] != '#') { x++; continue; }
+					int e = x;
+					while (glyph[y][e] == '#') e++;
+					char r[96];
+					snprintf(r, sizeof r, "m %d %d l %d %d %d %d %d %d ", x * 12, y * 12, e * 12, y * 12, e * 12, (y + 1) * 12, x * 12, (y + 1) * 12);
+					path += r;
+					x = e;
+				}
+			}
+			char head[128];
+			snprintf(head, sizeof head, "{\\an7\\pos(%d,%d)\\bord0\\shad0\\1c%s\\p1}", 480 - w * 6, 236 - glyphH * 6, ass(TOP_TITLE).c_str());
+			ev += head + path + "{\\p0}\n";
+		}
+		// (a long name: the title smaller, kept on one line)
+		std::string title = std::string(waiting ? "Waiting for " : playing ? "Playing in " : "Paused in ") + assText(where);
+		int fs = title.size() > 34 ? 40 : title.size() > 26 ? 48 : 56;
+		ev += "{\\an5\\pos(480,340)\\bord0\\shad0\\q2\\fnPixelify Sans\\fs" + std::to_string(fs) + "\\1c" + ass(TOP_TITLE) + "}" + title + "\n";
+		if (waiting)
+		{
+			ev += "{\\an5\\pos(480,412)\\bord0\\shad0\\fnInter\\fs30\\1c" + ass(TEXT) + "}Tap Play here on that page to start the sound\n";
+			ev += "{\\an5\\pos(480,464)\\bord0\\shad0\\fnInter\\fs28\\1c" + ass(TOP_SUB) + "}B: play on the handheld instead";
+		}
+		else ev += "{\\an5\\pos(480,412)\\bord0\\shad0\\fnInter\\fs30\\1c" + ass(TOP_SUB) + "}Hold A to play here";
 		// a song with the equalizer or an effect on: the browser plays it without them (they're the handheld's)
 		if (isAudio && (settings.eqOn || settings.soundFx != SoundFx::None))
 			ev += "\n{\\an5\\pos(480,600)\\bord0\\shad0\\fnInter\\fs26\\1c" + ass(TOP_SUB) + "}Your equalizer and effects don't apply in the browser";

@@ -1,5 +1,5 @@
 import { html, render, useState, useEffect, useLayoutEffect, useRef, useMemo, useCallback } from '../vendor/htm-preact-standalone.module.js';
-import { intent, B, CUE_SIZES, SPEEDS, SUBS, assBox, setSpeed, toggleCaptions, browserPlay, chooseAudio, chooseSub, directAudio, nativeAudio, playingAudio, streamWhy, continueHere, ctl, cueStyle, el, handoffToHandheld, playParked, probe1, probeOK, setBrowserVol, setCueStyle, setTarget, sizeCues, view } from './browser-player.js';
+import { intent, B, S, playBlocked, CUE_SIZES, SPEEDS, SUBS, assBox, setSpeed, toggleCaptions, browserPlay, chooseAudio, chooseSub, directAudio, nativeAudio, playingAudio, streamWhy, continueHere, ctl, cueStyle, el, handoffToHandheld, playParked, probe1, probeOK, setBrowserVol, setCueStyle, setTarget, sizeCues, view } from './browser-player.js';
 import { AppMenu, Art, Empty, MoreDots, Seek, coverUrl, openSheet, palOf, useHeld, useMedia, useTick } from './components.js';
 import { NO_HERE, NO_HERE_WHY, Q_DESK, Q_WIDE, lsGet, lsSet, notify, phoneNow, set, store, useStore } from './store.js';
 import { baseName, chapterTitle, dirName, fmtDate, fmtSize, fmtTime, isIOS, kindOfName, throttled, titleFor, touchOnly, userTap } from './util.js';
@@ -153,6 +153,16 @@ function trackClass(p) {
 	if (seenTrack.p !== p) { seenTrack.p = p; seenTrack.cls = Date.now() - trackDirAt < 4000 ? (trackDir < 0 ? 'trk-prev' : 'trk-next') : 'trk-fade'; seenTrack.at = Date.now(); }
 	return Date.now() - (seenTrack.at || 0) < 600 ? seenTrack.cls || '' : '';
 }
+// the browser wouldn't start the sound without a tap (Play on from the handheld, mostly): one big button over the
+// media (floating: over the page, away from the player). The handheld meanwhile says it waits, and its B takes it back
+export function TapToPlay({ floating }) {
+	const title = B.meta ? B.meta.title : '', self = Date.now() - (S.selfAt || 0) < 5000;
+	const stop = e => e.stopPropagation();
+	return html`<div class=${'tapplay' + (floating ? ' float' : '')} onPointerUp=${stop} onClick=${e => { stop(e); playBlocked(); }} role="group" aria-label="Tap to play">
+		<button class="box yellow tap-btn" onClick=${e => { stop(e); playBlocked(); }}><${Icon} n="play" k=${3} />Tap to play</button>
+		<div class="tap-t ell">${self ? title : 'The handheld sent ' + title + ' here'}</div>
+		<div class="tap-s">Your browser needs one tap to start the sound</div></div>`;
+}
 function Media({ v, off, immersive, onCollapse }) {
 	const box = useRef();
 	// the one media element shows in the slot. It goes back to #holder as the slot leaves, before Preact takes the slot
@@ -230,6 +240,7 @@ function Media({ v, off, immersive, onCollapse }) {
 			${live && menu && !floatMenu && html`<${VidMenu} page=${menu} setPage=${setMenu} fs=${fs} box=${box} />`}
 		${pulse && html`<div class="mpulse" key=${pulse.id} aria-hidden="true"><${Icon} n=${pulse.k} k=${4} /></div>`}
 		${rip && html`<div class=${'mrip ' + rip.side} key=${rip.id} aria-hidden="true"><span>${rip.side === 'l' ? '−' + 5 * rip.n + ' s' : '+' + 10 * rip.n + ' s'}</span></div>`}
+		${v.here && B.blocked && html`<${TapToPlay} />`}
 	</div>`;
 }
 /* ---- the gear's menu on the video: Audio track, Subtitles, Speed, each a page of its own. It lives in the

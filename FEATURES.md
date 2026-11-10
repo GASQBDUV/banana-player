@@ -264,7 +264,9 @@ you played last is on Home.)
 
 - **Playing** (only while a song or video plays, and the tab it opens on, from the lists too): **Now playing** (from
   the lists: back to the playing screen), **Like** / **Liked**, **Add to playlist…** (with the playlists it's already
-  in), **Show in folder**, **Info** and **Stop** (the place is kept). See [Like and Add to playlist](#like-and-add-to-playlist).
+  in), **Play on** (while a [web dashboard](#web-dashboard) page that can play is open; it says where it plays now,
+  see [Play on](#play-on-from-the-handheld)), **Show in folder**, **Info** and **Stop** (the place is kept). See
+  [Like and Add to playlist](#like-and-add-to-playlist).
 - **Settings:** see [Settings](#settings).
 - **About:** version, licence and the libraries it uses.
 
@@ -474,7 +476,8 @@ handheld, carries on at 1:27"):
 - **In this browser**: plays the file on the phone or computer, and pauses the handheld. Here there's no equalizer,
   effects or handheld volume (a volume slider for the browser instead), and the chapters are the browser's own.
   Also on iPhone and iPad.
-- While the browser plays, the handheld shows **Playing in your browser** (or **Paused in your browser**) and its bar
+- While the browser plays, the handheld shows **Playing in Chrome on Mac** (the browser and device, as the browser
+  describes itself; or **Paused in …**) and its bar
   runs on with the browser's time. **A** (or a tap on **Play**/**Pause**) on the handheld plays and pauses the browser;
   the handheld stays quiet. **Hold A** (or hold the Play button) for 0.6 s to play it on the handheld instead, from where
   the browser was: the button fills as you hold, the top screen says **Playing on the handheld**, and the browser stops.
@@ -484,8 +487,8 @@ handheld, carries on at 1:27"):
   it was picked on. With **This browser** chosen, a song or video opened on the handheld (from the list, Recent, a
   playlist, Play folder, Shuffle play, the mini bar) or in another browser tab plays **in that browser**, in the
   handheld's list, and the handheld holds it paused, as if the browser had picked it. Picked fast, the last pick wins.
-  Only the switch, **Continue here**, **Play here** / **Play on handheld** and holding **A** change the choice: Stop
-  (on either side), the end of a list, pausing, a photo, a dropped connection and a file the browser can't play leave it
+  Only the switch, **Continue here**, **Play here** / **Play on handheld**, the handheld's **Play on** and holding **A**
+  change the choice: Stop (on either side), the end of a list, pausing, a photo, a dropped connection and a file the browser can't play leave it
   as it is. Switching in another tab moves it to that tab.
   These play on the handheld once, with the browser still chosen for the next one: files the browser can't play (AVI,
   AC3/DTS, WMA, APE…, picked anywhere, the browser's own Next included: the top screen says **This one plays on the
@@ -493,9 +496,23 @@ handheld, carries on at 1:27"):
   closing the photo, the handheld holds the browser's file again. Once the chosen tab has been closed (or lost its connection) for 10 seconds, the
   handheld is chosen again: what the browser played waits there paused at its place (**Your browser went · paused
   here**), and **Play** carries on. **Hold A** is still the way to bring the sound back to the handheld.
-  Leaving the handheld's player (**B**) changes nothing for the browser: its mini bar reads **Playing in your browser**
+  Leaving the handheld's player (**B**) changes nothing for the browser: its mini bar reads **Playing in Chrome on Mac**
   (tap its mark to play or pause the browser, hold the mark to take it over). **Stop** on the handheld stops the browser
   too (the browser stays chosen: the next pick plays there). **Stop** in the browser unloads the handheld's copy too.
+- <a id="play-on-from-the-handheld"></a>**Play on, from the handheld** (START › Playing › **Play on**, shown while at
+  least one signed-in dashboard page that can play is open, not over a photo): a list of where it can play, the
+  **Handheld** first, then each open page by its browser and device (**Chrome on Mac**, **Safari on iPhone**,
+  **Firefox on Windows**…; a second one of the same kind gets **2**; one that doesn't say reads **Browser**). The one
+  playing now is ticked (**Playing now**, **Paused there**). **Up/Down** and **A** (or a tap on a row) pick, **B**
+  goes back. Picking moves it exactly as the dashboard's switch does: the same place, the same audio and subtitles,
+  and the picked one is where picks go from then on. The picker closes on the playing screen.
+- **A browser that won't start the sound by itself** (Safari, and Chrome on a page nobody has tapped yet, refuse sound
+  a tap didn't ask for): the page shows one big **Tap to play** over the picture ("The handheld sent Sintel here · Your
+  browser needs one tap to start the sound"; over any page, if the player isn't showing). Meanwhile the handheld's top
+  screen says **Waiting for Chrome on Mac** · **Tap Play here on that page to start the sound** · **B: play on the
+  handheld instead**, and its status line **Waiting for Chrome on Mac**. **B** on the handheld (or **Handheld** in
+  Play on) plays it there instead, from the same place; **A** pauses it. One tap on the page plays it and the waiting
+  ends.
 - A dashboard in another tab or device, while a browser plays, is a remote for it: **Play**/**Pause**, seeking,
   chapters, **Previous**/**Next** and **Stop** act on what that browser plays (the sound stays there).
 - While the handheld plays something behind its list (its player left, not stopped), the dashboard's player says

@@ -18,6 +18,24 @@ export const TAB_ID = (() => {
 	} catch (e) { return fresh(); }
 })();
 
+// what the handheld calls this page in its Play on list ("Chrome on Mac", "Safari on iPhone"): the browser's own
+// description, nothing typed. iPadOS says it's a Mac (MacIntel) with a touchscreen. Only the handheld shows it
+export const DEVICE_NAME = (() => {
+	try {
+		const ua = navigator.userAgent || '', d = navigator.userAgentData, plat = d && d.platform || '';
+		// (Chromium on a real Mac says macOS in userAgentData; Safari and every iPad browser have none)
+		const touchMac = /Macintosh/.test(ua) && navigator.maxTouchPoints > 1 && plat !== 'macOS';
+		const os = /iPhone|iPod/.test(ua) ? 'iPhone' : /iPad/.test(ua) || touchMac ? 'iPad' : /Android/.test(ua) || plat === 'Android' ? 'Android'
+			: /CrOS/.test(ua) || /Chrome ?OS/i.test(plat) ? 'Chromebook' : plat === 'macOS' || /Macintosh|Mac OS X/.test(ua) ? 'Mac'
+			: plat === 'Windows' || /Windows/.test(ua) ? 'Windows' : plat === 'Linux' || /Linux/.test(ua) ? 'Linux' : '';
+		const brands = d && d.brands ? d.brands.map(b => b.brand).join(',') : '';
+		const br = /Edg(e|A|iOS)?\//.test(ua) || /Microsoft Edge/.test(brands) ? 'Edge' : /OPR\/|Opera/.test(ua) ? 'Opera'
+			: /SamsungBrowser/.test(ua) ? 'Samsung Internet' : /Firefox\/|FxiOS/.test(ua) ? 'Firefox' : /CriOS|Chrome\//.test(ua) ? 'Chrome'
+			: /Safari\//.test(ua) ? 'Safari' : '';
+		return br && os ? br + ' on ' + os : br || (os ? 'Browser on ' + os : 'Browser');
+	} catch (e) { return 'Browser'; }
+})();
+
 /* ================= store ================= */
 // Playing in the page was off on iPhone and iPad (Safari's history and audio session broke it once); on again for
 // testing there. true turns it off everywhere (the handheld plays, the page is the remote)

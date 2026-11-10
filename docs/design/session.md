@@ -116,6 +116,7 @@ Every intent: `{origin, seq, basis}` + its fields. `origin`: `"hh"` or a tab id;
 | report `Pos` | load, t, playing | report |
 | report `Ended` | load | report |
 | report `CantPlay` | load, reason (`format`, `net`, `error`) | report |
+| report `Blocked` | load, t? (a browser's `play()` refused without a tap: it waits for one; §12) | report |
 | `Tick` | — (timeouts; `now` is an argument of every apply) | host only |
 | `TabGone`, `TabBack` | tab | host only (from `WebServer` ClientsChanged) |
 | `Slept`, `Woke` | — | host only |
@@ -227,6 +228,7 @@ New route: `POST /api/intent` (JSON `{origin, seq, basis, type, …}`) → `{ok,
 | I8 | Reports only from the current output for the current `load` | rule 2 |
 | I9 | `0 ≤ posNow ≤ dur` once `dur` known; `playing ⇒ index ≥ 0 && !parked-on-handheld` | clamps in `posNow`/reducer |
 | I10 | Same `(origin, seq)` twice ⇒ same result, one effect set | rule 1 |
+| I11 | `blocked ⇒ playing && out = Browser && index ≥ 0 && loaded` | `Blocked` only then; cleared after any apply that pauses, reloads or moves the output (§12) |
 
 ### Failure modes
 
@@ -474,3 +476,23 @@ What moved, what went, and the choices made (the code and tests follow these):
   the handheld side while the browser plays (both land on the same file); Stop on the handheld then a pick there →
   the browser; a photo over the browser's song (the song plays on; the copy is held again after); hold A.
 
+## 12. Play on and the tap a browser wants (2026-11-10)
+
+- **Play on** (START › Playing on the handheld) is the dashboard's switch from the other side: `SessionHost::sendTo()`
+  sends `SetOutput` from `"hh"` (its place and tracks reported first, `reportHere()`, as for a page's switch). Nothing
+  new in the reducer: `pref` moves with it, as any `SetOutput` moves it.
+- **`blocked`** (published as `session.blocked`): the output, a browser, had its `play()` refused for want of a tap
+  (Safari; Chrome on a page with no user activation). The page reports **`Blocked`** (a report: from the output, for
+  its `load`; `t` its place when it knows it). The wish stays `playing` (nothing was paused by anyone), but nothing
+  sounds, so `posNow` doesn't run on while it waits; a `Pos` with `playing` (the tap came) ends it. `Blocked` while
+  the session is paused is rejected (`paused`), from the handheld `not-browser`.
+- It ends by itself, after any apply: whenever the session stops playing, the output changes, or the `load` moves
+  (Next, a hand-off, a Stop): a new load reports again if it must (I11). So the handheld's B is just `takeOver()`
+  (SetOutput here: `HhPlay` with `ao-reload`, the wish already playing), A is the usual `Pause`, and a tab gone 10 s
+  falls back paused as before.
+- Why a report and not `Pos(playing:0)` (what a refused `play()` sent before): that made the session paused, so the
+  handheld said "Paused in your browser" and A meant Play; the person had asked for it to play there, and the
+  handheld should say it waits and offer the way out. The page's own refusals while it is not the output, or of a
+  paused session, still report `Pos` as before.
+- Tests: three named cases in core-test (waits and ends with the tap; B plays here with `aoReload`; pause, Next and the
+  tab gone end it) and `Blocked` in the fuzz test's renderer reports.

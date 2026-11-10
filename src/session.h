@@ -87,13 +87,17 @@ namespace bp
 		double dur = 0;	// the item's length once Loaded (0: not known)
 		bool audioOnly = false;	// the item is a song
 		bool loaded = false;	// the output said Loaded for this load
+		// the output (a browser) was refused the sound without a tap (its autoplay rule): it waits for one there, the
+		// wish still to play, the place frozen. Cleared by its play (Pos playing), a pause, a reload or another output
+		bool blocked = false;
 		// host timers (not published, not a change of v): when this load was asked for; the output's tab gone since
 		int64_t loadAt = 0, goneAt = 0;
 		std::string goneTab;
 		std::vector<OriginSeen> seen;	// the last SEEN_MAX origins, least recently used first
 	};
 
-	// where it has got to by now: pos, run on while it plays on a loaded output, within the item's length
+	// where it has got to by now: pos, run on while it plays on a loaded output (not one waiting for a tap), within the
+	// item's length
 	double posNow(const Session& s, int64_t now);
 	// the handheld's mpv sounds only for this (I2)
 	inline bool hhShouldPlay(const Session& s) { return s.out.kind == OutKind::Handheld && s.playing && !s.parked && s.index >= 0; }
@@ -105,7 +109,7 @@ namespace bp
 	enum class IntentType
 	{
 		Open, Play, Pause, Seek, SeekBy, Step, SetAudio, SetSub, SetSpeed, SetLoop, SetOutput, Stop, PhotoPark,
-		PhotoResume, FileGone, Loaded, Pos, Ended, CantPlay, Tick, TabGone, TabBack, Slept, Woke
+		PhotoResume, FileGone, Loaded, Pos, Ended, CantPlay, Tick, TabGone, TabBack, Slept, Woke, Blocked
 	};
 	const char* intentName(IntentType t);
 
@@ -137,6 +141,7 @@ namespace bp
 		double dur = 0;	// Loaded
 		bool audioOnly = false;	// Loaded
 		bool playing = false;	// Pos
+		// Blocked: t (with hasT) is where the refused element stands
 		std::string reason;	// CantPlay: "format", "net", "timeout", "error"
 	};
 

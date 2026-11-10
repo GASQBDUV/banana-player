@@ -11,7 +11,7 @@ namespace bp
 	{
 		static const char* NAMES[] = {"Open", "Play", "Pause", "Seek", "SeekBy", "Step", "SetAudio", "SetSub", "SetSpeed",
 			"SetLoop", "SetOutput", "Stop", "PhotoPark", "PhotoResume", "FileGone", "Loaded", "Pos", "Ended", "CantPlay",
-			"Tick", "TabGone", "TabBack", "Slept", "Woke"};
+			"Tick", "TabGone", "TabBack", "Slept", "Woke", "Blocked"};
 		return NAMES[(int)t];
 	}
 
@@ -55,7 +55,7 @@ namespace bp
 	double posNow(const Session& s, int64_t now)
 	{
 		double p = s.pos;
-		if (s.playing && !s.parked && s.loaded && s.index >= 0 && now > s.posAt) p += (now - s.posAt) / 1000.0 * s.speed;
+		if (s.playing && !s.parked && s.loaded && !s.blocked && s.index >= 0 && now > s.posAt) p += (now - s.posAt) / 1000.0 * s.speed;
 		if (s.dur > 0) p = std::min(p, s.dur);
 		return std::max(0.0, p);
 	}
@@ -71,7 +71,7 @@ namespace bp
 				a.playing == b.playing && a.speed == b.speed && a.loop == b.loop && a.audio == b.audio && a.sub == b.sub &&
 				a.out == b.out && a.pref == b.pref && a.outV == b.outV && a.itemV == b.itemV && a.playV == b.playV &&
 				a.seekN == b.seekN && a.parked == b.parked && a.error == b.error && a.dur == b.dur &&
-				a.audioOnly == b.audioOnly && a.loaded == b.loaded && a.boot == b.boot;
+				a.audioOnly == b.audioOnly && a.loaded == b.loaded && a.blocked == b.blocked && a.boot == b.boot;
 		}
 
 		bool sameAll(const Session& a, const Session& b)
@@ -215,7 +215,7 @@ namespace bp
 					i.type == IntentType::Slept || i.type == IntentType::Woke;
 				if (host && i.origin != "hh") return "origin";
 				bool report = i.type == IntentType::Loaded || i.type == IntentType::Pos || i.type == IntentType::Ended ||
-					i.type == IntentType::CantPlay;
+					i.type == IntentType::CantPlay || i.type == IntentType::Blocked;
 				// rule 2: reports only from the output, for its current load
 				if (report)
 				{
@@ -436,6 +436,17 @@ namespace bp
 					n.posAt = now;
 					// the output's play state, unless it was sent before the last Play/Pause (that wish stands)
 					if (i.basis >= s.playV && n.playing != i.playing) n.playing = i.playing;
+					if (i.playing) n.blocked = false;	// it sounds: the tap came
+					return "";
+				case IntentType::Blocked:
+					// a browser that wouldn't start the sound by itself: it waits for a tap there (the handheld says so,
+					// B there plays here). Only while the wish is to play: paused, there's nothing to wait for
+					if (s.out.kind != OutKind::Browser) return "not-browser";
+					if (!s.playing) return "paused";
+					n.blocked = true;
+					n.loaded = true;
+					if (i.hasT) n.pos = clampPos(n, i.t);
+					n.posAt = now;
 					return "";
 				case IntentType::Ended:
 				{
@@ -586,6 +597,10 @@ namespace bp
 		std::vector<Effect> fx;
 		Ctx c{r.s, s, i, now, s.v + 1, fx};
 		std::string why = c.run();
+		// waiting for a tap lasts only while that output plays that load and the wish is still to play: a pause, a
+		// reload (Next, a hand-off), another output or a stop end it (a new load reports again if it must)
+		Session& w = r.s;
+		if (w.blocked && (!w.playing || w.out != s.out || w.index < 0 || w.load != s.load)) w.blocked = false;
 		if (!why.empty())
 		{
 			// all or nothing: the old session (only what it says may go out)
@@ -641,6 +656,8 @@ namespace bp
 		if (s.index < 0 && (s.playing || s.parked || !s.error.empty())) return "I7: nothing plays, yet playing/parked/error";
 		if (s.pos < 0 || (s.dur > 0 && s.pos > s.dur + 1e-9)) return "I9: pos outside [0, dur]";
 		if (s.playing && s.parked && s.out.kind == OutKind::Handheld) return "I9: playing while parked on the handheld";
+		if (s.blocked && (!s.playing || s.out.kind != OutKind::Browser || s.index < 0 || !s.loaded))
+			return "I11: waiting for a tap, yet not a browser output that should play";
 		if (s.seen.size() > SEEN_MAX) return "I10: the seen store over its size";
 		return "";
 	}
@@ -669,7 +686,7 @@ namespace bp
 			i.type != IntentType::Tick)
 			return std::string("pref: moved by ") + intentName(i.type);
 		bool report = i.type == IntentType::Loaded || i.type == IntentType::Pos || i.type == IntentType::Ended ||
-			i.type == IntentType::CantPlay;
+			i.type == IntentType::CantPlay || i.type == IntentType::Blocked;
 		if (report && r.reject.empty() && (i.origin != outOrigin(old) || i.load != old.load)) return "I8: a report from elsewhere taken";
 		for (auto& e : r.fx)
 		{
@@ -725,7 +742,7 @@ namespace bp
 		pick("audio", s.audio);
 		pick("sub", s.sub);
 		j.key("playV").num(s.playV).key("seekN").num(s.seekN);
-		j.key("parked").boolean(s.parked).key("error").str(s.error);
+		j.key("parked").boolean(s.parked).key("blocked").boolean(s.blocked).key("error").str(s.error);
 		return j.end().out();
 	}
 }

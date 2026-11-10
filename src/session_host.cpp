@@ -75,7 +75,7 @@ namespace bp
 			r = apply(s, i, now);
 		}
 		bool quiet = (i.type == IntentType::Tick && r.s.v == s.v && r.fx.empty()) ||
-			(i.type == IntentType::Pos && r.s.v == s.v) || r.reject == "stale-report";
+			((i.type == IntentType::Pos || i.type == IntentType::Blocked) && r.s.v == s.v) || r.reject == "stale-report";
 		if (!quiet)
 		{
 			std::string extra;
@@ -231,7 +231,9 @@ namespace bp
 		Result r = submit(i, true);
 		if (!r.reject.empty()) showHere = false;
 		// a pick for the handheld: on its file even where the session's item lags behind today's (steps c-e)
-		if (r.reject.empty() && (i.type == IntentType::SetAudio || i.type == IntentType::SetSub) && s.out.kind == OutKind::Handheld)
+		// and one made in a page that is the output: the handheld's held copy takes it too, so its Audio & Subtitles
+		// shows what plays and a hand-off back finds it set
+		if (r.reject.empty() && (i.type == IntentType::SetAudio || i.type == IntentType::SetSub) && (s.out.kind == OutKind::Handheld || holdsItem()))
 			picksWanted = true;
 		return r;
 	}
@@ -249,6 +251,16 @@ namespace bp
 		}
 		submit(i, true);
 		submit(make(IntentType::Play), true);
+	}
+
+	void SessionHost::sendTo(const Output& to)
+	{
+		if (to == s.out && to == s.pref) return;
+		if (to.kind != OutKind::Handheld) reportHere();
+		Intent i = make(IntentType::SetOutput);
+		i.hasOut = true;
+		i.out = to;
+		submit(i, true);
 	}
 
 	void SessionHost::chooseOutput(const Output& to, const std::string& origin)
@@ -411,7 +423,7 @@ namespace bp
 			}
 		}
 		// the session's picks on the handheld's copy, once its tracks are known
-		if (s.out.kind != OutKind::Handheld) picksWanted = false;
+		if (s.out.kind != OutKind::Handheld && !holdsItem()) picksWanted = false;
 		else if (picksWanted && p.playing() && p.loaded && !p.loading())
 		{
 			picksWanted = false;

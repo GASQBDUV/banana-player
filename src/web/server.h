@@ -112,6 +112,13 @@ namespace bp
 		int clients() const { return streams; }
 		// that tab's stream is open (its ?tab= id, any session); "" asks for any stream at all
 		bool tabConnected(const std::string& tab) const;
+		// the pages connected now that can play (their streams' ?play=, on unless 0), in the order they came, each with
+		// the name it gave (?name=, "Chrome on Mac"; none: "Browser"; a second of the same name gets " 2"). Only the
+		// handheld shows these (START › Playing › Play on)
+		struct Tab { std::string id, name; };
+		std::vector<Tab> playTabs() const;
+		// a tab's name as playTabs gives it (one gone a moment: the name it had), "Browser" if never heard of
+		std::string tabName(const std::string& tab) const;
 		// the browser's roots changed (a card in or out)
 		void setRoots(const std::vector<WebRoot>& roots);
 		std::vector<WebRoot> roots() const;
@@ -187,6 +194,10 @@ namespace bp
 		// each tab's stream (session + the tab's own id): a tab that reconnects (a reload, a dropped Wi-Fi) ends its
 		// old stream at once instead of holding a thread till the next ping finds it gone
 		std::map<std::string, uint64_t> tabStreams;
+		// each tab's name and whether it can play, from its last stream (kept a while after it goes: its name stays known)
+		struct TabInfo { std::string name; bool play = true; uint64_t since = 0; };
+		std::map<std::string, TabInfo> tabInfo;
+		bool tabUpLocked(const std::string& tab) const;
 		uint64_t streamSeq = 0;
 		std::string stateJson;
 		std::deque<Event> recent;

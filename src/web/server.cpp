@@ -531,14 +531,57 @@ namespace bp
 		return id;
 	}
 
-	bool WebServer::tabConnected(const std::string& tab) const
+	bool WebServer::tabUpLocked(const std::string& tab) const
 	{
-		if (tab.empty()) return streams > 0;
-		std::lock_guard<std::mutex> g(hubLock);
 		std::string end = "|" + tab;
 		for (auto& [key, token] : tabStreams)
 			if (key.size() >= end.size() && key.compare(key.size() - end.size(), end.size(), end) == 0) return true;
 		return false;
+	}
+
+	bool WebServer::tabConnected(const std::string& tab) const
+	{
+		if (tab.empty()) return streams > 0;
+		std::lock_guard<std::mutex> g(hubLock);
+		return tabUpLocked(tab);
+	}
+
+	// a page's own word for itself, as the handheld can draw it: printable ASCII (its fonts), trimmed, short
+	static std::string cleanTabName(const std::string& in)
+	{
+		std::string out;
+		for (char c : in)
+			if (c >= 0x20 && c < 0x7F && out.size() < 32) out += c;
+		while (!out.empty() && out.back() == ' ') out.pop_back();
+		size_t a = out.find_first_not_of(' ');
+		return a == std::string::npos ? "Browser" : out.substr(a);
+	}
+
+	std::vector<WebServer::Tab> WebServer::playTabs() const
+	{
+		std::lock_guard<std::mutex> g(hubLock);
+		std::vector<std::pair<uint64_t, std::string>> up;
+		for (auto& [tab, info] : tabInfo)
+			if (info.play && tabUpLocked(tab)) up.push_back({info.since, tab});
+		std::sort(up.begin(), up.end());
+		std::vector<Tab> out;
+		std::map<std::string, int> seen;
+		for (auto& [since, tab] : up)
+		{
+			const std::string& name = tabInfo.at(tab).name;
+			int n = ++seen[name];
+			out.push_back({tab, n > 1 ? name + " " + std::to_string(n) : name});
+		}
+		return out;
+	}
+
+	std::string WebServer::tabName(const std::string& tab) const
+	{
+		for (auto& t : playTabs())
+			if (t.id == tab) return t.name;
+		std::lock_guard<std::mutex> g(hubLock);
+		auto it = tabInfo.find(tab);
+		return it == tabInfo.end() ? "Browser" : it->second.name;
 	}
 
 	void WebServer::notify(const std::string& event, const std::string& dataJson)
@@ -587,7 +630,24 @@ namespace bp
 		s->key = tab.empty() ? "" : key;
 		{
 			std::lock_guard<std::mutex> g(hubLock);
-			if (!s->key.empty()) tabStreams[s->key] = s->token = ++streamSeq;
+			if (!s->key.empty())
+			{
+				tabStreams[s->key] = s->token = ++streamSeq;
+				// its name (it keeps its place in the list across reconnects while it's known)
+				TabInfo& info = tabInfo[tab];
+				if (!info.since) info.since = s->token;
+				info.name = cleanTabName(req.get_param_value("name"));
+				info.play = req.get_param_value("play") != "0";
+				// (a few dozen tabs known at most: the oldest not connected go)
+				while (tabInfo.size() > 48)
+				{
+					auto old = tabInfo.end();
+					for (auto it = tabInfo.begin(); it != tabInfo.end(); ++it)
+						if (!tabUpLocked(it->first) && (old == tabInfo.end() || it->second.since < old->second.since)) old = it;
+					if (old == tabInfo.end()) break;
+					tabInfo.erase(old);
+				}
+			}
 			s->gen = generation;
 			s->epoch = authEpoch;
 			// a reconnect gets what it missed, if it's still here; an id from before a restart is from nothing here

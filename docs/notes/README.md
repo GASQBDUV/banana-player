@@ -7,6 +7,7 @@ Write the way the rest of the repo does: plain and precise, with the why. Say wh
 
 ## Index
 
+- [2026-11-10 play on](2026-11-10-play-on.md): the handheld picks where it plays; page names, the refused `play()` (`Blocked`) and how to test it headless.
 - [2026-11-11 session migration](2026-11-11-session-migration.md): steps b–f of the one playback Session; the Stop-then-pick bug and what the owner will notice.
 - [2026-11-10 file durations](2026-11-10-file-durations.md): lengths in the file rows and Up next; header-only probes, the formats skipped, MP3 without Xing.
 - [2026-11-10 background playback](2026-11-10-background-playback.md): leaving the player keeps it playing; the leave/stop split and the browser-play bug it found.

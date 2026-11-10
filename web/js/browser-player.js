@@ -14,7 +14,7 @@ el.playsInline = true; el.preload = 'auto'; el.controls = false;
 document.getElementById('holder').appendChild(el);
 // parked: unloaded when the connection went, at that position (the page never plays it again by itself)
 // tok: grows with each item loaded here (an answer for an older one is dropped: a Direct Stream started for it)
-export const B = { active: false, queue: [], index: -1, source: null, meta: null, loop: 'no', error: false, leaving: false, parked: null, parkedPlaying: false, vol: Number(lsGet('bpVol') || 80), tok: 0 };
+export const B = { blocked: false, active: false, queue: [], index: -1, source: null, meta: null, loop: 'no', error: false, leaving: false, parked: null, parkedPlaying: false, vol: Number(lsGet('bpVol') || 80), tok: 0 };
 el.volume = B.vol / 100;
 // playing here with the page hidden (a locked phone): keep listening; paused and hidden: stop (battery)
 el.addEventListener('play', () => {
@@ -32,17 +32,38 @@ let posTimer = 0;
 // (the session's Pos report: only the output's, for its load. A play or pause made here first says so: Play / Pause)
 function sendPos() {
 	if (!B.active || !B.meta || B.leaving || B.parked != null || store.conn !== 'ok' || !el.getAttribute('src') || !isOutput() || B.meta.p !== S.s.file) return;
+	// (waiting for a tap: still waiting, at its place now; a Pos would say it's paused)
+	if (B.blocked && el.paused) { intent('Blocked', { load: S.s.load, t: bPos().toFixed(2) }).catch(() => {}); return; }
 	intent('Pos', { load: S.s.load, t: bPos().toFixed(2), playing: el.paused ? 0 : 1 }).catch(() => {});
 }
 for (const ev of ['play', 'pause', 'seeked']) el.addEventListener(ev, () => {
 	// (not the pause a file's end brings: that's its Ended, and the next one plays)
-	if (ev !== 'seeked' && !el.ended && isOutput() && B.active && B.meta && B.meta.p === S.s.file && S.s.playing === el.paused && !B.leaving)
+	if (ev === 'play' && B.blocked) { B.blocked = false; notify(); }	// (the tap came: Pos says it plays)
+	if (ev !== 'seeked' && !el.ended && !B.blocked && isOutput() && B.active && B.meta && B.meta.p === S.s.file && S.s.playing === el.paused && !B.leaving)
 		intent(el.paused ? 'Pause' : 'Play').catch(() => {});
 	sendPos();
 	clearInterval(posTimer); posTimer = 0;
 	if (!el.paused) posTimer = setInterval(() => { if (el.paused || !B.active) { clearInterval(posTimer); posTimer = 0; } else sendPos(); }, 10000);
 });
 el.addEventListener('emptied', () => { clearInterval(posTimer); posTimer = 0; });
+// it sounds: the tap the browser wanted came (the session hears it by the Pos above)
+el.addEventListener('playing', () => { if (B.blocked) { B.blocked = false; notify(); } });
+// play() refused. No tap yet (Safari, a Chrome page nobody touched: their autoplay rules) while the session wants it to
+// play here: Tap to play shows, and the session hears it waits for one (Blocked: the handheld says so, and its B plays
+// there instead). Anything else: the session hears it's paused, at its place once the element has it
+function refused(e) {
+	if (e && e.name === 'NotAllowedError' && isOutput() && S.s.playing && B.active && B.meta && B.meta.p === S.s.file && B.parked == null) {
+		if (!B.blocked) { B.blocked = true; notify(); }
+		intent('Blocked', Object.assign({ load: S.s.load }, el.readyState >= 1 ? { t: bPos().toFixed(2) } : {})).catch(() => {});
+		return;
+	}
+	if (el.readyState >= 1) sendPos(); else el.addEventListener('loadedmetadata', () => setTimeout(sendPos, 0), { once: true });
+}
+// Tap to play: within the tap (Safari wants play() inside it)
+export function playBlocked() {
+	if (!B.meta || B.parked != null) return;
+	el.play().then(() => { if (B.blocked) { B.blocked = false; notify(); } }).catch(e => toast(e && e.name === 'NotAllowedError' ? 'Your browser still won\u2019t start the sound' : "Couldn't play it here"));
+}
 for (const ev of ['play', 'pause', 'loadedmetadata', 'durationchange', 'waiting', 'playing', 'seeked']) el.addEventListener(ev, () => { updateMediaSession(); notify(); });
 el.addEventListener('ended', () => {
 	// a Direct Stream cut short (the connection dropped while paused, say): on from where it stopped
@@ -94,7 +115,7 @@ function startItem(items, i, source, m, pos, w, play) {
 	subsForFile(m, w.s);
 	const a = w.a != null && m && w.a !== directAudio(m) ? w.a : null;
 	// (refused, no tap: the session hears it's paused, at its place once the element has it)
-	const start = () => el.play().catch(() => { if (el.readyState >= 1) sendPos(); else el.addEventListener('loadedmetadata', () => setTimeout(sendPos, 0), { once: true }); });
+	const start = () => el.play().catch(refused);
 	// another audio track: Safari switches it in the file (once it knows its tracks); elsewhere a Direct Stream
 	// from pos, never the file first (its clock is the stream's)
 	if (a != null && !('audioTracks' in el) && !streamWhy(m, a)) {
@@ -116,7 +137,7 @@ function startItem(items, i, source, m, pos, w, play) {
 	if (!m) probe1(it.p).then(m2 => { if (!m2 || !B.meta || B.meta.p !== it.p) return; Object.assign(B.meta, { title: titleFor(it.p, m2.title), artist: m2.artist || '', album: m2.album || '', chapters: m2.chapters || [], duration: m2.duration || 0, media: m2 }); subsForFile(m2); notify(); });
 	updateMediaSession(); notify();
 }
-function unload() { el.pause(); B.remux = null; clearTimeout(remuxTimer); el.removeAttribute('src'); clearSubs(); el.load(); }
+function unload() { el.pause(); B.blocked = false; B.remux = null; clearTimeout(remuxTimer); el.removeAttribute('src'); clearSubs(); el.load(); }
 export function browserStop() {
 	B.leaving = true; unload();
 	Object.assign(B, { active: false, meta: null, queue: [], index: -1, error: false, parked: null, parkedPlaying: false, tok: B.tok + 1 });
@@ -198,9 +219,10 @@ export function playingAudio() {
 	return B.remux ? B.remux.a : directAudio(m);
 }
 // the chosen track: in place (Safari), the file itself (its default track), else a Direct Stream from here
-export async function chooseAudio(i) {
+// quiet: the session's pick followed here (made on the handheld), not sent back
+export async function chooseAudio(i, quiet) {
 	const m = B.meta && B.meta.media; if (!m || B.parked != null) return;
-	sendPick('SetAudio', audioPick(m, i));
+	if (!quiet) sendPick('SetAudio', audioPick(m, i));
 	if (nativeAudio()) { [...el.audioTracks].forEach((t, j) => t.enabled = j === i); notify(); return; }
 	if (i === playingAudio() && !B.switching) return;
 	if (i === directAudio(m)) { directPlay(bPos(), !el.paused); return; }
@@ -221,7 +243,7 @@ function directPlay(pos, play) {
 	B.remux = null; B.switching = null; clearTimeout(remuxTimer);
 	el.src = fileUrl(B.meta.p);
 	if (pos > 0) el.addEventListener('loadedmetadata', () => { el.currentTime = pos; }, { once: true });
-	if (play) el.play().catch(() => {});
+	if (play) el.play().catch(e => { if (e && e.name === 'NotAllowedError') refused(e); });
 	shiftSubs();
 	notify();
 }
@@ -236,7 +258,7 @@ async function remuxAt(a, t, play) {
 	B.remux = { a, base: r.start, pending: null };
 	B.switching = null;
 	el.src = '/api/remux?' + new URLSearchParams({ p, a, t: r.start.toFixed(3), tab: TAB_ID });
-	if (play) el.play().catch(() => {});
+	if (play) el.play().catch(e => { if (e && e.name === 'NotAllowedError') refused(e); });
 	shiftSubs();
 	notify();
 }
@@ -501,12 +523,13 @@ export const isOutput = () => outMe(S.s) && S.s.index >= 0;
 export const isPref = () => !!S.s && !!S.s.pref && S.s.pref.kind === 'browser' && S.s.pref.tab === TAB_ID;
 // where it has got to: the session's pos as published, run on since it came while it plays on a loaded output
 export function sessPos(ss, at) {
-	const p = ss.pos + (ss.playing && ss.loaded ? (Date.now() - at) / 1000 * (ss.speed || 1) : 0);
+	const p = ss.pos + (ss.playing && ss.loaded && !ss.blocked ? (Date.now() - at) / 1000 * (ss.speed || 1) : 0);
 	return Math.max(0, ss.dur > 0 ? Math.min(ss.dur, p) : p);
 }
 // seq: grows per tab, across reloads (the time), above what the handheld numbered this tab's old words
 let seqN = 0;
 export async function intent(type, o) {
+	if ((type === 'SetOutput' || type === 'Open') && o && o.to === 'browser') S.selfAt = Date.now();
 	const body = Object.assign({ type, tab: TAB_ID, seq: seqN = Math.max(seqN + 1, Date.now() * 1000), basis: Math.max(0, S.v) }, o);
 	let r = await post('/api/intent', body);
 	// a choice made over a state that moved on meanwhile (a file the page itself just opened): again, over the new one
@@ -545,9 +568,15 @@ export function onSession(ss) {
 	if (!me) S.load = -1;
 	// a Play / Pause or a seek made elsewhere (the handheld's A, its bar, a remote): this element follows
 	else if (B.active && B.meta && B.meta.p === ss.file && B.parked == null) {
-		if (ss.playV !== S.playV) { if (ss.playing && el.paused) el.play().catch(() => sendPos()); else if (!ss.playing && !el.paused) el.pause(); }
+		if (ss.playV !== S.playV) { if (ss.playing && el.paused) el.play().catch(refused); else if (!ss.playing && !el.paused) el.pause(); }
+		// (paused from elsewhere, or it plays: nothing to tap for)
+		if (B.blocked && (!ss.playing || !el.paused)) { B.blocked = false; notify(); }
 		if (ss.seekN !== S.seekN) { const t = sessPos(ss, S.at); if (Math.abs(bPos() - t) > 1) seekTo(t); }
-	}
+		// a track picked elsewhere (the handheld's Audio & Subtitles) while this file plays here: this element follows
+		const pk = JSON.stringify([ss.audio, ss.sub]);
+		if (S.picks != null && pk !== S.picks && B.meta.media) followPicks(B.meta.media, ss);
+		S.picks = pk;
+	} else S.picks = null;
 	S.playV = ss.playV; S.seekN = ss.seekN;
 }
 // the session's item here: its file, at its place, with its tracks, playing if it plays. One this browser can't have
@@ -583,6 +612,12 @@ function tracksFor(m, ss) {
 		else if (k >= 0) out.s = subs[k].i;	// (a picture one: subsForFile says it shows on the handheld only)
 	}
 	return out;
+}
+// the session's picks on the file playing here, when they differ from what it plays (tracksFor says why one can't)
+function followPicks(m, ss) {
+	const w = tracksFor(m, ss);
+	if (w.a != null && w.a !== playingAudio() && !(B.switching && B.switching.a === w.a)) chooseAudio(w.a, true);
+	if (w.s != null && w.s !== SUBS.chosen) chooseSub(w.s, true);
 }
 // this page's track as a pick (its place in its kind's list, as the handheld lists them in the same order)
 function audioPick(m, i) { const l = m && m.audio || [], x = l[i]; return x ? { ord: i, of: l.length, lang: x.lang || '', label: x.label, external: 0 } : null; }

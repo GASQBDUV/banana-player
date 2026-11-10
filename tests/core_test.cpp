@@ -3317,6 +3317,92 @@ static void testSessionNamed()
 		CHECK_EQ(m.go(first[0]).dup, false);
 		CHECK_EQ(m.s.pos, 0.0);
 	}
+	{
+		// Play on (the handheld's picker): a browser refused the sound without a tap waits for one, the wish kept, the
+		// place frozen; its play (Pos playing) ends the wait
+		Sim m;
+		m.open(5, 1);
+		m.loaded();
+		m.report(IntentType::Pos, "hh", m.s.load, 24, true);
+		m.output(browserOut("tabA"), "hh", m.s.v);
+		CHECK_EQ(m.s.out, browserOut("tabA"));
+		CHECK_EQ(m.s.pref, browserOut("tabA"));
+		CHECK_EQ(m.s.pos, 24.0);
+		CHECK_EQ(m.report(IntentType::Blocked, "hh", m.s.load).reject, std::string("stale-report"));
+		Intent b = m.mk(IntentType::Blocked, "tabA");
+		b.load = m.s.load;
+		b.hasT = true;
+		b.t = 24.2;
+		uint64_t v = m.s.v;
+		m.go(b);
+		CHECK_EQ(m.s.blocked, true);
+		CHECK_EQ(m.s.playing, true);
+		CHECK_EQ(m.s.loaded, true);
+		CHECK_EQ(m.s.v, v + 1);
+		m.now += 5000;
+		CHECK_EQ(posNow(m.s, m.now), 24.2);	// (nothing sounds: the place doesn't run on)
+		m.report(IntentType::Pos, "tabA", m.s.load, 24.2, true);
+		CHECK_EQ(m.s.blocked, false);
+		CHECK_EQ(m.s.playing, true);
+	}
+	{
+		// waiting for a tap: B on the handheld (SetOutput here) plays here, at the place, its sound reopened
+		Sim m;
+		m.open(5, 1);
+		m.loaded();
+		m.output(browserOut("tabA"), "hh", m.s.v);
+		Intent b = m.mk(IntentType::Blocked, "tabA");
+		b.load = m.s.load;
+		m.go(b);
+		CHECK_EQ(m.s.blocked, true);
+		m.fx.clear();
+		m.output(handheldOut(), "hh", m.s.v);
+		CHECK_EQ(m.s.blocked, false);
+		CHECK_EQ(m.s.out, handheldOut());
+		CHECK_EQ(m.s.playing, true);
+		CHECK_EQ(m.count(Effect::HhPlay, m.fx), 1);
+		CHECK_EQ(m.fx.back().aoReload, true);
+		// a pause, a Next, a stop end the wait; a paused session has nothing to wait for
+		Sim p;
+		p.open(5, 1, "tabA");
+		p.loaded();
+		Intent k = p.mk(IntentType::Blocked, "tabA");
+		k.load = p.s.load;
+		p.go(k);
+		p.toggle();
+		CHECK_EQ(p.s.blocked, false);
+		k = p.mk(IntentType::Blocked, "tabA");
+		k.load = p.s.load;
+		CHECK_EQ(p.go(k).reject, std::string("paused"));
+		p.toggle();
+		k = p.mk(IntentType::Blocked, "tabA");
+		k.load = p.s.load;
+		p.go(k);
+		CHECK_EQ(p.s.blocked, true);
+		uint64_t oldLoad = p.s.load;
+		p.step(1);
+		CHECK_EQ(p.s.blocked, false);
+		CHECK_EQ(p.s.out, browserOut("tabA"));
+		// (the old load's word comes late: dropped)
+		k = p.mk(IntentType::Blocked, "tabA");
+		k.load = oldLoad;
+		CHECK_EQ(p.go(k).reject, std::string("stale-report"));
+	}
+	{
+		// the waiting tab gone 10 s: the handheld, paused (never sound by itself), the wait over
+		Sim m;
+		m.open(3, 0, "tabA");
+		m.loaded();
+		Intent b = m.mk(IntentType::Blocked, "tabA");
+		b.load = m.s.load;
+		m.go(b);
+		m.host(IntentType::TabGone, "tabA");
+		m.now += TAB_GRACE_MS;
+		m.host(IntentType::Tick);
+		CHECK_EQ(m.s.out, handheldOut());
+		CHECK_EQ(m.s.playing, false);
+		CHECK_EQ(m.s.blocked, false);
+	}
 }
 
 // the property test: a model network (delay, reordering, 10 % duplicates, 5 % drops retried with the same seq), model
@@ -3406,8 +3492,10 @@ static bool fuzzSession(uint32_t seed, int steps)
 		i.seq = ++seqs[origin];
 		i.basis = v.v;
 		i.load = v.load;
-		int r = pick(20);
-		i.type = r < 6 ? IntentType::Loaded : r < 16 ? IntentType::Pos : r < 18 ? IntentType::Ended : IntentType::CantPlay;
+		int r = pick(22);
+		i.type = r < 6 ? IntentType::Loaded : r < 16 ? IntentType::Pos : r < 18 ? IntentType::Ended : r < 20 ? IntentType::CantPlay
+			: IntentType::Blocked;
+		i.hasT = pick(2);
 		i.dur = 30 + pick(300);
 		i.audioOnly = pick(2);
 		i.t = pick(330);

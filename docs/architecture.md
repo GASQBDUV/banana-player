@@ -139,6 +139,13 @@ Moved out of `CLAUDE.md`, which keeps the one-line rules and the map; the reason
   output stayed silent once played while the picture ran on), the picks via `matchTrack`. The bottom panel shows the
   session's place while a page plays (`Ui::shownPosition()` → `posNow`); A (or the Play button) plays/pauses the page
   as it lets go, held 600 ms (`PLAY_HOLD_MS`, `Ui::tick`) it plays here (`takeOver`).
+  **Play on** (START › Playing, `ui_menus.cpp`: `outChoices`, `drawPlayOn`): the pages come from
+  `WebServer::playTabs()`, each tab's SSE stream registering `?tab=&name=&play=` (`DEVICE_NAME` in `store.js`; the
+  server keeps the name per tab, numbers duplicates, never shows it anywhere but the handheld). A pick is
+  `SessionHost::sendTo()` (SetOutput from `"hh"`, after `reportHere()`). A page whose `play()` is refused without a tap
+  reports `Blocked` (the session's `blocked`: the wish stays playing, `posNow` stops running); it shows Tap to play,
+  the handheld's top card and status line say **Waiting for <page>**, and B there is `takeOver`
+  (docs/notes/2026-11-10-play-on.md).
   **The page's layout** (`web/style.css`, `docs/design/midnight.md`'s palette): phone (tab bar, floating mini player,
   the full player with its panel as a sheet), tablet from 700 px (icon rail, player bar), computer from 1100 px
   (sidebar with playlists and the handheld's card); `Q_WIDE`/`Q_DESK` in `web/js/store.js` match the CSS's media queries (a phone

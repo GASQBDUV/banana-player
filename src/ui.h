@@ -198,6 +198,8 @@ namespace bp
 		bool plIsLiked(const std::string& file) const { return plStore && plStore->isBuiltinFile(file); }
 		// a page in a browser plays what plays here (the Session's output is that tab): the handheld holds it paused
 		bool pageIsOut() const;
+		std::string outputName() const;	// where it plays now: "Handheld", or the page's name ("Chrome on Mac")
+		std::string pageName() const;	// the output page's name, as it gave it ("Browser" unknown)
 		// while a page plays the file, the paused copy here stays where it was (no seek per report: that decodes a frame):
 		// the bar, times and chapter show the session's place (posNow); a seek made here is the session's Seek
 		bool predicting(const Player& p) const;
@@ -630,16 +632,32 @@ namespace bp
 		void drawTabs(const Player& p);
 		// the Playing tab: the file's card, then its rows (PLAY_ROW + i)
 		// Now playing (while it plays behind the browser) first, Stop last
-		enum PlayingRow { PR_LIKE, PR_ADD, PR_SHOW, PR_INFO, PR_NOW, PR_STOP };
+		enum PlayingRow { PR_LIKE, PR_ADD, PR_SHOW, PR_INFO, PR_NOW, PR_STOP, PR_PLAYON };
 		std::vector<int> playingRows() const;
 		void drawPlaying(const Player& p);
 		bool playingKey(Button b, Player& p);
 		bool playingChoose(int row, Player& p);	// true: leave (Show in folder closes what plays)
 		Rect playingRowRect(int i) const
 		{
-			int step = playingRows().size() > 5 ? 46 : 54;	// (six: closer, to end above the footer)
+			int n = (int)playingRows().size(), step = n > 6 ? 42 : n > 5 ? 46 : 54;	// (six or seven: closer, above the footer)
 			return {16, 142 + i * step, 608, step - 4};
 		}
+		// Play on (the Playing tab's row, while a dashboard page that can play is open): where it plays, the handheld or
+		// one of those pages, as a dialog over the tab. Picking one is the Session's SetOutput (SessionHost::sendTo)
+		struct OutChoice { std::string tab, name; };	// tab "": the handheld
+		std::vector<OutChoice> outChoices() const;	// the handheld first, then each page that can play (WebServer::playTabs)
+		bool playOnShown() const;	// the row: a page that can play is open, or one is the output
+		bool playOnOpen = false;
+		int playOnCursor = 0;
+		void openPlayOn();
+		bool playOnKey(Button b, Player& p);
+		bool playOnPointer(const Pointer& pt, int x, int y, Player& p);
+		void playOnChoose(int i, Player& p);
+		void drawPlayOn(const Player& p);
+		Rect playOnBox() const { int n = (int)outChoices().size(); int h = 122 + std::min(n, PLAYON_SHOWN) * 60; return {70, std::max(16, (436 - h) / 2), 500, h}; }
+		Rect playOnRow(int i) const { Rect b = playOnBox(); return {b.x + 20, b.y + 106 + (i - playOnScroll) * 60, b.w - 40, 54}; }
+		static constexpr int PLAYON_SHOWN = 4, PLAYON_ROW = 2000;	// (above the picker's PICK_ROW + its rows)
+		int playOnScroll = 0;
 		// Show in folder from the Playing tab: what plays closed, then its folder shown (showBrowser)
 		std::string showAfterLeave;
 		// Like: toggled (the heart, START's Playing tab, L3), the heart's pop and the top panel's card

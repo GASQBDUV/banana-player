@@ -706,7 +706,7 @@ namespace bp
 		std::string sub;
 		SDL_Color subInk = DIM;
 		if (err) { sub = "Couldn't read"; subInk = DANGER; }
-		else if (held) { sub = pagePlaying() ? "Playing in your browser" : "Paused in your browser"; subInk = ACCENT; }
+		else if (held) { sub = (SessionHost::get().pageWaits() ? "Waiting for " : pagePlaying() ? "Playing in " : "Paused in ") + pageName(); subInk = ACCENT; }
 		else if (!live) sub = "stopped at " + formatTime(pos);
 		else if (p.loading()) sub = "Loading" + std::string(SDL_GetTicks() / 400 % 4, '.');
 		else sub = formatTime(pos) + " / " + formatTime(dur) + (p.paused ? " \xC2\xB7 paused" : "");
