@@ -2,12 +2,13 @@
 #include "player.h"
 #include "ui.h"
 #include <SDL.h>
+#include <algorithm>
 #include <cstdio>
 #include <random>
 
 namespace bp
 {
-	SessionHost& SessionHost::shadow()
+	SessionHost& SessionHost::get()
 	{
 		static SessionHost host;
 		return host;
@@ -21,6 +22,29 @@ namespace bp
 
 	static std::string base(const std::string& p) { return p.empty() ? "-" : p.substr(p.rfind('/') + 1); }
 
+	TrackPick pickOf(const std::vector<Track>& list, int64_t selectedId)
+	{
+		TrackPick k;
+		k.set = true;
+		k.of = (int)list.size();
+		for (int i = 0; i < (int)list.size(); i++)
+			if (list[i].id == selectedId)
+			{
+				k.ord = i;
+				k.lang = list[i].lang;
+				k.label = trackLabel(list[i], i + 1);
+				k.external = list[i].external;
+			}
+		return k;
+	}
+
+	std::vector<TrackInfo> infosOf(const std::vector<Track>& list)
+	{
+		std::vector<TrackInfo> out;
+		for (int i = 0; i < (int)list.size(); i++) out.push_back({list[i].lang, trackLabel(list[i], i + 1), list[i].external, true});
+		return out;
+	}
+
 	Intent SessionHost::make(IntentType t, const std::string& origin, bool legacyBasis)
 	{
 		Intent i;
@@ -28,20 +52,24 @@ namespace bp
 		i.origin = origin;
 		bool host = t == IntentType::Tick || t == IntentType::TabGone || t == IntentType::TabBack || t == IntentType::Slept ||
 			t == IntentType::Woke;
-		i.seq = host ? 0 : ++seqs[origin];
+		// (a tab's own intents carry its seq, Date.now()*1000+n: the words numbered here for it go on from the last)
+		uint64_t last = seqs[origin];
+		for (auto& e : s.seen)
+			if (e.origin == origin) last = std::max(last, e.seq);
+		i.seq = host ? 0 : (seqs[origin] = last + 1);
 		i.basis = legacyBasis ? publishedV : s.v;
 		return i;
 	}
 
-	Result SessionHost::submit(const Intent& in)
+	Result SessionHost::submit(const Intent& in, bool live)
 	{
 		uint32_t now = SDL_GetTicks();
 		Intent i = in;
 		Result r = apply(s, i, now);
-		// a new item routed to the browser that the browser can't have (not served, a format it doesn't play): again,
-		// with the host's word (the reducer can't know, §5)
+		// a new item routed to the browser that the browser can't have (not served, a format it doesn't play, its tab
+		// not there): again, with the host's word (the reducer can't know, §5)
 		if (r.reject.empty() && r.s.index >= 0 && r.s.itemV == s.v + 1 && r.s.out.kind == OutKind::Browser &&
-			(!browserCan || !browserCan(r.s.queue[r.s.index])))
+			(!browserCan || !browserCan(r.s.queue[r.s.index], i.origin == r.s.out.tab ? "" : r.s.out.tab)))
 		{
 			i.browserCan = false;
 			r = apply(s, i, now);
@@ -53,17 +81,204 @@ namespace bp
 			std::string extra;
 			if (r.reject.empty() && r.s.v != s.v)
 			{
-				extra = " out=" + std::string(r.s.out.kind == OutKind::Handheld ? "hh" : r.s.out.tab) + " file=" +
-					base(r.s.index >= 0 ? r.s.queue[r.s.index] : "") + (r.s.playing ? " playing" : " paused");
+				extra = " out=" + std::string(r.s.out.kind == OutKind::Handheld ? "hh" : r.s.out.tab) +
+					(r.s.pref != r.s.out ? " pref=" + std::string(r.s.pref.kind == OutKind::Handheld ? "hh" : r.s.pref.tab) : "") +
+					" file=" + base(r.s.index >= 0 ? r.s.queue[r.s.index] : "") + (r.s.playing ? " playing" : " paused");
 			}
-			fprintf(stderr, "session: %s%s%s\n", describe(s, i, r).c_str(), i.origin == "hh" ? "" : (" from " + i.origin).c_str(), extra.c_str());
+			fprintf(stderr, "session: %s%s%s%s\n", describe(s, i, r).c_str(), i.origin == "hh" ? "" : (" from " + i.origin).c_str(),
+				extra.c_str(), live && !r.fx.empty() && r.reject.empty() ? " (run)" : "");
 		}
+		Session old = s;
 		s = r.s;
+		if (live && !r.dup)
+		{
+			// the handheld's copy takes the picks when it becomes the output, or a new item there
+			if (r.reject.empty() && s.out.kind == OutKind::Handheld && s.index >= 0 && (old.out.kind != OutKind::Handheld || old.load != s.load))
+				picksWanted = true;
+			// (run as the loop pass ends: Next x15 in one pass is one load; a rejected intent's notes still go)
+			pendingFx.insert(pendingFx.end(), r.fx.begin(), r.fx.end());
+		}
 		return r;
 	}
 
+	bool SessionHost::holdsItem() const
+	{
+		return player && s.index >= 0 && player->playing() && !player->playingPhoto() && player->currentPath() == file();
+	}
+
+	void SessionHost::bringHere(bool show)
+	{
+		if (!player || !ui || s.index < 0 || holdsItem()) return;
+		// (today's code had moved on without it, or stopped: the session's item, at its place)
+		fprintf(stderr, "session: the handheld opens %s to play it\n", base(file()).c_str());
+		ui->flushPlaylist(*player);
+		if (s.source.kind == 2)
+		{
+			PlaySource src;
+			src.kind = SourceKind::Playlist;
+			src.title = s.source.title;
+			player->openPlaylist(s.queue, s.index, src);
+		}
+		else player->open(s.queue, s.index);
+		ui->seekPath = file();
+		ui->seekTo = s.pos;
+		ui->seekUntil = SDL_GetTicks() + 8000;
+		// (its screens show what plays, here or held for a page, as a pick here does)
+		if (show) ui->showPlayer();
+	}
+
+	void SessionHost::seekHere(double t)
+	{
+		if (!player || !ui) return;
+		if (s.out.kind == OutKind::Handheld) bringHere();
+		if (holdsItem() && player->loaded && !player->loading() && player->duration > 0)
+		{
+			if (std::abs(player->position - t) > 0.3) player->seekFraction(std::clamp(t / player->duration, 0.0, 1.0));
+			return;
+		}
+		ui->seekPath = file();
+		ui->seekTo = t;
+		ui->seekUntil = SDL_GetTicks() + 8000;
+	}
+
+	void SessionHost::applyPicks()
+	{
+		// (the handheld's file, whichever: a pick made over its own list fits it even where the session lags)
+		if (!player || !player->playing() || player->playingPhoto() || player->playingAudio()) return;
+		for (TrackType type : {TrackType::Audio, TrackType::Sub})
+		{
+			const TrackPick& k = type == TrackType::Audio ? s.audio : s.sub;
+			if (!k.set) continue;
+			std::vector<Track> list = player->tracksOf(type);
+			int m = matchTrack(k, infosOf(list));
+			int64_t id = -1;
+			if (m == MATCH_OFF) id = type == TrackType::Sub ? 0 : -1;
+			else if (m >= 0) id = list[m].id;
+			if (id < 0) continue;	// the default: mpv's own choice stays
+			const Track* cur = player->selected(type);
+			if ((cur ? cur->id : 0) == id) continue;
+			player->selectTrack(type, id);
+			player->osd(std::string(type == TrackType::Audio ? "Audio: " : "Subtitles: ") + (m >= 0 ? trackLabel(list[m], m + 1) : "Off"));
+			fprintf(stderr, "session: %s track %lld (%s)\n", type == TrackType::Audio ? "audio" : "sub", (long long)id,
+				m >= 0 ? trackLabel(list[m], m + 1).c_str() : "off");
+		}
+	}
+
+	void SessionHost::reportHere()
+	{
+		if (!player || s.out.kind != OutKind::Handheld || !holdsItem() || !player->loaded || player->loading()) return;
+		// where it is, to the moment (the hand-off starts the page there), and what it plays
+		if (s.loaded && !s.parked)
+		{
+			Intent i = make(IntentType::Pos);
+			i.load = s.load;
+			i.t = std::max(0.0, player->position);
+			i.playing = !player->paused;
+			submit(i);
+		}
+		if (player->playingAudio()) return;
+		for (TrackType type : {TrackType::Audio, TrackType::Sub})
+		{
+			std::vector<Track> list = player->tracksOf(type);
+			if (list.empty()) continue;
+			const Track* cur = player->selected(type);
+			TrackPick k = pickOf(list, cur ? cur->id : 0);
+			if (k == (type == TrackType::Audio ? s.audio : s.sub)) continue;
+			Intent i = make(type == TrackType::Audio ? IntentType::SetAudio : IntentType::SetSub);
+			(type == TrackType::Audio ? i.audio : i.sub) = k;
+			submit(i);
+		}
+	}
+
+	void SessionHost::run(const std::vector<Effect>& fx)
+	{
+		if (!player) return;
+		Player& p = *player;
+		for (const Effect& e : coalesce(fx))
+			switch (e.kind)
+			{
+			case Effect::HhLoad:
+				// the item on the handheld: already there (today's code opened it: a pick here), in its list (Next,
+				// Previous, the end of one), else the session's list opened. Held for a page: paused, it never sounds
+				if (s.index >= 0 && e.path == file())
+				{
+					if (!holdsItem() && !(p.playing() && !p.playingPhoto() && p.jumpTo(e.path, s.index))) bringHere();
+					if (e.t > 0) seekHere(e.t);
+					if (e.hold) p.holdPaused();
+				}
+				break;
+			case Effect::HhSeek: seekHere(e.t); break;
+			case Effect::HhPlay:
+				bringHere();
+				// (unpause reopens the sound output of a copy that was only held: Player::wakeHeld)
+				if (holdsItem() || p.playing()) p.unpause();
+				break;
+			case Effect::HhPause:
+				if (p.playing() && !p.playingPhoto()) p.pause();
+				break;
+			case Effect::HhTracks: picksWanted = true; break;
+			case Effect::HhUnload: if (p.playing() && !p.playingPhoto()) unload = endedFx ? 2 : 1; break;
+			case Effect::Note: p.osd(e.text, 2400); break;
+			default: break;	// (stops, photos: today's code, till step e)
+			}
+	}
+
+	Result SessionHost::fromPage(const Intent& i)
+	{
+		if (i.type == IntentType::SetOutput && i.hasOut && i.out.kind != OutKind::Handheld) reportHere();
+		// a page sends the handheld its file: its screens show it, as an /api/play did
+		if ((i.type == IntentType::SetOutput || i.type == IntentType::Open) && i.hasOut && i.out.kind == OutKind::Handheld) showHere = true;
+		Result r = submit(i, true);
+		if (!r.reject.empty()) showHere = false;
+		// a pick for the handheld: on its file even where the session's item lags behind today's (steps c-e)
+		if (r.reject.empty() && (i.type == IntentType::SetAudio || i.type == IntentType::SetSub) && s.out.kind == OutKind::Handheld)
+			picksWanted = true;
+		return r;
+	}
+
+	void SessionHost::takeOver(double at)
+	{
+		// (with the page's own word of its place: from that tab, the old output; else the handheld's own)
+		Intent i = make(IntentType::SetOutput, at >= 0 && s.out.kind == OutKind::Browser ? s.out.tab : "hh");
+		i.hasOut = true;
+		i.out = handheldOut();
+		if (at >= 0)
+		{
+			i.hasT = true;
+			i.t = at;
+		}
+		submit(i, true);
+		submit(make(IntentType::Play), true);
+	}
+
+	void SessionHost::chooseOutput(const Output& to, const std::string& origin)
+	{
+		Intent i = make(IntentType::SetOutput, origin);
+		i.hasOut = true;
+		i.out = to;
+		submit(i);
+	}
+
+	void SessionHost::pageCant(const std::string& reason)
+	{
+		if (s.index < 0 || s.out.kind != OutKind::Browser) return;
+		Intent i = make(IntentType::CantPlay, s.out.tab);
+		i.load = s.load;
+		i.reason = reason;
+		submit(i, true);
+	}
+
+	void SessionHost::handheldPicked(TrackType type, int64_t id)
+	{
+		if (!player || s.index < 0 || !holdsItem()) return;
+		// (the id asked for: mpv answers the choice a moment later)
+		Intent i = make(type == TrackType::Audio ? IntentType::SetAudio : IntentType::SetSub);
+		(type == TrackType::Audio ? i.audio : i.sub) = pickOf(player->tracksOf(type), id);
+		submit(i);
+	}
+
 	void SessionHost::open(const std::vector<std::string>& paths, int index, int sourceKind, const std::string& title,
-		const std::string& origin, const Output* out, double t)
+		const std::string& origin, const Output* out, double t, bool live)
 	{
 		Intent i = make(IntentType::Open, origin);
 		i.queue = paths;
@@ -76,45 +291,61 @@ namespace bp
 			i.hasOut = true;
 			i.out = *out;
 		}
-		submit(i);
+		submit(i, live);
 	}
 
-	void SessionHost::step(int n, const std::string& origin)
+	Result SessionHost::step(int n, const std::string& origin)
 	{
 		Intent i = make(IntentType::Step, origin);
 		i.n = n;
-		submit(i);
+		return submit(i, true);
+	}
+
+	void SessionHost::playLive(bool on, const std::string& origin) { submit(make(on ? IntentType::Play : IntentType::Pause, origin), true); }
+
+	void SessionHost::seekLive(double t, bool relative, const std::string& origin)
+	{
+		Intent i = make(relative ? IntentType::SeekBy : IntentType::Seek, origin);
+		i.t = t;
+		submit(i, true);
+	}
+
+	bool SessionHost::stepsHere(const Player& p) const
+	{
+		return s.index >= 0 && !p.playingPhoto() && (pageIsOutput() || (p.playing() && p.currentPath() == file()));
+	}
+
+	Result SessionHost::ended()
+	{
+		Intent i = make(IntentType::Ended);
+		i.load = s.load;
+		endedFx = true;
+		Result r = submit(i, true);
+		return r;
 	}
 
 	void SessionHost::toggle(const std::string& origin) { submit(make(s.playing ? IntentType::Pause : IntentType::Play, origin)); }
 	void SessionHost::play(bool on, const std::string& origin) { submit(make(on ? IntentType::Play : IntentType::Pause, origin)); }
 
-	void SessionHost::takeOver()
-	{
-		Intent i = make(IntentType::SetOutput);
-		i.hasOut = true;
-		i.out = handheldOut();
-		submit(i);
-		play(true);
-	}
-
-	void SessionHost::stop(const std::string& origin, bool legacyBasis) { submit(make(IntentType::Stop, origin, legacyBasis)); }
+	Result SessionHost::stop(const std::string& origin) { return submit(make(IntentType::Stop, origin), true); }
 
 	void SessionHost::photoPark(double pos)
 	{
 		Intent i = make(IntentType::PhotoPark);
 		i.hasT = pos >= 0;
 		i.t = pos;
-		submit(i);
+		submit(i, true);
 	}
 
-	void SessionHost::photoResume() { submit(make(IntentType::PhotoResume)); }
+	void SessionHost::photoResume() { submit(make(IntentType::PhotoResume), true); }
 
-	void SessionHost::fileGone(const std::string& path)
+	bool SessionHost::fileGone(const std::string& path)
 	{
+		bool had = s.index >= 0;
 		Intent i = make(IntentType::FileGone, "web");
 		i.path = path;
-		submit(i);
+		submit(i, true);
+		return had && s.index < 0;
 	}
 
 	void SessionHost::seek(double t, bool relative, const std::string& origin)
@@ -124,67 +355,8 @@ namespace bp
 		submit(i);
 	}
 
-	void SessionHost::loop(int value)
-	{
-		Intent i = make(IntentType::SetLoop, "web");
-		i.loop = value;
-		submit(i);
-	}
 
-	void SessionHost::woke() { submit(make(IntentType::Woke)); }
-
-	void SessionHost::pagePlays(const std::string& tab, const std::string& path, const std::vector<std::string>& paths, int index)
-	{
-		if (path.empty() || tab.empty()) return;
-		std::string origin = tab;
-		if (s.index >= 0 && file() == path)
-		{
-			if (s.out != browserOut(tab))
-			{
-				// "Play in this browser" of what plays here, or the page's answer to a pick sent to it
-				Intent i = make(IntentType::SetOutput, origin, true);
-				i.hasOut = true;
-				i.out = browserOut(tab);
-				submit(i);
-				if (s.out == browserOut(tab) && !s.playing) play(true, origin);
-			}
-		}
-		else
-		{
-			// the page chose another file itself (its Next, a tap in its list): the handheld's list as it opened it
-			Intent i = make(IntentType::Open, origin);
-			i.queue = paths.empty() ? std::vector<std::string>{path} : paths;
-			i.index = paths.empty() ? 0 : index;
-			i.hasOut = true;
-			i.out = browserOut(tab);
-			submit(i);
-		}
-		// it says it plays it: its Loaded
-		if (s.out == browserOut(tab) && s.index >= 0 && file() == path && !s.loaded)
-		{
-			Intent l = make(IntentType::Loaded, origin);
-			l.load = s.load;
-			submit(l);
-		}
-	}
-
-	void SessionHost::pagePos(const std::string& tab, const std::string& path, double t, bool playing)
-	{
-		// the old route carries a file, not a load: one about another file is for an older load
-		Intent i = make(IntentType::Pos, tab.empty() ? "web" : tab, true);
-		i.load = s.index >= 0 && file() == path ? s.load : s.load - (s.load > 0);
-		i.t = t;
-		i.playing = playing;
-		submit(i);
-	}
-
-	void SessionHost::pageRefused()
-	{
-		Intent i = make(IntentType::CantPlay, s.out.kind == OutKind::Browser ? s.out.tab : "web");
-		i.load = s.load;
-		i.reason = "format";
-		submit(i);
-	}
+	void SessionHost::woke() { submit(make(IntentType::Woke), true); }
 
 	int sourceKindOf(const Player& p)
 	{
@@ -192,30 +364,11 @@ namespace bp
 		return k == SourceKind::Playlist ? 2 : k == SourceKind::NetFolder ? 1 : 0;
 	}
 
-	void SessionHost::handheldAsked(const Player& p, bool opened, double t)
-	{
-		Output hh = handheldOut();
-		Intent i = make(IntentType::SetOutput, "web");
-		i.hasOut = true;
-		i.out = hh;
-		submit(i);
-		if (opened)
-		{
-			open(p.paths(), p.index(), sourceKindOf(p), p.source().title, "web", &hh, t);
-			return;
-		}
-		if (s.index >= 0 && p.playing() && file() == p.currentPath())
-		{
-			if (t > 0) seek(t, false, "web");
-			play(true, "web");
-		}
-	}
-
 	void SessionHost::pass(Player& p, Ui& u, const std::function<bool(const std::string&)>& tabUp)
 	{
 		uint32_t now = SDL_GetTicks();
 		// the handheld as the output: its reports (it is the clock)
-		if (s.index >= 0 && s.out.kind == OutKind::Handheld && !s.parked && p.playing() && !p.playingPhoto() && p.currentPath() == file())
+		if (s.index >= 0 && s.out.kind == OutKind::Handheld && !s.parked && holdsItem())
 		{
 			if (!p.error.empty())
 			{
@@ -257,10 +410,39 @@ namespace bp
 				}
 			}
 		}
+		// the session's picks on the handheld's copy, once its tracks are known
+		if (s.out.kind != OutKind::Handheld) picksWanted = false;
+		else if (picksWanted && p.playing() && p.loaded && !p.loading())
+		{
+			picksWanted = false;
+			applyPicks();
+		}
+		// I2: the handheld's mpv never sounds while a page is the output. Every way today's code plays here goes
+		// through takeOver first; anything that slips by is paused (and said in the log), once it lasts
+		if (pageIsOutput() && p.playing() && !p.playingPhoto() && !p.paused && !p.loading())
+		{
+			if (!soundingSince) soundingSince = now;
+			else if (now - soundingSince >= 500)
+			{
+				soundingSince = 0;
+				fprintf(stderr, "session: invariant I2 repaired (the handheld played %s while %s is the output)\n",
+					base(p.currentPath()).c_str(), s.out.tab.c_str());
+				p.pause();
+			}
+		}
+		else soundingSince = 0;
+		// the handheld's Loop (its settings; Loop all is the music's) is the session's
+		int loop = p.settings.loop == LOOP_ALL && s.index >= 0 && !s.audioOnly ? SESSION_LOOP_OFF : p.settings.loop;
+		if (loop != s.loop)
+		{
+			Intent i = make(IntentType::SetLoop);
+			i.loop = loop;
+			submit(i);
+		}
 		if (now - tickAt >= 250)
 		{
 			tickAt = now;
-			submit(make(IntentType::Tick));
+			submit(make(IntentType::Tick), true);
 		}
 		if (now - tabsAt >= 500)
 		{
@@ -277,47 +459,24 @@ namespace bp
 				{
 					Intent i = make(up ? IntentType::TabBack : IntentType::TabGone);
 					i.path = tab;
-					submit(i);
+					submit(i, true);
 				}
 			}
 		}
-		compare(p, u, now);
-	}
-
-	void SessionHost::compare(Player& p, Ui& u, uint32_t now)
-	{
-		bool photo = p.playingPhoto();
-		bool page = u.browserPlaying || (u.pageOut && !p.playing());
-		std::string todayFile = p.playing() && !photo ? p.currentPath() : "";
-		std::string today = page ? "browser" : !todayFile.empty() ? "handheld" : photo && u.parkedShown() ? "photo" : "none";
-		std::string mine = s.index < 0 ? "none" : s.out.kind == OutKind::Browser ? "browser" : s.parked ? "photo" : "handheld";
-		std::string sig;
-		if (mine != today) sig = "output (session " + mine + ", today " + today + ")";
-		else if ((mine == "handheld" || mine == "browser") && !todayFile.empty() && todayFile != file())
-			sig = "file (session " + base(file()) + ", today " + base(todayFile) + ")";
-		else if (mine == "browser" && !u.browserTab.empty() && u.browserTab != s.out.tab)
-			sig = "tab (session " + s.out.tab + ", today " + u.browserTab + ")";
-		else if (mine == "handheld" && p.loaded && !p.loading() && p.error.empty() && s.playing == p.paused)
-			sig = std::string("playing (session ") + (s.playing ? "1" : "0") + ", today " + (p.paused ? "0" : "1") + ")";
-		else if (mine == "browser" && s.playing != u.pagePlaying())
-			sig = std::string("playing (session ") + (s.playing ? "1" : "0") + ", today " + (u.pagePlaying() ? "1" : "0") + ")";
-		if (sig.empty())
+		// a page the output and nothing here (a photo closed, a stop of the copy): the item held here again, quietly
+		if (pageIsOutput() && !p.playing() && player) bringHere(false), pendingFx.push_back({Effect::HhLoad, file(), "", s.pos, s.load, true});
+		if (!pendingFx.empty())
 		{
-			if (!loggedSig.empty()) fprintf(stderr, "session: agrees again (v%llu)\n", (unsigned long long)s.v);
-			loggedSig.clear();
-			pendingSig.clear();
-			return;
+			std::vector<Effect> fx;
+			fx.swap(pendingFx);
+			run(fx);
 		}
-		// async on both sides (mpv, the page): only what lasts 1.5 s, one line per 2 s at most
-		if (sig != pendingSig)
+		endedFx = false;
+		if (showHere && ui && s.out.kind == OutKind::Handheld && s.index >= 0)
 		{
-			pendingSig = sig;
-			pendingAt = now;
-			return;
+			showHere = false;
+			ui->showPlayer();
 		}
-		if (sig == loggedSig || now - pendingAt < 1500 || now - loggedAt < 2000) return;
-		loggedSig = sig;
-		loggedAt = now;
-		fprintf(stderr, "session: disagree %s v%llu file=%s\n", sig.c_str(), (unsigned long long)s.v, base(file()).c_str());
+		(void)u;
 	}
 }

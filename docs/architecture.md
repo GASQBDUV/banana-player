@@ -116,7 +116,7 @@ Moved out of `CLAUDE.md`, which keeps the one-line rules and the map; the reason
   async Player calls there, as with mpv. Fire-and-forget news goes by `post` (FsChanged, ClientConnected, PinRotated,
   ClientsChanged). Live updates are SSE on `/api/events`: `webSnapshot` (`main.cpp`, `api_player.cpp`) is built in the
   loop only while clients exist, and published at most 4/s when anything but the clock changed; `notify` carries fs,
-  playlists and handheld-play events. Pre-routing gate in
+  playlists and recent events; a new Session version (`session` in the state) goes out at once. Pre-routing gate in
   `server.cpp`: private remote address, Host an IP literal or localhost (DNS rebinding), `X-BP: 1` and a matching Origin
   on non-GET, and the `bp_s` session cookie on every `/api/*` but login. Sessions and the PIN (`webauth`: PinGate,
   SessionStore) live in `<state>/web-sessions.tsv` and `web.conf`. Paths are virtual `<rootIndex>/<rel>` through
@@ -127,13 +127,16 @@ Moved out of `CLAUDE.md`, which keeps the one-line rules and the map; the reason
   (on at start), `BP_WEB_PIN`, `BP_WEB_PORT`, `BP_WEB_DIR`, `BP_WEB_IP` (`none` = no Wi-Fi), `BP_WEB_FAIL` (the server
   won't start), `BP_WEB_KEEPALIVE` (idle seconds), and the scripted `web` step. Icons in `web/sprite.svg` come from the
   same `G_*` glyphs as the bottom panel: regenerate with `tools/make-sprite.py` after changing one.
-  **Playing in the browser** (`browserPlaying`): `/api/browser-play` opens the file on the handheld paused with
-  `Player::holdPaused()` (its screens show it), and its first play there reopens the sound output (`ao-reload`, in
-  `wakeHeld`): opened paused, the handheld's ALSA output stayed silent once played while the picture ran on. The
-  page's position (`/api/browser-pos`, on play/pause/seek and every 10 s) is never applied to the paused copy; the
-  bottom panel shows `Ui::shownPosition()` (extrapolated), and seeks made there count from it and go to the page.
-  A (or the Play button) while a page drives plays/pauses the page (`handheld-toggle {play}`, the state wanted,
-  `Ui::browserWant`), acting as it lets go; held 600 ms (`PLAY_HOLD_MS`, `Ui::tick`) it plays here (`takeOver`).
+  **Playing in the browser** (`docs/design/session.md`): one Session holds what plays, where (`out`), where picks go
+  (`pref`), the play state, the place and the track picks. A page sends intents to `POST /api/intent` (Open, Step,
+  Play, Pause, Pos, Loaded, Ended, CantPlay, SetOutput, SetAudio/SetSub, Stop) and renders from `state.session`
+  (`onSession`: a new `load` while it is the output loads `file` at `pos` with `tracksFor()`'s picks; `playV`/`seekN`
+  changes play, pause or seek it; `out` leaving stops its element). `SessionHost` runs the effects on the handheld once
+  per loop pass: the item held paused for a page (`Player::holdPaused()`, its screens show it; `jumpTo` within its own
+  list), seek, play with `ao-reload` for a copy that was only held (`wakeHeld`: opened paused, the handheld's ALSA
+  output stayed silent once played while the picture ran on), the picks via `matchTrack`. The bottom panel shows the
+  session's place while a page plays (`Ui::shownPosition()` → `posNow`); A (or the Play button) plays/pauses the page
+  as it lets go, held 600 ms (`PLAY_HOLD_MS`, `Ui::tick`) it plays here (`takeOver`).
   **The page's layout** (`web/style.css`, `docs/design/midnight.md`'s palette): phone (tab bar, floating mini player,
   the full player with its panel as a sheet), tablet from 700 px (icon rail, player bar), computer from 1100 px
   (sidebar with playlists and the handheld's card); `Q_WIDE`/`Q_DESK` in `web/js/store.js` match the CSS's media queries (a phone

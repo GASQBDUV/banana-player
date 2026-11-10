@@ -345,6 +345,16 @@ namespace bp
 		return true;
 	}
 
+	bool Player::jumpTo(const std::string& path, int hint)
+	{
+		int best = -1;
+		for (int i = 0; i < (int)playlist.size(); i++)
+			if (i != ghost && playlist[i] == path && (best < 0 || std::abs(i - hint) < std::abs(best - hint))) best = i;
+		if (best < 0) return false;
+		moveTo(best);
+		return true;
+	}
+
 	bool Player::back()
 	{
 		if (!playingPhoto() && loaded && position >= RESTART_S)
@@ -489,9 +499,6 @@ namespace bp
 
 		// (a graph takes the song's first audio track itself: no track to choose)
 		wantAid = graph.empty() && settings.rememberAudio && e && e->aid > 0 ? e->aid : 0;
-		// asked for this file alone (the web's hand-off): before what's remembered
-		if (graph.empty() && nextAid > 0) wantAid = nextAid;
-		nextAid = 0;
 		if (graph.empty()) fileOpts += ",aid=" + (wantAid ? std::to_string(wantAid) : std::string("auto"));
 		std::string alang = opts.lang;
 		if (settings.rememberAudio && !resume.lastAudioLang.empty()) alang = resume.lastAudioLang + (alang.empty() ? "" : "," + alang);
@@ -505,12 +512,6 @@ namespace bp
 			sid = e->sid ? std::to_string(e->sid) : "no";
 		}
 		else if (settings.rememberSubs && !e && resume.lastSubOff) sid = "no";
-		if (graph.empty() && nextSid >= 0)
-		{
-			wantSid = nextSid;
-			sid = nextSid ? std::to_string(nextSid) : "no";
-		}
-		nextSid = -1;
 		if (graph.empty()) fileOpts += ",sid=" + sid;
 		else wantSid = 0;
 		std::string slang = opts.lang;

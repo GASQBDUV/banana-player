@@ -20,23 +20,23 @@
 
 namespace bp
 {
+	bool Ui::pageIsOut() const { return SessionHost::get().pageIsOutput(); }
+
+	// (the Session's: a page the output of the file held here, its place by posNow, its play state the session's wish)
 	bool Ui::predicting(const Player& p) const
 	{
-		const BrowserPos& b = browserPos;
-		return browserPlaying && p.paused && b.t >= 0 && p.loaded && p.duration > 0 && p.currentPath() == b.path;
+		return pageIsOut() && p.loaded && p.duration > 0 && p.currentPath() == SessionHost::get().file();
 	}
 
 	bool Ui::pageDrives(const Player& p) const
 	{
-		return browserPlaying && webClients() > 0 && p.playing() && !p.playingPhoto() && (p.paused || p.loading());
+		return pageIsOut() && webClients() > 0 && p.playing() && !p.playingPhoto() && (p.paused || p.loading());
 	}
 
 	double Ui::shownPosition(const Player& p) const
 	{
 		if (!predicting(p)) return p.position;
-		const BrowserPos& b = browserPos;
-		double t = b.t + (pagePlaying() ? (SDL_GetTicks() - b.at) / 1000.0 : 0);
-		return std::clamp(t, 0.0, p.duration);
+		return std::clamp(posNow(SessionHost::get().session(), SDL_GetTicks()), 0.0, p.duration);
 	}
 
 	int Ui::shownChapter(const Player& p) const
@@ -50,34 +50,24 @@ namespace bp
 
 	void Ui::noteSeek(const Player& p, double t)
 	{
-		if (predicting(p)) browserPos = {browserPos.path, std::clamp(t, 0.0, p.duration), SDL_GetTicks(), browserPos.playing};
+		// a seek made here while a page plays it: the session's Seek, which the page follows
+		if (predicting(p)) SessionHost::get().seekLive(std::clamp(t, 0.0, p.duration), false);
 	}
 
-	bool Ui::pagePlaying() const
-	{
-		if (browserWant >= 0 && SDL_GetTicks() - browserWantAt < WANT_MS) return browserWant == 1;
-		return browserPos.playing;
-	}
+	bool Ui::pagePlaying() const { return SessionHost::get().session().playing; }
 
 	void Ui::toggleBrowser(Player& p)
 	{
-		// from the wish still pending, so quick presses each flip what the last one asked
-		bool play = !pagePlaying();
-		// the prediction goes on (or stops) from here at once, not when the page's word comes back
-		if (predicting(p)) browserPos = {browserPos.path, shownPosition(p), SDL_GetTicks(), browserPos.playing};
-		browserWant = play;
-		browserWantAt = SDL_GetTicks();
-		browserToggleSend = true;
-		SessionHost::shadow().play(play);
+		(void)p;
+		// the session's Play / Pause, from what it wishes now (quick presses each flip the last one)
+		SessionHost& sh = SessionHost::get();
+		sh.playLive(!sh.session().playing);
 	}
 
 	void Ui::takeOver(Player& p)
 	{
-		browserWant = -1;
-		if (!p.paused) return;
-		SessionHost::shadow().takeOver();
-		resumeFromBrowser(p);
-		p.togglePause();
+		// the handheld the output (the Session's SetOutput: here at the page's place, with its tracks) and playing
+		SessionHost::get().takeOver();
 		p.osd("Playing on the handheld");
 	}
 
@@ -86,12 +76,6 @@ namespace bp
 		if (b != Button::A || !playHoldAt || playHoldTouch) return;
 		playHoldAt = 0;	// let go before PLAY_HOLD_MS (tick() takes over at it, and clears this)
 		if (pageDrives(p)) toggleBrowser(p);
-	}
-
-	void Ui::resumeFromBrowser(Player& p)
-	{
-		if (!predicting(p)) return;
-		p.seekFraction(std::clamp(shownPosition(p) / p.duration, 0.0, 1.0));	// queued before the unpause: no sound from before
 	}
 
 	bool Ui::repeats(Button b, const Player& p) const

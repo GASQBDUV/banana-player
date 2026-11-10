@@ -1,8 +1,10 @@
 # One playback Session (design, 2026-11-10)
 
-**Status: step (a) done** (2026-11-11): `src/session.{h,cpp}` (bpcore) with its tests in `core-test`, and a shadow
-`SessionHost` (`src/session_host.{h,cpp}`) that logs `session: …` and `session: disagree <what>` lines and acts on
-nothing. Where this text left a choice open, §9 says what was chosen.
+**Status: all steps (a)–(f) done** (2026-11-11). The Session is the one truth for what plays, where, and how far:
+`src/session.{h,cpp}` (bpcore: the reducer, its invariants, the fuzz test in core-test) and `SessionHost`
+(`src/session_host.{h,cpp}`: the only caller of `apply`, running the effects on the handheld's mpv once per loop pass,
+coalesced). Pages send intents to `POST /api/intent` and render from `state.session`; the old routes, events and flags
+of §1 are gone (§10, §11). Where this text left a choice open, §9 (a), §10 (b) and §11 (c–f) say what was chosen.
 
 Goal: every way the handheld and a browser tab share playback goes through one value,
 the **Session**, changed only by **intents** through one pure reducer, and followed by two **renderers** (the
@@ -369,3 +371,106 @@ Choices made where the text above was open (the code and tests follow these):
   handheld's file follows only once the page answers `handheld-skip`; a page that never answers leaves it behind for
   good, with no timeout), and **playing** after A while a page plays (today's wish lapses after `WANT_MS` back to the
   page's last word if the page doesn't confirm; the session keeps the wish). Both are what steps (c)/(d) replace.
+
+## 10. Notes from step (b)
+
+What moved, what went, and the choices made (the code and tests follow these):
+
+- **Live intents.** `SessionHost::submit(i, live)`: `live` runs the effects at once on the main thread (no end-of-pass
+  executor yet: one intent at a time needs no coalescing; `coalesce()` still orders them). Live: everything from
+  `/api/intent` (`fromPage`), `takeOver()` (SetOutput(hh) + Play), `pageCant()`, and the host's own `Tick`, `TabGone`,
+  `TabBack`. Everything else is still fed by today's code and its effects are not run. The executor: `HhSeek` seeks the
+  handheld's copy (or queues the place, `Ui::seekPath`, while it opens); `HhPlay` unpauses (`wakeHeld()`'s `ao-reload`
+  for a copy that was only held); `HhPause`; `HhTracks` and any switch to the handheld apply the picks once mpv knows
+  the tracks (`applyPicks`, `matchTrack` on `trackLabel`s, an OSD line); `Note` is an OSD line. If the handheld doesn't
+  hold the session's item (today's code moved on without it: the gap (a) found), `bringHere()` opens it at its place.
+- **Leaving the handheld**, the host first reports its place (`Pos`) and its tracks (`SetAudio`/`SetSub` from `"hh"`)
+  so the page starts where it is with what it plays (`reportHere`). A track chosen on the handheld (`Ui::chooseTrack`,
+  so the old `/api/track` too) becomes the session's pick (`handheldPicked`). The page sends its picks as the viewer
+  makes them (not its automatic defaults), and both again just before it hands off.
+- **`pref` is the selected output** (owner, 2026-11-11): only `SetOutput`, an `Open` that names where (the page's own
+  pick while it is where picks go, "Play here"), and the tab-gone timeout move it; Stop, the end of a list, a photo, a
+  file the browser can't play, pause and a reconnect don't. `checkTransition` checks it, so the fuzz test does too.
+  Anything opened goes to `pref`, wherever it was picked: the handheld's picks and another tab's `/api/play` go through
+  `toPage()` (the web's `/api/play` now opens by Ui's play request, as the handheld's own picks do). `/api/play
+  to=handheld` is the page's explicit "Play on handheld": SetOutput(hh) first (not run: the new item replaces what
+  played). `store.target` is `pref == this tab` (`bpTarget` in localStorage is gone).
+- **Routing context**: `browserCan(path, tab)` is served + a browser format + that tab's stream connected (a tab's own
+  word, `""`, needs no check). So a pick goes to the handheld while the chosen tab is away, and to the tab again once
+  it's back (the tab-gone timeout then drops `pref`). A page that is where picks go keeps its event stream while hidden
+  (§8 Q3: `openSSE`, the `pause` handler, `visibilitychange`), which was the owner's bug: after a Stop the idle hidden
+  page closed its stream and the next pick played on the handheld.
+- **The page renderer** (`onSession`, `renderLoad` in `browser-player.js`) acts on `out` *changing* to or from this
+  tab only; an item change while it stays the output is still today's `handheld-skip`/`handheld-open`/`browserNext`
+  (step c). It takes the newest `(boot, v)` only, from the state and from each intent's answer (so a tap's SetOutput
+  loads in the same task, within the gesture). Out to this tab: the file it already plays (its own browser-play made
+  it the output) is adopted with a `Loaded`; else it probes, loads `file` at `pos` (run on from the answer's arrival
+  while it plays and is `loaded`), with `tracksFor()` (`matchTrack` on `/api/media`'s lists; an audio pick this browser
+  can't stream: its default and a toast), playing only if the session plays (a paused file stays paused where it
+  goes), and says `Loaded` (an 8 s Tick otherwise hands it to the handheld). Not served / probe says no: `CantPlay`.
+  Out leaving: `dropBrowser()` (no `stop=1`), "Playing on your handheld now" / "Playing in another browser"; a parked
+  page (connection lost) keeps its strip, and its Play is `continueHere()`.
+- **SetOutput rejected `stale`** (the page's basis behind its own browser-play's Open) is sent once more over the
+  answer's `v`: an explicit choice shouldn't fail on a race the viewer can't see.
+- **Seq numbering**: the host numbers a tab's old words (browser-play/pos) after the highest seq seen from it, and the
+  page's intents use `max(last + 1, Date.now() * 1000)`, so both share the tab's dedupe slot without colliding.
+- **Run-time I2**: a page the output and the handheld's mpv unpaused (not loading, not a photo) for 0.5 s → paused, and
+  `session: invariant I2 repaired` logged. Every way today's code plays the handheld while a page is the output goes
+  through `takeOver()` first: A / the mini bar's Play with no page listening, `/api/cmd play|toggle` (a remote tab), an
+  old page's `/api/play` of its own file with `t`; the chapter list and "Play from start" don't unpause then. `/api/cmd
+  next|prev` with a page the output move the page (`browserSkip`, as L/R), `stop` is the handheld's Stop (stops it too).
+- **Removed**: `Ui::browserPlaying` (→ `pageIsOut()`), `pageOut` (→ `prefIsPage()`), `browserTab`/`browserSeq` (a per-tab
+  map in `staleBrowserWord`), `browserPlayAt`, `browserSawPause`, `pageOpenRefused`, main's take-over detector, the
+  `handheld-play` event, `soundBackHere()`, `/api/handoff`, `/api/browser-refuse` (→ `CantPlay`), `/api/play`'s
+  `aid`/`sid`, `Player::nextAid`/`nextSid`, and on the page `handheldTookOver`, `B.handheldQuiet`, `applySnap`'s
+  take-over check, `chooseTarget`, `wantHandheldTracks`/`startTracks`/`handheldIds`/`keepTracks` and the `bpTr:`
+  sessionStorage. `browserPlaying` stays in the state, derived (step f).
+- **Shared vectors** are `tests/session_vectors.txt` (tab-separated: bpcore has no JSON reader), run by core-test and by
+  `tools/web-smoke.sh` with node.
+- **Not done here** (c–e): the two gaps (a) found stay for (c) and (d) (they're item and play-state, not output);
+  `PageToast` effects aren't delivered (the page says its own); `pos` while a page plays still comes from its 10 s
+  `browser-pos`.
+
+## 11. Notes from steps (c)–(f)
+
+- **(c) Next/Prev and opens.** Every pick is an `Open`: the handheld's own and the web's `/api/play` (now a Ui play
+  request, as the handheld's picks are) through main's `routed()` (the handheld opens it as before; the session's Open,
+  live, says where it plays: held paused at once for a page), a page's through `/api/intent` (`q[]` virtual paths,
+  `index`, `t`, `skind`/`stitle`/`sid`, `to`). The handheld's L/R, `/api/cmd next|prev` and a page's Next/Prev are
+  `Step` (only when the session has the item playing here or a page is the output: `stepsHere()`; else as before). The
+  handheld's end of a file is `Ended` from `"hh"`, a page's from its tab. The executor's `HhLoad` uses the handheld's
+  own list (`Player::jumpTo`, keeping its source, names and order), else opens the session's queue (`bringHere`),
+  holding it for a page. Effects now run once per pass of main's loop (`pendingFx`, `coalesce`): R×10 then L×4 in one
+  burst loads one file. A browser that can't play a picked file no longer skips it: the session's `CantPlay` plays it on
+  the handheld once, with the note, the browser still where picks go. The page's renderer loads on every `load` change
+  while it is the output, adopting the file it already plays (a shuffle is an `Open` of the new order from the file
+  playing, at its place). Gone: `browserSkip`, `handheld-skip`, `handheld-open`, `pageOpenTok/Path/At/Sent`,
+  `toPage()`/`opened()`, `handheldOpenJson`, `B.navTok`/`navTarget`/`openTok`, `browserNext`'s arithmetic, the page's
+  `RESTART_S`, `handheldOpen`, `announce`.
+- **(d) Play/pause/seek.** While a page is the output, the handheld's A (short), its bar and Left/Right, its chapter
+  list, and a remote tab's `/api/cmd toggle|play|pause|seek|seekrel|chapter*` are live `Play`/`Pause`/`Seek`; the page
+  follows `playV` and `seekN` (both now in `sessionJson`), and its own play/pause are `Play`/`Pause` and its place a
+  `Pos` (play, pause, seeked, every 10 s; not the pause a file's end brings). Behaviour change: a remote's toggle while
+  a browser plays now pauses/plays that browser instead of taking the sound back to the handheld (hold A does that).
+  While the handheld itself is the output, mpv stays the clock: its own A, seeks and speed act on mpv and come back as
+  reports (`Pos` every second), with `play()`/`seek()` telling the session at once. `Ui::predicting`/`shownPosition`/
+  `pagePlaying`/`noteSeek`/`toggleBrowser` are reads of the session (`posNow`). Gone: `browserWant`/`WantAt`/
+  `ToggleSend`/`WANT_MS`, `browserPos`, `browserSeenPos`, `browserSyncUntil`, `resumeFromBrowser`, `browserFile`,
+  `handheld-toggle`, `handheld-seek`, `/api/browser-pos`, `staleBrowserWord`, `wordSeq`.
+- **(e) Stop, photos, sleep.** The handheld's Stop, a remote's, a page's (`Stop` intent, sent again over a newer `v`
+  when stale) and a deleted file (`FileGone`) are live; the executor's `HhUnload` tells main (`takeUnload()`), which
+  stops the handheld's side (`stopPlaying`). A Stop the session can't take (a photo) stops here as before
+  (`stopRequest` stays for that). A photo over what a page plays parks nothing: the page plays on, and once the photo
+  closes the handheld holds the item again, quietly (`pass()`). Over the handheld's own song a photo still parks it
+  (`PhotoPark`/`PhotoResume` live; the mini bar's title and art stay `Ui::parked`). `Woke` pauses everywhere. Kept:
+  `seekPath/seekTo/seekUntil` (the place a file opening goes to, used by the executor too); `bgPlay`. Gone:
+  `handheld-stop`, `/api/browser-play` (and its `stop=1`).
+- **(f) Deleted:** `/api/browser-play`, `/api/browser-pos`, every `handheld-*` event, the state's `browserPlaying` (the
+  page reads `session.out`), the shadow's `compare()` and `session: disagree` logging. `/api/cmd` stays: it is the
+  remote's way to drive the session from a tab that isn't the output. The web mock follows `/api/intent`'s output
+  intents (Open, SetOutput, Stop).
+- **Checks run** (Mac): core-test (fuzz included, ~2 s), the fake-page flows per step, web-smoke, v1/v2 at 390 px, and
+  one headless Chrome run of: ep 02 browser→handheld→browser with jpn + English Subtitles; Next×10/Prev×4 at once from
+  the handheld side while the browser plays (both land on the same file); Stop on the handheld then a pick there →
+  the browser; a photo over the browser's song (the song plays on; the copy is held again after); hold A.
+

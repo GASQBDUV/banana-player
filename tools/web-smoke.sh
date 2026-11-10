@@ -175,9 +175,25 @@ post /api/play --data-urlencode "p[]=$SONG2" --data-urlencode "p[]=$SONG"; statu
 post /api/play --data-urlencode "playlist=$PLAY" -d index=1; status_is "play a playlist at 1" 200; wait_state "playlist source at 1" '.source.kind == "playlist" and .source.index == 1'
 post /api/cmd -d c=shuffle; status_is "shuffle" 200
 post /api/play --data-urlencode "p=$SONG"; status_is "play a song again" 200; wait_state "the song again" '.path | endswith("01 Sunny Peel.mp3")'
-post /api/browser-play; status_is "browser-play" 200; wait_state "state browserPlaying and paused" '.browserPlaying == true and .paused == true'
-post /api/handoff --data-urlencode "p=$SONG" -d t=20; status_is "handoff to the handheld" 200; wait_state "handoff: playing from 20 s" '.paused == false and .position > 18'
-wait_state "handoff clears browserPlaying" '.browserPlaying == false' 6
+# the Session (docs/design/session.md): a tab plays the song (Open), hands it to the handheld at 20 s, takes it back
+SQ=$(($(date +%s) * 1000000))
+OUT='.session.out.kind == "browser" and .session.out.tab == "smoke" and .session.index >= 0'
+post /api/intent -d type=Nope -d tab=smoke; status_is "unknown intent" 400
+post /api/intent -d basis=$(state | jq .session.v) -d type=Open -d tab=smoke -d seq=$SQ --data-urlencode "q=$SONG" -d to=browser; status_is "Open in the tab" 200
+jq_is "the tab is the output and where picks go" '.ok == true and .session.out.tab == "smoke" and .session.pref.tab == "smoke"'
+post /api/intent -d type=Loaded -d tab=smoke -d seq=$((SQ + 1)) -d load=$(jq .session.load "$T/body"); status_is "Loaded" 200
+wait_state "the handheld holds it paused" "$OUT and .paused == true"
+post /api/intent -d basis=$(state | jq .session.v) -d type=SetOutput -d to=handheld -d tab=smoke -d seq=$((SQ + 2)) -d at=20; status_is "SetOutput handheld" 200
+jq_is "the answer has the session" '.ok == true and .session.out.kind == "handheld" and .session.pref.kind == "handheld"'
+wait_state "handoff: playing from 20 s" '.paused == false and .position > 18 and .session.out.kind == "handheld"' 6
+post /api/intent -d type=SetAudio -d tab=smoke -d seq=$((SQ + 3)) -d ord=0 -d of=1 -d lang=eng --data-urlencode "label=Track 1"; status_is "SetAudio" 200
+post /api/intent -d basis=$(state | jq .session.v) -d type=SetOutput -d to=browser -d tab=smoke -d seq=$((SQ + 4)); status_is "SetOutput browser" 200
+wait_state "back in the tab: the handheld paused" "$OUT and .paused == true and .session.audio.set == true" 6
+post /api/intent -d basis=$(state | jq .session.v) -d type=SetOutput -d to=browser -d tab=smoke -d seq=$((SQ + 4)); jq_is "the same seq again is a dup" '.dup == true'
+post /api/intent -d basis=$(state | jq .session.v) -d type=Stop -d tab=smoke -d seq=$((SQ + 5)); status_is "Stop from the tab" 200
+wait_state "Stop: nothing plays, the tab stays where picks go" '.path == "" and .session.index == -1 and .session.pref.tab == "smoke"' 6
+post /api/intent -d basis=$(state | jq .session.v) -d type=SetOutput -d to=handheld -d tab=smoke -d seq=$((SQ + 6)); status_is "the handheld chosen again" 200
+post /api/play --data-urlencode "p=$SONG"; status_is "play a song again" 200; wait_state "on the handheld" '.paused == false and (.path | endswith("01 Sunny Peel.mp3"))' 6
 post /api/cmd -d c=stop; status_is "stop" 200; wait_state "state idle after stop" '.path == ""' 6
 wait $SSEPID 2>/dev/null
 [ -n "${SMOKE_KEEP_SSE:-}" ] && cp "$T/sse" "$SMOKE_KEEP_SSE"
@@ -216,6 +232,18 @@ raw -X POST -H 'X-BP: 1' -d pin=WWWW "$BASE/api/login"
 raw -X POST -H 'X-BP: 1' -d pin=$PIN "$BASE/api/login"
 status_in "right PIN during lockout is refused" 429 401
 jq_is "lockout says how long" '.retryAfter > 0'
+
+echo "== the Session's track matching: web/js/match.js on tests/session_vectors.txt (core-test runs them too)"
+if command -v node >/dev/null; then
+	cd "$(dirname "$0")/.." && node --input-type=module -e "
+import { readFileSync } from 'node:fs'; import { matchTrack } from './web/js/match.js';
+let bad = 0;
+for (const l of readFileSync('tests/session_vectors.txt', 'utf8').split('\n')) { if (!l || l[0] === '#') continue; const c = l.split('\t');
+	const list = c[7].split(' ;; ').map(t => { const x = t.split('|'); return { lang: x[0], label: x[1], external: x[2] === '1', playable: x[3] === '1' }; });
+	const got = matchTrack({ set: c[1] === '1', ord: +c[2], of: +c[3], lang: c[4], label: c[5], external: c[6] === '1' }, list);
+	if (got !== +c[0]) { bad++; console.log('match.js: ' + l + ' -> ' + got); } }
+process.exit(bad ? 1 : 0);"; check "match.js agrees with the vectors" $?; cd - >/dev/null
+else echo "(no node: skipped)"; fi
 
 echo
 echo "web-smoke: $pass passed, $fail failed"

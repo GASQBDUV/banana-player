@@ -1,5 +1,5 @@
 import { html, render, useState, useEffect, useLayoutEffect, useRef, useMemo, useCallback } from '../vendor/htm-preact-standalone.module.js';
-import { B, CUE_SIZES, SPEEDS, SUBS, assBox, setSpeed, toggleCaptions, browserPlay, chooseAudio, chooseSub, directAudio, nativeAudio, playingAudio, streamWhy, continueHere, ctl, cueStyle, el, handoffToHandheld, playParked, probe1, probeOK, setBrowserVol, setCueStyle, setTarget, sizeCues, view } from './browser-player.js';
+import { intent, B, CUE_SIZES, SPEEDS, SUBS, assBox, setSpeed, toggleCaptions, browserPlay, chooseAudio, chooseSub, directAudio, nativeAudio, playingAudio, streamWhy, continueHere, ctl, cueStyle, el, handoffToHandheld, playParked, probe1, probeOK, setBrowserVol, setCueStyle, setTarget, sizeCues, view } from './browser-player.js';
 import { AppMenu, Art, Empty, MoreDots, Seek, coverUrl, openSheet, palOf, useHeld, useMedia, useTick } from './components.js';
 import { NO_HERE, NO_HERE_WHY, Q_DESK, Q_WIDE, lsGet, lsSet, notify, phoneNow, set, store, useStore } from './store.js';
 import { baseName, chapterTitle, dirName, fmtDate, fmtSize, fmtTime, isIOS, kindOfName, throttled, titleFor, touchOnly, userTap } from './util.js';
@@ -630,19 +630,25 @@ function TrackRow({ on, label, sub, onClick, disabled, tag }) {
 	return html`<button class="radio track" role="radio" aria-checked=${!!on} disabled=${disabled} onClick=${onClick}><${Icon} n=${on ? 'radio-on' : 'radio'} k=${2} />
 		<span class="grow"><span class="lab">${label}</span>${sub && html`<span class="sm">${sub}</span>`}</span>${tag && html`<span class="chip">${tag}</span>`}</button>`;
 }
+// the handheld's track (its list as the state has it, by mpv's id; sub 0 off) as the Session's pick: the handheld
+// plays it, and so does this browser if it takes over
+function sendTrack(type, list, id) {
+	const k = list.findIndex(x => x.id === id), x = list[k];
+	return intent(type, k < 0 ? { off: 1, of: list.length } : { ord: k, of: list.length, lang: x.lang || '', label: x.label, external: x.external ? 1 : 0 });
+}
 function HandheldAudio({ t }) {
 	const list = t.audio || [];
 	const [cur, hold] = useChosen(t.aid);
 	if (!list.length) return html`<p class="note pad">This video has no sound.</p>`;
 	if (list.length === 1) return html`<div class="radios"><${TrackRow} on=${true} label=${list[0].label} /></div><p class="note pad">Only one audio track</p>`;
-	const pick = id => { if (id === cur) return; hold(id); post('/api/track', { kind: 'audio', id }).catch(e => { hold(null); errToast(e); }); };
+	const pick = id => { if (id === cur) return; hold(id); sendTrack('SetAudio', list, id).catch(e => { hold(null); errToast(e); }); };
 	return html`<div class="radios" role="radiogroup" aria-label="Audio track">${list.map(a => html`<${TrackRow} on=${a.id === cur} label=${a.label} onClick=${() => pick(a.id)} />`)}</div>`;
 }
 function HandheldSubs({ t }) {
 	const list = t.sub || [];
 	const [cur, hold] = useChosen(t.sid || 0);
 	const [styleOpen, setStyleOpen] = useState(false);
-	const pick = id => { if (id === cur) return; hold(id); post('/api/track', { kind: 'sub', id }).catch(e => { hold(null); errToast(e); }); };
+	const pick = id => { if (id === cur) return; hold(id); sendTrack('SetSub', list, id).catch(e => { hold(null); errToast(e); }); };
 	return html`${list.length ? html`<div class="radios" role="radiogroup" aria-label="Subtitles">
 			<${TrackRow} on=${!cur} label="Off" onClick=${() => pick(0)} />
 			${list.map(x => html`<${TrackRow} on=${x.id === cur} label=${x.label} sub=${x.forced ? 'Forced' : x.external ? 'From a file beside the video' : ''} onClick=${() => pick(x.id)} />`)}</div>`

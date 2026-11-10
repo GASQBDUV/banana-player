@@ -2,7 +2,21 @@ import { useState, useLayoutEffect, useRef } from '../vendor/htm-preact-standalo
 
 // this tab's own id, kept across its reloads (sessionStorage is per tab): the server swaps this tab's old live stream
 // for the new one at once
-export const TAB_ID = (() => { try { let t = sessionStorage.getItem('bpTab'); if (!t) { t = Math.random().toString(36).slice(2, 10); sessionStorage.setItem('bpTab', t); } return t; } catch (e) { return Math.random().toString(36).slice(2, 10); } })();
+// this tab's id, kept across its reloads (sessionStorage). A duplicated tab copies sessionStorage, id and all, while
+// the original is still open: 'bpTabLive' says so (set while the page shows, cleared as it goes away; a reload clears
+// it first), and the copy takes an id of its own, or the two would act as one output
+export const TAB_ID = (() => {
+	const fresh = () => Math.random().toString(36).slice(2, 10);
+	try {
+		let t = sessionStorage.getItem('bpTab');
+		if (!t || sessionStorage.getItem('bpTabLive') === '1') { t = fresh(); sessionStorage.setItem('bpTab', t); }
+		const live = v => { try { sessionStorage.setItem('bpTabLive', v); } catch (e) {} };
+		live('1');
+		addEventListener('pagehide', () => live('0'));
+		addEventListener('pageshow', () => live('1'));
+		return t;
+	} catch (e) { return fresh(); }
+})();
 
 /* ================= store ================= */
 // iPhone and iPad (every browser there is Safari underneath): playing in the page is off for now. Safari's history
@@ -19,7 +33,8 @@ export const store = {
 	// conn: 'ok', 'blip' (failing, the app stays; reconnecting: its banner, after 2 s), 'down' (the down screen)
 	conn: 'ok', reconnecting: false, downReason: '', probing: false, nextTry: 0,
 	snap: null, snapAt: 0, eq: null,
-	target: !NO_HERE && lsGet('bpTarget') === 'browser' ? 'browser' : 'handheld',
+	// where picks go: 'browser' when the Session's pref is this tab (browser-player.js onSession), else 'handheld'
+	target: 'handheld',
 	toasts: [], modals: [], lightbox: null, pick: null, sel: new Set(), upload: { items: [], paused: false }, pls: null, upDone: 0,
 	help: false, dropping: false, fsTick: 0, plTick: 0, route: parseRoute(), fresh: {}, media: null,
 };

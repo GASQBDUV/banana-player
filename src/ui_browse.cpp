@@ -668,7 +668,15 @@ namespace bp
 			case CTX_SETTINGS: openMainMenu(p, TAB_SETTINGS); break;
 			case CTX_R_START:
 				// (what plays: from its start, on the player)
-				if (p.playing() && p.currentPath() == path) { p.seekFraction(0); p.unpause(); showPlayer(); break; }
+				if (p.playing() && p.currentPath() == path)
+				{
+					// (a page playing it: from its start there, as the handheld's seeks reach it)
+					p.seekFraction(0);
+					if (!pageIsOut()) p.unpause();
+					else noteSeek(p, 0);
+					showPlayer();
+					break;
+				}
 				p.forgetPosition(path);
 				openFile(path, p);
 				break;

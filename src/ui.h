@@ -89,7 +89,7 @@ namespace bp
 		bool takeStopPressed() { bool r = stopPressed; stopPressed = false; return r; }
 		// what plays stopped (any Stop, the end of the list): a page playing the file has nothing held here any more
 		// (the page plays on: not told)
-		void stopped() { browserPlaying = false; browserFile.clear(); playHoldAt = 0; }
+		void stopped() { playHoldAt = 0; }
 		// a song or video stopped for a photo (one mpv: a photo replaces it): its place kept, the mini bar offers it back
 		// (park, before the photo opens). Resumed by the bar's play (in the background) or its tap / SELECT (the player)
 		void park(const Player& p);
@@ -191,57 +191,24 @@ namespace bp
 		bool setLikedPath(Player& p, const std::string& path, const std::string& title, double duration, bool on, int at = 0,
 			std::string* dropped = nullptr);
 		bool plIsLiked(const std::string& file) const { return plStore && plStore->isBuiltinFile(file); }
-		// a page in a browser plays (Play in this browser): the handheld paused; true till the handheld plays again
-		bool browserPlaying = false;
-		Uint32 browserPlayAt = 0;
-		bool browserSawPause = false;
-		// where a page playing the file has got to (it says so as it plays, pauses and seeks): play pressed here picks up
-		// there, not where this paused copy was left
-		struct BrowserPos { std::string path; double t = -1; Uint32 at = 0; bool playing = false; } browserPos;
-		void resumeFromBrowser(Player& p);
-		// while a page plays the file, the paused copy here stays where it was (no seek every few seconds: that decodes a
-		// frame each time): the bar, times and chapter show where the page should have got to, from its last word
+		// a page in a browser plays what plays here (the Session's output is that tab): the handheld holds it paused
+		bool pageIsOut() const;
+		// while a page plays the file, the paused copy here stays where it was (no seek per report: that decodes a frame):
+		// the bar, times and chapter show the session's place (posNow); a seek made here is the session's Seek
 		bool predicting(const Player& p) const;
 		double shownPosition(const Player& p) const;
 		int shownChapter(const Player& p) const;
-		void noteSeek(const Player& p, double t);	// a seek made here meanwhile: the prediction goes from there at once
-		// the paused copy moved to follow the page (till then: not a seek made here), and where it was last seen
-		Uint32 browserSyncUntil = 0;
-		double browserSeenPos = -1;
-		// Prev (-1) / Next (+1) pressed here while a page plays the file: main passes it to the page (handheld-skip),
-		// which moves on in its own list; the paused copy here follows when the page opens the next. A sum, not the last
-		// press: several presses between two passes of main's loop each count
-		int browserSkip = 0;
-		// a page plays, and the handheld's L/R are its (even while the copy here still opens the page's last file, when
-		// predicting() can't say yet: stepped here, that copy would start sounding and the page would stop)
+		void noteSeek(const Player& p, double t);	// a seek made here meanwhile: the session's Seek (the page follows)
+		// a page plays, and the handheld's A is its (Play / Pause of the session)
 		bool pageDrives(const Player& p) const;
-		// A (or the Play button) while a page drives: a short press plays or pauses the page (main sends
-		// handheld-toggle {play}, the state wanted, not a blind flip: a press seen twice, or two presses in one pass of
-		// main's loop, can't end up the wrong way round); held PLAY_HOLD_MS it plays here instead (takeOver). The wish
-		// stands for the label and the prediction till the page says it (browser-pos) or WANT_MS passes
-		static constexpr Uint32 PLAY_HOLD_MS = 600, WANT_MS = 2500;
+		// A (or the Play button) while a page drives: a short press plays or pauses the page (the session's Play /
+		// Pause, the state wanted: a press seen twice can't undo itself); held PLAY_HOLD_MS it plays here (takeOver)
+		static constexpr Uint32 PLAY_HOLD_MS = 600;
 		Uint32 playHoldAt = 0;
 		bool playHoldTouch = false;	// the hold is a finger's on the Play button (else A's)
-		int browserWant = -1;	// 1 play, 0 pause, -1 none pending
-		Uint32 browserWantAt = 0;
-		bool browserToggleSend = false;	// for main: send handheld-toggle with browserWant
-		bool pagePlaying() const;	// the page plays, as last said or as just asked
+		bool pagePlaying() const;	// the page plays (the session's wish)
 		void toggleBrowser(Player& p);
 		void takeOver(Player& p);
-		// the page's last word (browser-play, browser-pos, stop): its tab and a number that only grows; an older one
-		// arriving late (two requests can overtake each other) is dropped, so an older file never opens after a newer
-		std::string browserTab;
-		long long browserSeq = 0;
-		std::string browserFile;	// the file the page last said it plays (browser-play)
-		// a page is the sound: it said it plays (browser-play), and hasn't stopped or been taken over since. Unlike
-		// browserPlaying, the handheld's own Stop leaves it (the page plays on): a song or video picked here goes there
-		bool pageOut = false;
-		// the last pick sent to the page (main: opened here held, then handheld-open {tok} once it's loaded): answered by
-		// the page's browser-play for it, or refused (/api/browser-refuse: it plays here)
-		int pageOpenTok = 0;
-		std::string pageOpenPath;
-		Uint32 pageOpenAt = 0;
-		bool pageOpenSent = false, pageOpenRefused = false;
 		// an audio track or subtitles (id 0: off) chosen, as the Audio & Subtitles page chooses one (and the web): the
 		// language remembered as the settings say, and "Audio: <its label>" over the top panel. false: no such track
 		bool chooseTrack(Player& p, TrackType type, int64_t id);
@@ -253,6 +220,7 @@ namespace bp
 
 	private:
 		friend struct WebPlayerGlue;
+		friend class SessionHost;
 		friend struct WebPlaylistGlue;
 		enum class Page { Main, Tracks, Chapters, Settings, Browse, Info, About, Exit, Sound, Web, Playing };
 		struct Rect { int x, y, w, h; bool hit(int px, int py) const { return px >= x && py >= y && px < x + w && py < y + h; } };

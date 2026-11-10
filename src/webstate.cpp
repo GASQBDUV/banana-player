@@ -35,7 +35,7 @@ namespace bp
 				j.key(name).arr();
 				for (auto& t : v)
 					j.obj().key("id").num(t.id).key("label").str(t.label).key("selected").boolean(t.selected)
-						.key("default").boolean(t.isDefault).key("forced").boolean(t.forced).key("external").boolean(t.external).end();
+						.key("default").boolean(t.isDefault).key("forced").boolean(t.forced).key("external").boolean(t.external).key("lang").str(t.lang).end();
 				j.end();
 			};
 			j.obj();
@@ -43,8 +43,9 @@ namespace bp
 			list("sub", s.subTracks);
 			j.key("aid").num(s.aid).key("sid").num(s.sid).end();
 		}
-		j.key("browserPlaying").boolean(s.browserPlaying).key("clients").num(s.clients);
-		j.key("session").obj().key("boot").num(s.sessionBoot).key("v").num(s.sessionV).end();
+		j.key("clients").num(s.clients);
+		if (s.session.empty()) j.key("session").obj().key("boot").num(s.sessionBoot).key("v").num(s.sessionV).end();
+		else j.key("session").raw(s.session);
 		j.key("playlistSerial").num(s.playlistSerial).key("liked").boolean(s.liked).key("showHiddenFolders").boolean(s.showHiddenFolders);
 		j.end();
 		return j.out();
@@ -57,7 +58,7 @@ namespace bp
 			a.index != b.index || a.count != b.count || a.loading != b.loading || a.paused != b.paused ||
 			a.duration != b.duration || a.speed != b.speed || a.volume != b.volume || a.eqOn != b.eqOn ||
 			a.eqPreset != b.eqPreset || a.eqGains != b.eqGains || a.fx != b.fx || a.loop != b.loop ||
-			a.shuffled != b.shuffled || a.chapter != b.chapter || a.browserPlaying != b.browserPlaying ||
+			a.shuffled != b.shuffled || a.chapter != b.chapter || a.sessionV != b.sessionV || a.sessionBoot != b.sessionBoot ||
 			a.clients != b.clients || a.playlistSerial != b.playlistSerial || a.liked != b.liked || a.showHiddenFolders != b.showHiddenFolders || a.chapters.size() != b.chapters.size() ||
 			a.hasTracks != b.hasTracks || a.audioTracks != b.audioTracks || a.subTracks != b.subTracks || a.aid != b.aid ||
 			a.sid != b.sid)

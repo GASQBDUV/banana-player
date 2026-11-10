@@ -476,18 +476,29 @@ handheld, carries on at 1:27"):
   the browser was: the button fills as you hold, the top screen says **Playing on the handheld**, and the browser stops.
   **L / R** on the handheld move the browser's list on, however fast they're pressed: every press counts, and both end
   on the same file (**L** 5 s or more into the browser's song restarts it first, as Previous does everywhere).
-- The browser stays the sound while it plays: a song or video opened on the handheld (from the list, Recent, a
-  playlist, Play folder, Shuffle play, the mini bar) plays **in the browser**, in the handheld's list, and the handheld
-  holds it paused, as if the browser had picked it. Picked fast, the last pick wins. These still play on the handheld:
-  photos (the browser plays on while you look), files the browser can't play (AVI, AC3/DTS, WMA, APE…: the top screen
-  says **This one plays on the handheld** and the browser stops), network files, and anything opened once the browser's
-  tab is closed or the browser has stopped. **Hold A** is still the way to bring the sound back to the handheld.
+- **Where it plays is one choice for the whole system**, the switch's: anything opened plays there, whichever device
+  it was picked on. With **This browser** chosen, a song or video opened on the handheld (from the list, Recent, a
+  playlist, Play folder, Shuffle play, the mini bar) or in another browser tab plays **in that browser**, in the
+  handheld's list, and the handheld holds it paused, as if the browser had picked it. Picked fast, the last pick wins.
+  Only the switch, **Continue here**, **Play here** / **Play on handheld** and holding **A** change the choice: Stop
+  (on either side), the end of a list, pausing, a photo, a dropped connection and a file the browser can't play leave it
+  as it is. Switching in another tab moves it to that tab.
+  These play on the handheld once, with the browser still chosen for the next one: files the browser can't play (AVI,
+  AC3/DTS, WMA, APE…, picked anywhere, the browser's own Next included: the top screen says **This one plays on the
+  handheld**) and network files. A photo opened on the handheld while the browser plays leaves the browser playing;
+  closing the photo, the handheld holds the browser's file again. Once the chosen tab has been closed (or lost its connection) for 10 seconds, the
+  handheld is chosen again: what the browser played waits there paused at its place (**Your browser went · paused
+  here**), and **Play** carries on. **Hold A** is still the way to bring the sound back to the handheld.
   Leaving the handheld's player (**B**) changes nothing for the browser: its mini bar reads **Playing in your browser**
-  (tap its mark to play or pause the browser, hold the mark to take it over). **Stop** on the handheld only lets go of
-  its paused copy: the browser plays on. **Stop** in the browser unloads the handheld's copy too.
+  (tap its mark to play or pause the browser, hold the mark to take it over). **Stop** on the handheld stops the browser
+  too (the browser stays chosen: the next pick plays there). **Stop** in the browser unloads the handheld's copy too.
+- A dashboard in another tab or device, while a browser plays, is a remote for it: **Play**/**Pause**, seeking,
+  chapters, **Previous**/**Next** and **Stop** act on what that browser plays (the sound stays there).
 - While the handheld plays something behind its list (its player left, not stopped), the dashboard's player says
   **On handheld · in the background**, and its controls still drive it.
-- Switching the target while something plays carries on from the same place.
+- Switching the target while something plays carries on from the same place, with the same audio track and subtitles
+  (a second language, English subtitles: chosen on one side, they're what the other plays; one the browser can't play
+  plays its default there and comes back on the handheld). A paused file stays paused where it goes.
 - A file the browser can't play (AVI, AC3 or DTS sound, WMA, APE and so on) says **Plays on the handheld only**.
 - **Tracks** in the browser (a video's audio and subtitles), as Plex does it: the video stays the file itself (Direct
   Play) whenever it can.

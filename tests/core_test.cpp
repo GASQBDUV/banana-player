@@ -2436,7 +2436,6 @@ static void testWeb()
 		CHECK_EQ(differs([](WebSnapshot& s) { s.chapters[1].start = 61; }), true);
 		CHECK_EQ(differs([](WebSnapshot& s) { s.chapters.pop_back(); }), true);
 		CHECK_EQ(differs([](WebSnapshot& s) { s.chapter = 1; }), true);
-		CHECK_EQ(differs([](WebSnapshot& s) { s.browserPlaying = true; }), true);
 		CHECK_EQ(differs([](WebSnapshot& s) { s.clients = 2; }), true);
 		CHECK_EQ(differs([](WebSnapshot& s) { s.playlistSerial = 3; }), true);
 		CHECK_EQ(differs([](WebSnapshot& s) { s.showHiddenFolders = true; }), true);
@@ -2460,7 +2459,7 @@ static void testWeb()
 			"\"source\":{\"kind\":\"playlist\",\"title\":\"\",\"id\":\"Road.m3u\",\"index\":0,\"count\":2},\"screen\":\"browser\",\"loading\":false,"
 			"\"paused\":false,\"position\":1.5,\"positionAt\":42,\"duration\":0,\"speed\":1,\"volume\":0,"
 			"\"eq\":{\"on\":false,\"preset\":\"\",\"gains\":[-3,0,0,0,0,0,0,0,0,0]},\"fx\":\"\",\"loop\":\"one\","
-			"\"shuffled\":false,\"chapters\":[{\"title\":\"A\",\"start\":0}],\"chapter\":0,\"tracks\":null,\"browserPlaying\":false,"
+			"\"shuffled\":false,\"chapters\":[{\"title\":\"A\",\"start\":0}],\"chapter\":0,\"tracks\":null,"
 			"\"clients\":1,\"session\":{\"boot\":0,\"v\":0},\"playlistSerial\":0,\"liked\":false,\"showHiddenFolders\":false}"));
 
 		// the handheld's screen (its player left, or back to it) is news: the dashboard says "in the background"
@@ -2478,8 +2477,8 @@ static void testWeb()
 		v.aid = 1;
 		std::string vj = toJson(v);
 		CHECK_EQ(vj.find("\"tracks\":{\"audio\":[{\"id\":1,\"label\":\"English\",\"selected\":true,\"default\":true,"
-			"\"forced\":false,\"external\":false},{\"id\":2,") != std::string::npos, true);
-		CHECK_EQ(vj.find("\"forced\":true,\"external\":true}],\"aid\":1,\"sid\":0}") != std::string::npos, true);
+			"\"forced\":false,\"external\":false,\"lang\":\"\"},{\"id\":2,") != std::string::npos, true);
+		CHECK_EQ(vj.find("\"forced\":true,\"external\":true,\"lang\":\"\"}],\"aid\":1,\"sid\":0}") != std::string::npos, true);
 		WebSnapshot v2 = v;
 		CHECK_EQ(snapshotChanged(v, v2), false);
 		v2.audioTracks[0].selected = false;
@@ -2711,6 +2710,69 @@ namespace
 
 static void testSessionNamed()
 {
+	{
+		// stop on handheld keeps the browser as the output for the next open
+		Sim m;
+		m.open(5, 1, "tabA");
+		m.loaded();
+		m.go(m.mk(IntentType::Stop));
+		CHECK_EQ(m.s.index, -1);
+		CHECK_EQ(m.s.pref, browserOut("tabA"));
+		m.fx.clear();
+		m.open(5, 3);	// picked on the handheld
+		CHECK_EQ(m.s.out, browserOut("tabA"));
+		CHECK_EQ(m.count(Effect::HhPlay, m.fx), 0);
+		CHECK_EQ(m.fx.size() > 0 && m.fx[0].kind == Effect::HhLoad && m.fx[0].hold, true);
+	}
+	{
+		// open from the handheld with pref=browser goes to the browser; from the page with pref=handheld, the handheld
+		Sim m;
+		m.output(browserOut("tabA"), "tabA", m.s.v);	// the switch, with nothing playing
+		CHECK_EQ(m.s.pref, browserOut("tabA"));
+		m.open(4, 0);
+		CHECK_EQ(m.s.out, browserOut("tabA"));
+		Sim h;
+		Intent o = h.mk(IntentType::Open, "tabA");
+		o.queue = {"/m/a.mp4", "/m/b.mp4"};
+		h.go(o);
+		CHECK_EQ(h.s.out, handheldOut());
+		CHECK_EQ(h.count(Effect::HhPlay, h.fx), 1);
+	}
+	{
+		// stop, the end of the list, a photo, a file the browser can't play, a pause: pref stays the browser
+		Sim m;
+		m.open(2, 0, "tabA");
+		m.loaded();
+		m.toggle("tabA");
+		CHECK_EQ(m.s.pref, browserOut("tabA"));
+		Intent park = m.mk(IntentType::PhotoPark);
+		m.go(park);
+		CHECK_EQ(m.s.pref, browserOut("tabA"));
+		m.report(IntentType::CantPlay, "tabA", m.s.load);	// can't play it after all: the handheld plays it, once
+		CHECK_EQ(m.s.out, handheldOut());
+		CHECK_EQ(m.s.pref, browserOut("tabA"));
+		m.step(1);	// the next one: the browser again
+		CHECK_EQ(m.s.out, browserOut("tabA"));
+		Intent no = m.mk(IntentType::Open);
+		no.queue = {"/m/x.mkv", "/m/y.mkv"};
+		no.browserCan = false;
+		m.go(no);
+		CHECK_EQ(m.s.out, handheldOut());
+		CHECK_EQ(m.s.pref, browserOut("tabA"));
+		m.step(1);
+		m.loaded();
+		m.report(IntentType::Ended, outOrigin(m.s), m.s.load);	// the end of the list
+		CHECK_EQ(m.s.index, -1);
+		CHECK_EQ(m.s.pref, browserOut("tabA"));
+		m.open(3, 0);
+		CHECK_EQ(m.s.out, browserOut("tabA"));
+		// only SetOutput moves it
+		m.output(handheldOut(), "tabA", m.s.v);
+		CHECK_EQ(m.s.pref, handheldOut());
+		m.go(m.mk(IntentType::Stop));
+		m.open(3, 0);
+		CHECK_EQ(m.s.out, handheldOut());
+	}
 	{
 		// fast Next x15 Prev x7 ends at +8, reports arriving shuffled; one HhLoad per pass
 		for (int browser = 0; browser < 2; browser++)
@@ -3284,6 +3346,43 @@ static bool fuzzSession(uint32_t seed, int steps)
 	return true;
 }
 
+// matchTrack against tests/session_vectors.txt, which web/js/match.js runs too (tools/web-smoke.sh)
+static void testMatchVectors()
+{
+	std::ifstream f(BP_TESTS_DIR "/session_vectors.txt");
+	std::string line;
+	int n = 0;
+	auto split = [](const std::string& s, const std::string& sep) {
+		std::vector<std::string> out;
+		size_t at = 0;
+		for (size_t k; (k = s.find(sep, at)) != std::string::npos; at = k + sep.size()) out.push_back(s.substr(at, k - at));
+		out.push_back(s.substr(at));
+		return out;
+	};
+	while (std::getline(f, line))
+	{
+		if (line.empty() || line[0] == '#') continue;
+		auto c = split(line, "\t");
+		if (c.size() != 8) { CHECK_EQ(line, std::string("8 columns")); continue; }
+		TrackPick k;
+		k.set = c[1] == "1";
+		k.ord = atoi(c[2].c_str());
+		k.of = atoi(c[3].c_str());
+		k.lang = c[4];
+		k.label = c[5];
+		k.external = c[6] == "1";
+		std::vector<TrackInfo> list;
+		for (auto& t : split(c[7], " ;; "))
+		{
+			auto x = split(t, "|");
+			if (x.size() == 4) list.push_back({x[0], x[1], x[2] == "1", x[3] == "1"});
+		}
+		CHECK_EQ(matchTrack(k, list), atoi(c[0].c_str()));
+		n++;
+	}
+	CHECK_EQ(n >= 10, true);
+}
+
 static void testSessionFuzz()
 {
 	int runs = 2000;
@@ -3297,6 +3396,7 @@ static void testSessionFuzz()
 int main()
 {
 	testSessionNamed();
+	testMatchVectors();
 	testSessionFuzz();
 	testCrashLog();
 	testWeb();

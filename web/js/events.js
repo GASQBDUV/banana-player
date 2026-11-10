@@ -1,8 +1,7 @@
 import { TAB_ID, set, store } from './store.js';
-import { B, bPos, browserNext, dropBrowser, el, handheldOpen, handheldToggle, handheldTookOver, seekTo, updateMediaSession } from './browser-player.js';
+import { B, el, isPref, onSession, updateMediaSession } from './browser-player.js';
 import { markUsed } from './plshared.js';
 import { C, connFail, goDown, signOutHere } from './connection.js';
-import { markTrack, toast } from './toasts.js';
 import { fetchT, get } from './api.js';
 
 /* ================= live updates ================= */
@@ -10,20 +9,17 @@ let es = null;
 export function applySnap(s) {
 	const prev = store.snap;
 	set({ snap: s, snapAt: Date.now() });
-	// the handheld plays again (paused -> playing): this page pauses its player. Not on a snapshot that merely still
-	// says "playing": Continue here starts the browser a moment before the handheld's pause shows in the state
-	// (and only once it has been seen paused on this page's file: opening it there, it can look like playing a moment)
-	if (B.active && B.meta && s.path === B.meta.p && s.paused && !s.loading) B.handheldQuiet = true;
-	// (a Stop there isn't playing again: nothing plays, so its "paused" is false too, and this page plays on)
-	if (s.path && s.paused === false && !s.loading && prev && prev.paused === true && B.active && B.handheldQuiet && !el.paused && !B.leaving && Date.now() - (B.announcedAt || 0) > 2000) handheldTookOver();
+	// the Session: where it plays and where picks go. Out moving to this tab loads its file here; leaving, it stops
+	onSession(s.session);
 	if (!prev || prev.playlistSerial !== s.playlistSerial) set({ plTick: store.plTick + 1 });
 	// a playlist playing on the handheld is a recent one (the Playlists page's Recent, the sidebar's)
 	if (s.source && s.source.kind === 'playlist' && s.source.id && !s.paused && (!prev || prev.path !== s.path)) markUsed(s.source.id);
 	updateMediaSession();
 }
 export function openSSE() {
-	// hidden, the page listens only while it plays: the handheld playing again must pause it (two sounds otherwise)
-	if (es || (document.hidden && !playingHere()) || !store.authed || store.conn !== 'ok') return;
+	// hidden, the page listens only while it plays, or while it's where picks go (a song picked on the handheld comes
+	// here, a locked phone too): the handheld taking over must stop it (two sounds otherwise)
+	if (es || (document.hidden && !playingHere() && !isPref()) || !store.authed || store.conn !== 'ok') return;
 	const me = es = new EventSource('/api/events?tab=' + TAB_ID);
 	let heard = false;
 	C.lastEvent = Date.now();
@@ -34,9 +30,6 @@ export function openSSE() {
 	on('playlists', () => set({ plTick: store.plTick + 1, plExternal: true }));
 	// the handheld's history changed (played, removed, cleared, here or there): Recent loads again
 	on('recent', () => set({ recentTick: (store.recentTick || 0) + 1 }));
-	// started on the handheld from another page: this one's file goes, or Play here would bring two sounds back
-	// (not one about this page's own Play: the handheld opening the file paused can look like playing for a moment)
-	on('handheld-play', () => { if (B.active && Date.now() - (B.announcedAt || 0) > 1500 && (B.handheldQuiet || Date.now() - B.announcedAt > 8000)) handheldTookOver(); });
 	on('bye', d => {
 		const r = d.reason || 'quit';
 		if (r === 'pin') return signOutHere('pin');
@@ -45,17 +38,6 @@ export function openSSE() {
 		goDown(r);
 	});
 	on('awake', () => clearTimeout(C.graceTimer));
-	// Prev / Next pressed on the handheld while this page plays: this page's list moves on (as its own buttons do), by
-	// as many as were pressed (n); pressed fast, browserNext sums them and loads only the last
-	on('handheld-skip', d => { if (B.active && B.meta && B.parked == null && (d.dir === 1 || d.dir === -1)) { markTrack(d.dir); browserNext(false, d.dir, d.n || 1, true); } });
-	// A (or its Play) on the handheld while this page plays: this page plays or pauses ({play}: the state wanted)
-	on('handheld-toggle', d => handheldToggle(d.play === 1));
-	// Stop on the handheld while this page plays: one Stop, everywhere (the handheld already stopped: nothing to tell it)
-	on('handheld-stop', () => { if (B.active) { dropBrowser(); toast('Stopped on the handheld'); } });
-	// a song or video picked on the handheld while this page is the sound: it plays here (or, one it can't, is refused)
-	on('handheld-open', d => handheldOpen(d));
-	// the handheld seeked while this page plays its file: here too
-	on('handheld-seek', d => { if (B.active && B.meta && B.parked == null && typeof d.t === 'number' && store.snap && store.snap.path === B.meta.p && Math.abs(bPos() - d.t) > .5) seekTo(d.t); });
 	es.onerror = () => {
 		if (es !== me || store.conn !== 'ok') return;
 		if (heard) return connFail();

@@ -68,8 +68,13 @@ tools/make-sprite.py                                 # regenerates web/sprite.sv
   `web/vendor/`; `cmake/EmbedWeb.cmake` embeds every file under `web/` into the binary.
 - Network: `net*.cpp`, `netstore`, `networker`, `netstream`, `discovery`. Updater: `updater.*`, `update.cpp`.
 - Session (`docs/design/session.md`): `session.*` (bpcore) is the one playback state and its pure reducer `apply()`
-  (invariants and a fuzz test in core-test); `session_host.*` is its shadow (step a): fed from today's hooks, it acts on
-  nothing and logs `session: disagree <what>` where it differs from today's flags.
+  (invariants and a fuzz test in core-test; `matchTrack` also in `web/js/match.js`, both run `tests/session_vectors.txt`).
+  `session_host.*` (`SessionHost::get()`) owns it and runs the effects on mpv once per loop pass (`run()`,
+  coalesced). Opens (main's `routed()`), Step, Ended, Stop, the output (`out`), the selected output (`pref`: only
+  SetOutput, an Open that names where, or a tab gone 10 s move it), the track picks, photos and Woke all go through
+  it; a page sends intents to `/api/intent` and renders from `state.session` (`onSession`/`renderLoad`). While the
+  handheld itself is the output mpv is the clock and reports back (`pass()`). Any new way to play on the handheld
+  while a page is the output goes through `takeOver()` (else the I2 repair pauses it).
 
 ## Hard rules (the reasons are in docs/architecture.md)
 
@@ -110,8 +115,9 @@ tools/make-sprite.py                                 # regenerates web/sprite.sv
   The web app is plain ES modules: export a name where it is declared, assign a `let` only in its own module, and keep
   `store.js` free of app imports. `?debug` exposes `window.__bp` (tests use it). The glyph sprite is generated
   (`tools/make-sprite.py`); web-only glyphs are inline in `index.html`. `web/style.css` copies `theme.h` by hand.
-- **Playing in the browser:** the paused copy on the handheld is never given the page's position; its first play there
-  does `ao-reload`; iPhone/iPad play in the page is off (`NO_HERE`).
+- **Playing in the browser:** the handheld holds a paused copy of the page's item (the Session's `HhLoad` with
+  `hold`), never moved per report (only the session's Seek/SetOutput seek it); its first play there does `ao-reload`;
+  iPhone/iPad play in the page is off (`NO_HERE`). `store.target` is derived from the Session's `pref`.
 - **Tracks in the browser** (docs/notes/2026-11-11-browser-tracks.md): `/api/subs` (WebVTT), `/api/ass` (the whole ASS
   script for JASSUB, vendored in `web/vendor/jassub/`, loaded only when a styled track is chosen) and `/api/fonts` +
   `/api/font` (Matroska font attachments) in `subs.*`; a non-default audio track is a Direct Stream (`remux.*`:

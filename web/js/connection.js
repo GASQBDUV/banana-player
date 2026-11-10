@@ -1,6 +1,6 @@
 import { boot } from './session.js';
 import { set, store } from './store.js';
-import { B, dropBrowser, el, parkHere } from './browser-player.js';
+import { B, dropBrowser, el, isPref, parkHere } from './browser-player.js';
 import { applySnap, closeSSE, openSSE, playingHere, refreshState } from './events.js';
 import { fetchT, get } from './api.js';
 import { closeOverlays, seeVersion, toast } from './toasts.js';
@@ -97,7 +97,7 @@ function onVisible() {
 	else if (store.authed) { openSSE(); refreshState(); }
 }
 document.addEventListener('visibilitychange', () => {
-	if (document.hidden) { clearTimeout(C.timer); C.timer = 0; if (!playingHere()) closeSSE(); }
+	if (document.hidden) { clearTimeout(C.timer); C.timer = 0; if (!playingHere() && !isPref()) closeSSE(); }
 	else onVisible();
 });
 addEventListener('online', onVisible);

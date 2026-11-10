@@ -567,7 +567,7 @@ namespace bp
 			optNum("videoBitrate", (double)m.videoBitrate); optStr("pixFmt", m.pixFmt);
 			w.key("audio").arr();
 			for (auto& a : listAudio(m))
-				w.obj().key("i").num(a.i).key("label").str(a.label).key("default").boolean(a.isDefault).key("codec").str(a.codec).key("channels").num(a.channels).end();
+				w.obj().key("i").num(a.i).key("label").str(a.label).key("default").boolean(a.isDefault).key("codec").str(a.codec).key("channels").num(a.channels).key("lang").str(a.lang).end();
 			w.end().key("subs").arr();
 			auto subs = listSubtitles(real, m);
 			for (auto& s : subs)

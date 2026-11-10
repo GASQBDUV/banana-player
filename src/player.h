@@ -52,12 +52,6 @@ namespace bp
 		// names (all of them), where its subtitles and cover are found (mpv can't look in it itself). The source is the
 		// folder (Folder, or NetFolder for a bpnet:// one)
 		void open(const std::vector<std::string>& list, int index, const std::vector<std::string>& folderNames = {});
-		// the next file opened (the next load: open, openPlaylist, a play request) with this audio track (mpv's aid, 1
-		// on), as loadfile's own option, never a property: the web's "Change it on the handheld". Once, then 0. A song
-		// under a filter graph takes its first track whatever this says
-		int64_t nextAid = 0;
-		// the same for the subtitles: -1 nothing asked, 0 off, else mpv's sid
-		int64_t nextSid = -1;
 		// a playlist's items (local and bpnet:// mixed, in its order: shuffled already for Shuffle play) from paths[index].
 		// Photos are dropped. A local item that isn't there is skipped, here and by next/prev/advance. A network item's
 		// subtitles and cover need its folder's listing, which the caller fetches: see netFolderWanted
@@ -74,6 +68,9 @@ namespace bp
 		// the one before. A photo always steps. false: the first one, under RESTART_S in (nothing happens)
 		static constexpr double RESTART_S = 5;
 		bool back();
+		// to that file of the list as it plays (the one nearest hint when it's there twice; the Session's Step and
+		// Ended): false when the list hasn't it
+		bool jumpTo(const std::string& path, int hint);
 		// at a file's end: the next one, or (Loop all, music) the first again; false when that's all
 		bool advance();
 		bool playingAudio() const { return isAudio && !playlist.empty(); }

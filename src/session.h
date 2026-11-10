@@ -3,6 +3,7 @@
 // through apply(), a pure reducer. No window, no mpv, no network, no clock: `now` (the host's ms clock) is passed in,
 // so a sequence of intents replays exactly (the fuzz test's seeds).
 #include <cstdint>
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -172,4 +173,9 @@ namespace bp
 	std::string checkTransition(const Session& old, const Intent& i, const Result& r, int64_t now);
 	// "v3→v4 fx=[HhLoad,HhPlay]" or "rejected (stale)": a log line's tail
 	std::string describe(const Session& old, const Intent& i, const Result& r);
+	// the session as the pages get it (the state's "session"): {boot, v, out {kind, tab}, pref, load, loaded, index,
+	// file, queue, qindex, playing, pos, dur, speed, audio, sub (picks: {set, ord, of, lang, label, external}), parked,
+	// error}. Paths go through virt; one it gives "" for (the web doesn't serve it) is left out of queue (qindex: the
+	// item's place in what's left, -1 if it went). pos is posNow at now
+	std::string sessionJson(const Session& s, int64_t now, const std::function<std::string(const std::string&)>& virt);
 }

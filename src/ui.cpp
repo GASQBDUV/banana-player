@@ -368,8 +368,9 @@ namespace bp
 		case Button::A:
 			// a page plays it: the page's play/pause as A lets go (release()), here only once held (tick())
 			if (pageDrives(p)) { if (!playHoldAt) { playHoldAt = SDL_GetTicks(); playHoldTouch = false; } break; }
-			SessionHost::shadow().play(p.paused);	// (mpv answers the flip later: paused is still the old state)
-			if (p.paused) resumeFromBrowser(p);
+			// the page is the output but can't hear (its tab gone a moment): play here
+			if (pageIsOut()) { takeOver(p); break; }
+			SessionHost::get().play(p.paused);	// (mpv answers the flip later: paused is still the old state)
 			p.togglePause();
 			break;
 		// out of the player at once: what plays goes on behind the browser (nothing is lost, so a pocket's press costs
@@ -400,21 +401,9 @@ namespace bp
 			break;
 		case Button::L:
 		case Button::R:
-			SessionHost::shadow().step(b == Button::R ? 1 : -1);
-			// a page plays it: the page's song moves on, not this paused copy (which would start sounding here)
-			if (pageDrives(p))
-			{
-				// the page's Previous follows the same rule (browserNext): the first press of a burst, RESTART_S or more
-				// in, restarts it; on the first one before that, nothing, said here
-				if (b == Button::L && !browserSkip && !p.loading())
-				{
-					double t = shownPosition(p);
-					if (t >= Player::RESTART_S) noteSeek(p, 0);
-					else if (p.index() == 0 && p.settings.loop != LOOP_ALL) { p.osd("This is the first one"); break; }
-				}
-				browserSkip += b == Button::R ? 1 : -1;
-				break;
-			}
+			// the session's Step (Previous RESTART_S in restarts; a burst counts every press; a page playing it moves on
+			// there, the copy here following held). What the session doesn't have (it disagrees: logged), as before
+			if (SessionHost::get().stepsHere(p)) { SessionHost::get().step(b == Button::R ? 1 : -1); break; }
 			if (b == Button::L ? !p.back() : !p.next()) p.osd(b == Button::L ? "This is the first one" : "This is the last one");
 			break;
 		case Button::Up: case Button::Down:
@@ -466,7 +455,6 @@ namespace bp
 		// Home's Recent: listed again when what plays changes (the next song started by itself: its card comes first)
 		if (page == Page::Browse && !inMenu && atHome() && !homeTouch && !ctxOpen && p.currentPath() != homeListedFor)
 			enterFolder(HOMEDIR, p);
-		if (browserWant >= 0 && SDL_GetTicks() - browserWantAt >= WANT_MS) browserWant = -1;
 		// the hand-off from a browser: its position, once the file it opened knows its length (5 s at most)
 		if (!seekPath.empty())
 		{

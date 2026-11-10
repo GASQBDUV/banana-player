@@ -444,6 +444,7 @@ namespace bp
 			e.label = trackLabel(t, ++n);
 			e.isDefault = anyDefault ? a.isDefault : e.i == 0;
 			e.codec = a.codec;
+			e.lang = a.lang;
 			e.channels = a.channels;
 			e.stream = a.index;
 			out.push_back(e);

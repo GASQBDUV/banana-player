@@ -1,0 +1,13 @@
+# matchTrack vectors (docs/design/session.md §6), read by core-test and tools/web-smoke.sh (web/js/match.js). One case a line,
+# tab-separated: want  set  ord  of  lang  label  external  list. list: tracks joined by " ;; ", each lang|label|external|playable.
+# want: an index, off (-1) or default (-2)
+-2	0	1	2	jpn	Japanese · AAC Stereo	0	eng|English · AAC Stereo|0|1 ;; jpn|Japanese · AAC Stereo|0|1
+1	1	1	2	jpn	Japanese · AAC Stereo	0	eng|English · AAC Stereo|0|1 ;; jpn|Japanese · AAC Stereo|0|1
+-1	1	-1	3			0	eng|English · ASS · English Karaoke/Signs [0ZC]|0|1 ;; eng|English · ASS · English Subtitles [OZC]|0|1 ;; eng|English · PGS · English Subtitles (Retail)|0|0
+1	1	1	3	eng	English · ASS · English Subtitles [OZC]	0	eng|English · ASS · English Karaoke/Signs [0ZC]|0|1 ;; eng|English · ASS · English Subtitles [OZC]|0|1 ;; eng|English · PGS · English Subtitles (Retail)|0|0
+0	1	1	3	eng	English · ASS · English Subtitles [OZC]	0	eng|English · ASS · English Subtitles [OZC]|0|1 ;; eng|English · ASS · English Karaoke/Signs [0ZC]|0|1 ;; eng|English · PGS · English Subtitles (Retail)|0|0 ;; eng|English · SRT|1|1
+-2	1	2	3	eng	English · PGS · English Subtitles (Retail)	0	eng|English · ASS · English Karaoke/Signs [0ZC]|0|1 ;; eng|English · ASS · English Subtitles [OZC]|0|1 ;; eng|English · PGS · English Subtitles (Retail)|0|0
+-2	1	2	4	eng	English · PGS · English Subtitles (Retail)	0	eng|English · ASS · English Karaoke/Signs [0ZC]|0|1 ;; eng|English · ASS · English Subtitles [OZC]|0|1 ;; eng|English · PGS · English Subtitles (Retail)|0|0
+3	1	0	1	eng	English · SRT (beside)	1	eng|English · ASS · English Subtitles [OZC]|0|1 ;; eng|English · ASS · English Karaoke/Signs [0ZC]|0|1 ;; eng|English · PGS · English Subtitles (Retail)|0|0 ;; eng|English · SRT|1|1
+1	1	5	9	JPN	Japanese · FLAC	0	eng|English · AAC Stereo|0|1 ;; jpn|Japanese · AAC Stereo|0|1
+-2	1	0	1	fre	French · AAC	0	eng|English · AAC Stereo|0|1 ;; jpn|Japanese · AAC Stereo|0|1

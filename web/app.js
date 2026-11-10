@@ -25,7 +25,7 @@ const NAV = [['playing', 'Playing', 'note', '#/playing'], ['files', 'Files', 'fo
 async function loadPls() { try { set({ pls: (await get('/api/playlists', null, { quiet: true })).playlists || [] }); } catch (e) {} }
 
 // the handheld plays it behind its browser (its player left, not stopped): the bars say so
-const bgShown = () => !!store.snap && !!store.snap.path && store.snap.screen === 'browser' && !store.snap.browserPlaying;
+const bgShown = () => { const sn = store.snap, ss = sn && sn.session; return !!sn && !!sn.path && sn.screen === 'browser' && !(ss && ss.out && ss.out.kind === 'browser' && ss.index >= 0); };
 // the phone's small player, floating over the tab bar
 function MiniPlayer() {
 	const v = view(); useTick(1000);

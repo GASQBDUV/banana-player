@@ -1,9 +1,12 @@
 #pragma once
-// The Session's host on the handheld (docs/design/session.md §2). Step (a): a SHADOW. Today's code calls the hooks
-// below where it acts (opens, steps, toggles, the page's words, the hand-off, Stop, a photo over music); the host turns
-// them into intents, runs the reducer beside today's flags, executes no effect, and logs `session: disagree <what>`
-// when its output, file or play state differs from today's for a while. It never touches mpv and never blocks.
+// The Session's host on the handheld (docs/design/session.md §2), on the main thread only: it holds the Session, is the
+// only caller of apply(), and runs the effects on the handheld's mpv (run(), once per pass of main's loop, coalesced).
+// Live intents: everything a page sends (/api/intent), the handheld's Open/Step/Ended/Stop/photo/Woke, a page's
+// Play/Pause/Seek from the handheld, and the host's Tick/TabGone/TabBack. While the handheld itself is the output, mpv
+// is the clock: its play state and place come back as reports (pass()), and the few calls left non-live (play(),
+// seek()) only tell the session what the handheld just did.
 #include "session.h"
+#include "tracks.h"
 #include <cstdint>
 #include <functional>
 #include <map>
@@ -19,62 +22,97 @@ namespace bp
 	class SessionHost
 	{
 	public:
-		static SessionHost& shadow();	// the one on the main thread (only the main thread calls it)
+		static SessionHost& get();
+
+		// the executor's hands (main, once both exist)
+		void attach(Player* p, Ui* u) { player = p; ui = u; }
 
 		const Session& session() const { return s; }
 		uint64_t boot() const { return s.boot; }
 		uint64_t version() const { return s.v; }
 		std::string file() const { return s.index >= 0 ? s.queue[s.index] : ""; }
+		// a browser tab plays the item (the handheld holds its paused copy): today's browserPlaying, derived
+		bool pageIsOutput() const { return s.index >= 0 && s.out.kind == OutKind::Browser; }
+		// picks go to a browser tab (the selected output, kept by Stop, the end of a list, a file it can't play...)
+		bool prefIsPage() const { return s.pref.kind == OutKind::Browser; }
+		std::string prefTab() const { return prefIsPage() ? s.pref.tab : ""; }
 		// the v of the last snapshot published to the pages: what an old page's word is taken to have seen (its basis)
 		uint64_t publishedV = 0;
 
 		// an intent made here: origin's next seq (the host numbers each origin's words while the old routes carry
 		// none), basis the current v (a legacy page: publishedV)
 		Intent make(IntentType t, const std::string& origin = "hh", bool legacyBasis = false);
-		Result submit(const Intent& i);
+		// live: run its effects on the handheld now (a step-(b) intent); else today's code acts, the session follows
+		Result submit(const Intent& i, bool live = false);
+		// a page's intent (/api/intent), live. Leaving the handheld, its place and tracks are reported first
+		Result fromPage(const Intent& i);
 
-		// ---- hooks from today's code ----
-		// can a browser play this file (the web serves it, a format a browser plays): the context Open and Step need
-		// (main sets it; none: no)
-		std::function<bool(const std::string&)> browserCan;
+		// ---- step (b), live ----
+		// hold A, the handheld's Play while a page is the output, the web's handheld Play, an old page's /api/play of
+		// its own file (at: where it was, t >= 0): SetOutput(hh) + Play
+		void takeOver(double at = -1);
+		// a page's "Play on handheld" of a new pick (/api/play to=handheld): the handheld the selected output before it
+		// opens (not run: what plays now is replaced, not moved)
+		void chooseOutput(const Output& to, const std::string& origin);
+		// the page sent a pick never answered it, or one it said it can't play: CantPlay for it (the handheld plays)
+		void pageCant(const std::string& reason);
+		// a track chosen on the handheld (its Audio & Subtitles page, the web's /api/track): the session's pick
+		void handheldPicked(TrackType type, int64_t id);
+
+		// ---- what the handheld did itself, or picks it made (the session follows: nothing more runs) ----
+		// can that browser tab play this file (the web serves it, a format a browser plays, the tab is there; tab "":
+		// the tab's own word, there by definition): the context Open and Step need (main sets it; none: no)
+		std::function<bool(const std::string& path, const std::string& tab)> browserCan;
 		// a pick (handheld or web) as Open; sourceKind 0 folder, 1 network, 2 playlist. out: given when the picker says
 		// where (the page's Play here / Play in this browser); else the session's pref decides
 		void open(const std::vector<std::string>& paths, int index, int sourceKind, const std::string& title,
-			const std::string& origin, const Output* out, double t);
-		void step(int n, const std::string& origin = "hh");
+			const std::string& origin, const Output* out, double t, bool live = false);
+		// Next / Previous (n: how many; Previous RESTART_S in restarts first), live: the handheld follows in its own list
+		Result step(int n, const std::string& origin = "hh");
+		// a Play / Pause or a seek of what a page plays (the handheld's A, its bar, a remote tab): live, the page follows
+		void playLive(bool on, const std::string& origin = "hh");
+		void seekLive(double t, bool relative, const std::string& origin = "hh");
+		// Next / Previous on the handheld go through the session: it has the item playing here, or a page plays it
+		bool stepsHere(const Player& p) const;
+		// the handheld's file played to its end (it is the output): the next, a wrap, or the end (index -1)
+		Result ended();
 		void toggle(const std::string& origin = "hh");	// the opposite of the session's playing
 		void play(bool on, const std::string& origin = "hh");
-		void takeOver();	// the handheld plays again (hold A, the take-over check): SetOutput(hh) + Play
-		void stop(const std::string& origin, bool legacyBasis);
+		// Stop (the handheld's, a remote's): live, everywhere; the handheld's own stop follows (takeUnload)
+		Result stop(const std::string& origin);
+		// the executor's word to main that what plays here stops (HhUnload): 0 no, 1 a Stop, 2 the end of the list
+		int takeUnload() { int u = unload; unload = 0; return u; }
 		void photoPark(double pos);
 		void photoResume();
-		void fileGone(const std::string& path);
+		bool fileGone(const std::string& path);	// true: it was the session's item (stopped)
 		void seek(double t, bool relative, const std::string& origin);
-		void loop(int value);
 		void woke();
-		// the page's old words: browser-play (file: what it plays), its stop, browser-pos, browser-refuse; /api/play
-		// (after today's code opened it: paths/index are the player's now)
-		void pagePlays(const std::string& tab, const std::string& file, const std::vector<std::string>& paths, int index);
-		void pagePos(const std::string& tab, const std::string& file, double t, bool playing);
-		void pageRefused();
-		// /api/play (= /api/handoff): the sound back here, then what today's code did. opened: it opened a file at once (the
-		// player's list now); else the same file plays on (seek t, play), or main opens it as the loop comes round (a
-		// playlist: the handheld's Open then goes here, the pref being the handheld)
-		void handheldAsked(const Player& p, bool opened, double t);
-
-		// each pass of main's loop: the handheld's reports (as the output), Tick, the tabs, and the comparison.
-		// tabUp: is that tab's event stream connected (empty function: no dashboard)
+		// each pass of main's loop: the handheld's reports (as the output), its picks once it can take them, Tick, the
+		// tabs, invariant I2, the effects. tabUp: is that tab's event stream connected
 		void pass(Player& p, Ui& u, const std::function<bool(const std::string&)>& tabUp);
 
 	private:
 		SessionHost();
 		Session s;
+		Player* player = nullptr;
+		Ui* ui = nullptr;
 		std::map<std::string, uint64_t> seqs;
-		uint32_t tickAt = 0, posAt = 0, tabsAt = 0, mismatchSince = 0;
+		uint32_t tickAt = 0, posAt = 0, tabsAt = 0, mismatchSince = 0, soundingSince = 0;
 		std::map<std::string, bool> tabState;
-		std::string pendingSig, loggedSig;
-		uint32_t pendingAt = 0, loggedAt = 0;
 		uint64_t erroredLoad = 0;
-		void compare(Player& p, Ui& u, uint32_t now);
+		bool picksWanted = false;	// the session's picks to put on the handheld's copy once its tracks are known
+		bool showHere = false;	// the next run that brings the item here shows the player
+		int unload = 0;
+		bool endedFx = false;	// the effects waiting came from the handheld's Ended (its unload is the end of the list)
+		std::vector<Effect> pendingFx;	// live effects, run once per pass of main's loop (coalesce: a burst loads one file)
+		void run(const std::vector<Effect>& fx);
+		bool holdsItem() const;	// the handheld's mpv has the session's item
+		void bringHere(bool show = true);	// opens the session's item on the handheld (it holds another, or none)
+		void seekHere(double t);
+		void applyPicks();
+		void reportHere();	// before the handheld stops being the output: its place and its tracks
 	};
+	// the pick a renderer list's chosen track makes, and the list as matchTrack reads it (the labels as trackLabel's)
+	TrackPick pickOf(const std::vector<Track>& list, int64_t selectedId);
+	std::vector<TrackInfo> infosOf(const std::vector<Track>& list);
 }

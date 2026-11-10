@@ -20,7 +20,7 @@ namespace bp
 	};
 
 	// the file's audio tracks, labelled as the handheld's menu does
-	struct AudioEntry { int i = 0; std::string label, codec; int channels = 0, stream = -1; bool isDefault = false; };
+	struct AudioEntry { int i = 0; std::string label, codec, lang; int channels = 0, stream = -1; bool isDefault = false; };
 	std::vector<AudioEntry> listAudio(const MediaInfo& m);
 	std::vector<SubEntry> listSubtitles(const std::string& real, const MediaInfo& m);
 

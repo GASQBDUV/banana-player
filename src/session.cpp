@@ -1,5 +1,6 @@
 #include "session.h"
 #include "photo.h"
+#include "json.h"
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
@@ -662,6 +663,11 @@ namespace bp
 		bool changed = !samePublished(r.s, old);
 		if (changed && r.s.v != old.v + 1) return "I3: a change without one v";
 		if (!changed && r.s.v != old.v) return "I3: v moved with nothing changed";
+		// the selected output moves only by a choice: SetOutput, an Open that names where (Play here / Play on the
+		// handheld), or the timeout of its tab gone (Tick); not by Stop, the end of a list, a photo, a file it can't play
+		if (r.s.pref != old.pref && i.type != IntentType::SetOutput && !(i.type == IntentType::Open && i.hasOut) &&
+			i.type != IntentType::Tick)
+			return std::string("pref: moved by ") + intentName(i.type);
 		bool report = i.type == IntentType::Loaded || i.type == IntentType::Pos || i.type == IntentType::Ended ||
 			i.type == IntentType::CantPlay;
 		if (report && r.reject.empty() && (i.origin != outOrigin(old) || i.load != old.load)) return "I8: a report from elsewhere taken";
@@ -687,5 +693,39 @@ namespace bp
 			out += effectName(r.fx[k].kind);
 		}
 		return out + "]";
+	}
+
+	std::string sessionJson(const Session& s, int64_t now, const std::function<std::string(const std::string&)>& virt)
+	{
+		JsonWriter j;
+		auto out = [&](const char* name, const Output& o) {
+			j.key(name).obj().key("kind").str(o.kind == OutKind::Handheld ? "handheld" : "browser").key("tab").str(o.tab).end();
+		};
+		auto pick = [&](const char* name, const TrackPick& p) {
+			j.key(name).obj().key("set").boolean(p.set).key("ord").num(p.ord).key("of").num(p.of).key("lang").str(p.lang)
+				.key("label").str(p.label).key("external").boolean(p.external).end();
+		};
+		j.obj().key("boot").num(s.boot).key("v").num(s.v);
+		out("out", s.out);
+		out("pref", s.pref);
+		j.key("load").num(s.load).key("loaded").boolean(s.loaded).key("index").num(s.index);
+		j.key("file").str(s.index >= 0 ? virt(s.queue[s.index]) : "");
+		int qindex = -1, n = 0;
+		j.key("queue").arr();
+		for (int k = 0; k < (int)s.queue.size(); k++)
+		{
+			std::string v = virt(s.queue[k]);
+			if (v.empty()) continue;
+			if (k == s.index) qindex = n;
+			j.str(v);
+			n++;
+		}
+		j.end().key("qindex").num(qindex);
+		j.key("playing").boolean(s.playing).key("pos").num(posNow(s, now)).key("dur").num(s.dur).key("speed").num(s.speed);
+		pick("audio", s.audio);
+		pick("sub", s.sub);
+		j.key("playV").num(s.playV).key("seekN").num(s.seekN);
+		j.key("parked").boolean(s.parked).key("error").str(s.error);
+		return j.end().out();
 	}
 }

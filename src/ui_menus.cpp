@@ -1,4 +1,5 @@
 #include "ui.h"
+#include "session_host.h"
 #include "format.h"
 #include "playlist.h"
 #include "netpath.h"
@@ -141,7 +142,8 @@ namespace bp
 			// from there: playing (a paused one too), the card says where, back to the player
 			int c = (int)r[i].id;
 			p.seekChapter(c);
-			p.unpause();
+			if (!pageIsOut()) p.unpause();
+			else if (c >= 0 && c < (int)p.chapters.size()) noteSeek(p, p.chapters[c].time);	// (a page playing it: the session's Seek, which the page follows)
 			p.showChapterCard(c);
 			page = Page::Main;
 			return;
@@ -161,6 +163,7 @@ namespace bp
 			if (list[i].id == id) label = trackLabel(list[i], (int)i + 1);
 		if (label.empty()) return false;
 		p.selectTrack(type, id);
+		SessionHost::get().handheldPicked(type, id);
 		p.osd(std::string(type == TrackType::Audio ? "Audio: " : "Subtitles: ") + label);
 		return true;
 	}

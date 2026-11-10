@@ -118,7 +118,7 @@ namespace bp
 
 		// main thread: the state snapshot (webstate's toJson); every SSE stream sends it as `event: state`
 		void publish(const std::string& json);
-		// any thread: an event for every SSE stream: "fs" {"dir":…}, "playlists" {"serial":…}, "handheld-play" {},
+		// any thread: an event for every SSE stream: "fs" {"dir":…}, "playlists" {"serial":…}, "recent" {…},
 		// "bye" {"reason":"sleep"} (the lid closed: the stream stays open), "awake" {} (back from it). bye and awake are
 		// news of the moment: a stream that connects later never gets them replayed (Last-Event-ID)
 		void notify(const std::string& event, const std::string& dataJson);
@@ -204,7 +204,4 @@ namespace bp
 	// web's Stop does (back to the browser); false if it didn't (it plays something else, or nothing). Waits for the
 	// main thread (2 s at most): for "Stop and delete", before the file goes
 	bool stopIfPlaying(WebServer& ws, const std::string& real);
-	// main thread: handheld-open's data, for what the handheld just opened held for the page (its list as served, the
-	// file's place in it, its source, where it starts); "" when the file isn't served (the handheld plays it)
-	std::string handheldOpenJson(WebServer& ws, Player& p, Ui& u);
 }

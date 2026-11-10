@@ -72,11 +72,25 @@ def reset_state(scene="audio"):
 	S.clear()
 	S.update(path="", title="", artist="", album="", kind="", source={"kind": "none"}, loading=False, paused=True, position=0, positionAt=now_ms(),
 		duration=0, speed=1, volume=62, eq={"on": True, "preset": "Rock", "gains": [4, 3, 2, 0, -1, -1, 1, 2, 3, 4]}, fx="none", loop="no",
-		shuffled=False, chapters=[], chapter=-1, browserPlaying=False, clients=1, playlistSerial=1)
+		shuffled=False, chapters=[], chapter=-1, clients=1, playlistSerial=1)
 	Q["items"] = []
 	if scene == "audio": play_list(playlist_paths("road-trip"), 1, {"kind": "playlist", "title": "Road trip", "id": "road-trip"}, 61)
 	if scene == "video": play_list(["0/Videos/Sintel (2010).mp4"], 0, {"kind": "folder", "title": "Videos", "id": "0/Videos"}, 120)
 	if scene == "photo": pass
+
+# the Session (docs/design/session.md): only where it plays and where picks go, as the page reads them
+NOPICK = {"set": False, "ord": -1, "of": 0, "lang": "", "label": "", "external": False}
+SS = {"boot": 1, "v": 1, "out": {"kind": "handheld", "tab": ""}, "pref": {"kind": "handheld", "tab": ""}}
+def set_out(kind, tab="", pref=True):
+	SS["out"] = {"kind": kind, "tab": tab if kind == "browser" else ""}
+	if pref: SS["pref"] = dict(SS["out"])
+	SS["v"] += 1
+def snap():
+	i = 0 if S["path"] else -1
+	S["session"] = dict(boot=SS["boot"], v=SS["v"], out=SS["out"], pref=SS["pref"], load=SS["v"], loaded=True, index=i, file=S["path"],
+		queue=[S["path"]] if S["path"] else [], qindex=i, playing=bool(S["path"]) and not S["paused"], pos=cur_pos(), dur=S["duration"],
+		speed=S["speed"], audio=NOPICK, sub=NOPICK, parked=False, error="")
+	return S
 
 def cur_pos():
 	if S["paused"] or not S["path"]: return S["position"]
@@ -89,7 +103,7 @@ def load_file(vp, pos=0):
 	rp = real(vp); rel = os.path.relpath(rp, ROOT); size, dur, kind, play = FAKE.get(rel, (None, 200, "audio", "yes"))
 	name = os.path.basename(rp); title = re.sub(r"^\d+ ", "", name.rsplit(".", 1)[0])
 	S.update(path=vp, title=title, artist="The Peel Brothers" if kind == "audio" else "", album="Highway Slow" if kind == "audio" else "", kind=kind, duration=dur or 200,
-		paused=False, loading=False, chapters=chapters_of(vp), browserPlaying=False)
+		paused=False, loading=False, chapters=chapters_of(vp))
 	set_pos(pos); update_chapter()
 
 def chapters_of(vp):
@@ -141,7 +155,7 @@ EVQ = []   # (event, data)
 def push(ev="state"):
 	sync_liked()
 	with cond:
-		EVQ.append((ev, json.dumps(S) if ev == "state" else "{}")); del EVQ[:-20]; cond.notify_all()
+		EVQ.append((ev, json.dumps(snap()) if ev == "state" else "{}")); del EVQ[:-20]; cond.notify_all()
 
 def ticker():
 	while True:
@@ -191,8 +205,8 @@ class H(http.server.BaseHTTPRequestHandler):
 				if k == "logout": SCENE["tokens"].clear()
 				if k == "lock": SCENE["lockUntil"] = time.time() + 47
 				if k == "free": FAKE_FREE[0] = int(v[0])
-				if k == "browser": S["browserPlaying"] = True
-				if k == "handheld": S["browserPlaying"] = False
+				if k == "browser": set_out("browser", "mock-other", False)
+				if k == "handheld": set_out("handheld", "", False)
 			go = one("go", "/")
 			self.send_response(302); self.send_header("Location", go); self.send_header("Content-Length", "0")
 			if "login" in q: self.send_header("Set-Cookie", "bp_s=mocktoken; Path=/")
@@ -231,7 +245,7 @@ class H(http.server.BaseHTTPRequestHandler):
 		self.send_response(200); self.send_header("Content-Type", ct); self.send_header("Content-Length", str(len(b))); self.send_header("Cache-Control", "no-cache"); self.end_headers(); self.wfile.write(b)
 
 	def api(self, method, path, q, one):
-		if path == "/api/state": sync_liked(); S["position"] = cur_pos() if not S["paused"] else S["position"]; S["positionAt"] = now_ms() if not S["paused"] else S["positionAt"]; return self.send_json(S)
+		if path == "/api/state": sync_liked(); S["position"] = cur_pos() if not S["paused"] else S["position"]; S["positionAt"] = now_ms() if not S["paused"] else S["positionAt"]; return self.send_json(snap())
 		if path == "/api/events": return self.sse()
 		if path == "/api/logout": SCENE["tokens"].clear(); return self.send_json({"ok": True})
 		if path == "/api/roots": return self.send_json({"roots": [{"name": "This card", "path": "0", "free": FAKE_FREE[0], "total": 64_000_000_000}]})
@@ -309,6 +323,7 @@ class H(http.server.BaseHTTPRequestHandler):
 				return self.send_json({"ok": True})
 			if path == "/api/play":
 				ps = gl("p")
+				if g("to") == "handheld": set_out("handheld")
 				if g("playlist"):
 					i = g("playlist"); idx = int(g("index", "0")); items = playlist_paths(i)
 					if g("shuffle") == "1": random.shuffle(items); idx = 0; S["shuffled"] = True
@@ -328,10 +343,17 @@ class H(http.server.BaseHTTPRequestHandler):
 					else:
 						d = p.rsplit("/", 1)[0]; items = folder_media(d); play_list(items, items.index(p), {"kind": "folder", "title": os.path.basename(real(d)), "id": d}, float(g("t", "0")))
 				push(); return self.send_json({"ok": True})
-			if path == "/api/browser-play":
-				if g("stop") == "1": S["browserPlaying"] = False
-				else: S["paused"] = True; set_pos(cur_pos()); S["browserPlaying"] = True
-				push(); return self.send_json({"ok": True})
+			if path == "/api/intent":
+				if g("type") == "SetOutput":
+					if g("to") == "handheld" and SS["out"]["kind"] == "browser" and S["path"]: set_pos(float(g("at", cur_pos()))); S["paused"] = False
+					elif g("to") == "browser": set_pos(cur_pos()); S["paused"] = True
+					set_out(g("to"), g("tab")); push()
+				if g("type") == "Open":
+					qs = q.get("q", []) or f.get("q", [])
+					play_list(qs, int(g("index", "0")), {"kind": g("skind", "folder"), "title": g("stitle"), "id": g("sid")}, float(g("t", "0")))
+					S["paused"] = True; set_out("browser", g("tab")); push()
+				if g("type") == "Stop": reset_state("x"); push()
+				return self.send_json({"ok": True, "v": SS["v"], "session": snap()["session"]})
 			if path == "/api/cmd":
 				c = g("c")
 				if c == "toggle": 
@@ -402,7 +424,7 @@ class H(http.server.BaseHTTPRequestHandler):
 
 	def sse(self):
 		self.send_response(200); self.send_header("Content-Type", "text/event-stream"); self.send_header("Cache-Control", "no-cache"); self.send_header("Connection", "close"); self.end_headers()
-		sync_liked(); self.wfile.write(("event: state\ndata: %s\n\n" % json.dumps(S)).encode()); self.wfile.flush()
+		sync_liked(); self.wfile.write(("event: state\ndata: %s\n\n" % json.dumps(snap())).encode()); self.wfile.flush()
 		last = len(EVQ) and id(EVQ[-1]); seen = id(EVQ[-1]) if EVQ else None
 		while True:
 			with cond:

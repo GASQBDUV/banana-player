@@ -585,8 +585,8 @@ namespace bp
 			// a page plays it: the page's play / pause (as A on the player)
 			if (pageDrives(p)) { toggleBrowser(p); return; }
 			if (!p.error.empty()) return;
-			SessionHost::shadow().play(p.paused);
-			if (p.paused) resumeFromBrowser(p);
+			if (pageIsOut()) { takeOver(p); return; }
+			SessionHost::get().play(p.paused);
 			p.togglePause();
 			return;
 		}
