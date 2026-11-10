@@ -595,7 +595,8 @@ combination instead.)
 - **Volume and brightness:** the keys show a level card on the top screen.
 - **Loading:** a file that takes a moment to open (a big photo, a slow card) shows a spinner on the top screen.
 - **Lock:** locks the touch screen while playing; Screen off still works. Hold the lock for a second to unlock.
-- **Screen off:** turns the bottom screen off to save battery. Touch it or press any button to turn it back on (that
-  press does nothing else). It also turns off by itself
+- **Screen off:** turns the bottom screen off to save battery. While the player is showing, the playback buttons
+  keep working with it off (**A**, **LEFT/RIGHT**, **L/R**, **L2/R2**, **UP/DOWN**, **L3**); a touch or any other button
+  turns it back on (that press does nothing else). Elsewhere (a list), any button turns it back on. It also turns off by itself
   while a song or video plays and nothing is touched (Settings › Controls & screen › **Screen off after**).
 - **Lid:** closing it pauses; opening it keeps it paused until you press play.

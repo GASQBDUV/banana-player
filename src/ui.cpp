@@ -90,12 +90,20 @@ namespace bp
 	{
 		sameBrightness = p.settings.sameBrightness;
 		webInputAt = SDL_GetTicks();
-		// dark (Screen off, or off by itself): any button brings the panel back and does nothing else, as a touch
-		// does (the thumb can't see what it would do). F + START still quits, in main
+		// dark (Screen off, or off by itself): over what plays, the playback keys work blind and leave it dark (play
+		// and pause, seek, next and previous, chapters, speed, like: issue #3, watching with the bottom screen off);
+		// any other button, or anywhere else (a list: A there would open whatever the cursor is on), brings the
+		// panel back and does nothing else, as a touch does. F + START still quits, in main
 		if (!panel.on())
 		{
-			panel.set(true);
-			return false;
+			bool playKey = b == Button::A || b == Button::Left || b == Button::Right || b == Button::L || b == Button::R ||
+						   b == Button::L2 || b == Button::R2 || b == Button::Up || b == Button::Down || b == Button::L3;
+			bool overPlayer = page == Page::Main && !inMenu && !quickOpen && !kbOpen && p.playing() && !p.playingPhoto();
+			if (!(playKey && overPlayer))
+			{
+				panel.set(true);
+				return false;
+			}
 		}
 		if (quickOpen) return quickKey(b, p);
 		if (kbOpen)
