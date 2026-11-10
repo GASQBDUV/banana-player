@@ -1,0 +1,174 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Banana Player promo</title>
+<!-- Instagram pictures for a release, one page per variant (#post, #square, #c1, #c2, #c3); render.mjs shoots them.
+     Colours are Midnight's (docs/design/midnight.md). Only our own material and Sintel (CC BY 3.0, credited). -->
+<style>
+@font-face { font-family: Pixel; src: url(../../assets/fonts/PixelifySans-Regular.ttf); }
+@font-face { font-family: Inter; src: url(../../assets/fonts/Inter-Regular.ttf); font-weight: 400; }
+@font-face { font-family: Inter; src: url(../../assets/fonts/Inter-Bold.ttf); font-weight: 700; }
+:root { --bg: #000; --surface: #121116; --shell: #19181e; --edge: #34323c; --yellow: #FFD23F; --cream: #E8E2D3; --dim: #8F8A80; }
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { background: #000; }
+.art { position: relative; overflow: hidden; color: var(--cream); font-family: Inter, sans-serif;
+	background: radial-gradient(rgba(232, 226, 211, .075) 1.3px, transparent 1.8px) 0 0 / 9px 9px, #000; }
+.glow { position: absolute; border-radius: 50%; background: radial-gradient(closest-side, rgba(255, 210, 63, .16), rgba(255, 210, 63, 0)); pointer-events: none; }
+.pad { position: absolute; inset: 64px; }
+.abs { position: absolute; }
+
+/* the brand line */
+.brand { display: flex; align-items: center; gap: 22px; }
+.brand img { width: 84px; height: 84px; image-rendering: pixelated; }
+.brand b { font: 52px Pixel; color: var(--yellow); font-weight: 400; }
+.chip { margin-left: auto; font: 700 24px Inter; color: #000; background: var(--yellow); border-radius: 8px; padding: 8px 14px; box-shadow: inset 0 -4px 0 #B2932C; }
+.kicker { font: 32px Pixel; color: var(--yellow); letter-spacing: 4px; text-transform: uppercase; }
+h1 { font: 76px/1.08 Pixel; font-weight: 400; color: var(--cream); }
+h1 em { font-style: normal; color: var(--yellow); }
+
+/* callouts: a yellow pixel, then the line */
+.calls { display: grid; gap: 22px 40px; }
+.call { display: flex; align-items: baseline; gap: 18px; font: 700 32px/1.25 Inter; }
+#square .call, #c3 .call { font-size: 30px; }
+.call::before { content: ''; flex: none; width: 14px; height: 14px; background: var(--yellow); transform: translateY(-4px); }
+.call small { display: block; font: 400 30px/1.3 Inter; color: var(--dim); margin-top: 4px; }
+.foot { font: 30px/1.3 Inter; color: var(--cream); }
+.foot .url { display: block; margin-top: 8px; font: 700 34px Inter; color: var(--yellow); }
+.credit { position: absolute; font: 18px Inter; color: #6f6b64; }
+
+/* the handheld: two shells and a hinge, as the RG DS folds (drawn, no maker's marks) */
+.ds { position: absolute; --w: 336px; width: calc(var(--w) + 40px); }
+.ds .shell { background: linear-gradient(#212027, var(--shell)); border-radius: 26px; padding: 20px; box-shadow: inset 0 0 0 2px var(--edge), inset 0 -6px 0 #111015, 0 30px 80px rgba(0, 0, 0, .7); }
+.ds .shell.top { border-radius: 26px 26px 16px 16px; }
+.ds .shell.bot { border-radius: 16px 16px 30px 30px; }
+.ds .scr { display: block; width: var(--w); height: calc(var(--w) * .75); border-radius: 6px; outline: 7px solid #000; }
+.ds .hinge { height: 22px; margin: 0 36px; background: linear-gradient(#0c0b0f, #26252c 45%, #0c0b0f); border-radius: 4px; }
+
+/* the phone: a plain rounded slab */
+.phone { position: absolute; --w: 280px; width: calc(var(--w) + 24px); padding: 12px; border-radius: 50px; background: #0d0c10;
+	box-shadow: inset 0 0 0 2px var(--edge), 0 30px 80px rgba(0, 0, 0, .8); }
+.phone img { display: block; width: var(--w); border-radius: 38px; }
+
+/* a browser window: a bar with three dots */
+.win { position: absolute; border-radius: 16px; overflow: hidden; background: #0d0c10; box-shadow: 0 0 0 2px var(--edge), 0 30px 80px rgba(0, 0, 0, .8); }
+.win .bar { height: 38px; display: flex; align-items: center; gap: 9px; padding: 0 16px; background: #17161b; }
+.win .bar i { width: 12px; height: 12px; border-radius: 50%; background: #3a3842; }
+.win .bar span { margin-left: 18px; font: 17px Inter; color: var(--dim); background: #0d0c10; border-radius: 6px; padding: 4px 14px; }
+.win img { display: block; }
+
+.v { display: none; }
+</style>
+</head>
+<body>
+
+<!-- 1080x1350: the post, and the carousel's first slide -->
+<div class="art v" id="post" style="width:1080px;height:1350px">
+	<div class="glow" style="left:-80px;top:300px;width:900px;height:800px"></div>
+	<div class="pad">
+		<div class="brand"><img src="../../docs/img/icon.png" alt=""><b>Banana Player</b><span class="chip">0.5.4</span></div>
+		<h1 class="abs" style="top:132px;font-size:66px">Your RG DS / RG DS Plus<br>is a <em>little cinema.</em></h1>
+		<div class="win" style="left:300px;top:340px;width:652px">
+			<div class="bar"><i></i><i></i><i></i><span>192.168.1.20:8080</span></div>
+			<img style="width:652px" src="../../docs/img/web-desktop-browser.png">
+		</div>
+		<div class="ds" style="left:0;top:316px;--w:300px">
+			<div class="shell top"><img class="scr" src="img/browser-top.png"></div>
+			<div class="hinge"></div>
+			<div class="shell bot"><img class="scr" src="img/browser-bottom.png"></div>
+		</div>
+		<div class="calls abs" style="top:906px;left:0;right:0;grid-template-columns:1fr;gap:16px">
+			<div class="call">Peaks visualizer &amp; 10-band EQ</div>
+			<div class="call">Keeps playing while you browse</div>
+			<div class="call">Plays in your browser, controlled from the handheld</div>
+			<div class="call">Free &amp; open source</div>
+		</div>
+		<div class="foot abs" style="bottom:0">For BananaOS on the Anbernic RG DS &amp; RG DS Plus<span class="url">github.com/tonywei92/banana-player</span></div>
+	</div>
+	<div class="credit" style="right:64px;bottom:30px">Sintel © Blender Foundation, CC BY 3.0</div>
+	<div class="swipe abs" style="display:none;position:absolute;right:64px;bottom:76px;font:30px Pixel;color:var(--yellow)">swipe →</div>
+</div>
+
+<!-- 1080x1080 -->
+<div class="art v" id="square" style="width:1080px;height:1080px">
+	<div class="glow" style="left:420px;top:80px;width:760px;height:760px"></div>
+	<div class="pad">
+		<div class="brand"><img src="../../docs/img/icon.png" alt=""><b>Banana Player</b><span class="chip">0.5.4</span></div>
+		<h1 class="abs" style="top:150px;font-size:56px;width:450px">Your RG DS /<br>RG DS Plus is a<br><em>little cinema.</em></h1>
+		<div class="foot abs" style="top:400px;width:440px;color:var(--dim)">For BananaOS on the Anbernic RG DS &amp; RG DS Plus</div>
+		<div class="win" style="left:480px;top:130px;width:472px">
+			<div class="bar"><i></i><i></i><i></i><span>192.168.1.20:8080</span></div>
+			<img style="width:452px" src="../../docs/img/web-desktop-browser.png">
+		</div>
+		<div class="ds" style="left:692px;top:390px;--w:220px">
+			<div class="shell top"><img class="scr" src="img/browser-top.png"></div>
+			<div class="hinge"></div>
+			<div class="shell bot"><img class="scr" src="img/browser-bottom.png"></div>
+		</div>
+		<div class="calls abs" style="top:620px;left:0;width:540px;grid-template-columns:1fr;gap:12px">
+			<div class="call">Peaks visualizer &amp; 10-band EQ</div>
+			<div class="call">Keeps playing while you browse</div>
+			<div class="call">Plays in your browser, controlled from the handheld</div>
+			<div class="call">Free &amp; open source</div>
+		</div>
+		<div class="foot abs" style="top:900px"><span class="url" style="margin:0">github.com/tonywei92/banana-player</span></div>
+	</div>
+	<div class="credit" style="right:64px;bottom:28px">Sintel © Blender Foundation, CC BY 3.0</div>
+</div>
+
+<!-- carousel 2: Sound -->
+<div class="art v" id="c2" style="width:1080px;height:1350px">
+	<div class="glow" style="left:-160px;top:280px;width:900px;height:1000px"></div>
+	<div class="pad">
+		<div class="kicker">Sound</div>
+		<h1 class="abs" style="top:56px">Tune every song.</h1>
+		<div class="ds" style="left:0;top:236px;--w:440px">
+			<div class="shell top"><img class="scr" src="img/peaks-top.png"></div>
+			<div class="hinge"></div>
+			<div class="shell bot"><img class="scr" src="img/sound-bottom.png"></div>
+		</div>
+		<div class="calls abs" style="left:528px;right:0;top:280px;grid-template-columns:1fr;gap:56px">
+			<div class="call"><span>Peaks visualizer<small>64 bars, bass on the left; caps hang at the top, then fall</small></span></div>
+			<div class="call"><span>10-band equalizer<small>12 presets, from Bass Boost to Jazz, or your own</small></span></div>
+			<div class="call"><span>Room effects<small>Room, Concert hall, Church, Cave, Wide stereo, Headphones</small></span></div>
+			<div class="call"><span>Heard at once<small>Set it on the handheld or from your phone</small></span></div>
+		</div>
+		<div class="foot abs" style="bottom:0">Free · for the Anbernic RG DS &amp; RG DS Plus<span class="url">github.com/tonywei92/banana-player</span></div>
+	</div>
+</div>
+
+<!-- carousel 3: the web dashboard -->
+<div class="art v" id="c3" style="width:1080px;height:1350px">
+	<div class="glow" style="left:200px;top:200px;width:1000px;height:900px"></div>
+	<div class="pad">
+		<div class="kicker">Web dashboard</div>
+		<h1 class="abs" style="top:56px;font-size:60px">Hear it on your computer.<br><em>Control it from the handheld.</em></h1>
+		<div class="win" style="left:0;top:236px;width:840px">
+			<div class="bar"><i></i><i></i><i></i><span>192.168.1.20:8080</span></div>
+			<img style="width:840px" src="../../docs/img/web-desktop-browser.png">
+		</div>
+		<div class="ds" style="left:612px;top:480px;--w:300px">
+			<div class="shell top"><img class="scr" src="img/browser-top.png"></div>
+			<div class="hinge"></div>
+			<div class="shell bot"><img class="scr" src="img/browser-bottom.png"></div>
+		</div>
+		<div class="calls abs" style="left:0;width:580px;top:830px;grid-template-columns:1fr;gap:18px;--cs:30px">
+			<div class="call">Films and songs play in the browser</div>
+			<div class="call">The handheld's buttons drive it</div>
+			<div class="call">Audio &amp; subtitle tracks too</div>
+		</div>
+		<div class="foot abs" style="bottom:0">Free · for the Anbernic RG DS &amp; RG DS Plus<span class="url">github.com/tonywei92/banana-player</span></div>
+	</div>
+	<div class="credit" style="right:64px;bottom:28px">Sintel © Blender Foundation, CC BY 3.0</div>
+</div>
+
+<script>
+	// #post, #square, #c1 (the post with a swipe hint), #c2, #c3
+	const v = location.hash.slice(1) || 'post';
+	const el = document.getElementById(v === 'c1' ? 'post' : v);
+	el.style.display = 'block';
+	if (v === 'c1') el.querySelector('.swipe').style.display = 'block';
+	document.fonts.ready.then(() => Promise.all([...el.querySelectorAll('img')].map(i => i.decode().catch(() => {})))).then(() => { document.title = 'ready'; });
+</script>
+</body>
+</html>
