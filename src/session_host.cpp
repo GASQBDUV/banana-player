@@ -486,8 +486,8 @@ namespace bp
 			i.on = p.settings.shuffle;
 			submit(i, true);
 		}
-		// the handheld's Loop (its settings; Loop all is the music's) is the session's
-		int loop = p.settings.loop == LOOP_ALL && s.index >= 0 && !s.audioOnly ? SESSION_LOOP_OFF : p.settings.loop;
+		// the handheld's Loop (its settings) is the session's, for songs and videos alike
+		int loop = p.settings.loop;
 		if (loop != s.loop)
 		{
 			Intent i = make(IntentType::SetLoop);

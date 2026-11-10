@@ -485,11 +485,12 @@ namespace bp
 				case Button::None: label = "Add"; g = addFlashUntil && SDL_GetTicks() < addFlashUntil ? &G_CHECK : &G_PL_ADD; off = !actions; break;
 				case Button::R:
 				{
-					// (Shuffle: the last of its hidden order, with no Loop all, has no Next)
+					// (only In order has no Next at the last one: Shuffle starts a new round, a Loop goes back to the first)
 					const Session& ss = SessionHost::get().session();
 					label = "Next";
 					g = &G_NEXT;
-					off = ss.index >= 0 && ss.shuffle && p.currentPath() == ss.queue[ss.index] ? !hasNext(ss) : p.index() + 1 >= p.count();
+					off = ss.index >= 0 && p.currentPath() == ss.queue[ss.index] ? !hasNext(ss)
+						: !p.settings.shuffle && p.settings.loop == LOOP_OFF && p.index() + 1 >= p.count();
 					break;
 				}
 				// music: loop, Sound (or chapters), the Display popup; a video: audio, subtitles, picture size

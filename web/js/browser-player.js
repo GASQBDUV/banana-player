@@ -2,7 +2,7 @@ import { NO_HERE, NO_HERE_WHY, TAB_ID, lsGet, lsSet, notify, set, store } from '
 import { MATCH_OFF, matchTrack } from './match.js';
 import { closeSSE, openSSE } from './events.js';
 import { errMsg, errToast, fetchT, get, post } from './api.js';
-import { markTrack, toast } from './toasts.js';
+import { ask, markTrack, toast } from './toasts.js';
 import { baseName, cmpName, dirName, fmtTime, joinPath, kindOfName, plural, titleFor, userTap } from './util.js';
 import { C } from './connection.js';
 import { go, tapped } from './router.js';
@@ -82,7 +82,12 @@ el.addEventListener('error', () => {
 	if (!B.active || !el.getAttribute('src')) return;
 	// the Direct Stream failed: back to the file as it is (its default sound)
 	if (B.remux) { remuxFailed(el.error); return; }
-	B.error = true; notify(); const m = B.meta; toast("This browser can't play this file", m && { label: 'Play on handheld', fn: () => handoffToHandheld() }, 8000); });
+	B.error = true; notify();
+	// (this tab the output: the session skips it, said in the page, and the list goes on here)
+	if (isOutput() && S.s && B.meta && B.meta.p === S.s.file) { skippedToast(B.meta.p); intent('CantPlay', { load: S.s.load, reason: 'format' }).catch(() => {}); return; }
+	toast("This browser can't play this file", null, 6000); });
+// a file of the list this browser can't play: skipped (Next, Previous, a file's end), said here
+function skippedToast(p) { toast((p ? baseName(p) : 'This one') + " isn't supported in this browser · skipped", null, 5000); }
 export function probeOK(m) {
 	if (m.playable === 'no') return false;
 	if (m.playable === 'maybe' && m.mime) { const hint = m.mime + (m.codecs ? '; codecs="' + m.codecs + '"' : ''); return !!el.canPlayType(hint) || !!el.canPlayType(m.mime); }
@@ -601,7 +606,7 @@ export function finishedList() {
 	return f && f.index >= 0 && f.queue && f.queue[f.index] ? f : null;
 }
 // where it came from (a folder the handheld played has no title in the session: its name)
-function finSource(f) {
+export function finSource(f) {
 	const kind = f.source.kind === 'playlist' ? 'playlist' : 'folder', p = f.queue[f.index];
 	return { kind, title: f.source.title || (kind === 'folder' ? baseName(dirName(p)) || 'This card' : ''), id: f.source.id || '' };
 }
@@ -643,7 +648,7 @@ export const ctl = {
 	chapterTo(i) { if (view().finished) return; if (hereNow()) ctl.seek(B.meta.chapters[i].start); else cmd('chapterto', { i }); },
 	chapterStep(dir) { const v = view(); if (!v.chapters.length) return; const i = Math.max(0, Math.min(v.chapters.length - 1, v.chapter + dir)); ctl.chapterTo(i); },
 	// one Loop for both: the handheld's setting (its mode key, the page's, either output), which the session follows
-	// (Loop all is the music's: a video plays once), so a page playing it ends as the handheld would. Off → all → one;
+	// (songs and videos alike), so a page playing it ends as the handheld would. Off → all → one;
 	// Shuffle is its own setting (with Loop all, a shuffled list plays on for ever, a new round each time)
 	loop() {
 		const order = ['no', 'all', 'one'], cur = store.snap ? store.snap.loop : B.loop;
@@ -742,7 +747,8 @@ export function onSession(ss) {
 // (not served, a format it can't play) is the session's CantPlay: the handheld plays it, this tab stays where picks go
 async function renderLoad(ss, at) {
 	const p = ss.file, tok = ++B.tok;
-	const cant = () => { intent('CantPlay', { load: ss.load, reason: 'format' }).catch(() => {}); toast("This browser can't play this one · it plays on the handheld", null, 6000); };
+	// (the session skips it: the next one plays here)
+	const cant = () => { skippedToast(p); intent('CantPlay', { load: ss.load, reason: 'format' }).catch(() => {}); };
 	if (!p) return cant();
 	const m = await probe1(p);
 	if (tok !== B.tok || !isOutput() || S.s.load !== ss.load) return;	// moved on meanwhile
@@ -920,12 +926,28 @@ export async function playAt(p, pos, target, stay) {
 	if (!sv(stay, p)) go('#/playing');
 	return true;
 }
-// a row's tap: it plays at once where the last choice was; one this browser can't play goes to the handheld (said so)
+// a row's tap: it plays at once where the last choice was. One this browser can't play asks first: play it on the
+// handheld, or not (Cancel, the default: nothing moves without a yes)
 export async function playHere(play, p, playable) {
-	if (store.target === 'browser') {
-		const m = playable === 'no' ? { playable: 'no' } : await probe1(p);
-		if (m && !probeOK(m)) { toast('Not supported in this browser · play it on the handheld instead', { label: 'Play on handheld', fn: () => play('handheld') }, 8000); return; }
-	}
-	await play(store.target);
+	const where = await whereToPlay(p, playable);
+	if (where) await play(where);
+}
+// where a file picked here plays: the chosen output; one this browser can't play asks (the handheld, or nothing)
+export async function whereToPlay(p, playable) {
+	if (store.target !== 'browser') return store.target;
+	const m = playable === 'no' ? { playable: 'no' } : await probe1(p);
+	if (!m || probeOK(m)) return 'browser';
+	const yes = await ask("This browser can't play it", baseName(p) + ' plays on your handheld only. Play it there?',
+		{ buttons: [{ label: 'Play on handheld', value: true }, { label: 'Cancel', value: null, cls: 'primary', focus: true }] });
+	return yes ? 'handheld' : null;
+}
+// a list from one of its items, on the handheld (Up next's row of a file this browser can't play, said yes to)
+export async function playListOnHandheld(paths, index, src) {
+	src = src || {};
+	try {
+		const r = await intent('Open', { q: paths, index, t: '0', skind: src.kind || 'folder', stitle: src.title || '', sid: src.id || '', to: 'handheld' });
+		if (r && r.rejected) toast("Couldn't play it: try again");
+		return !!r && !r.rejected;
+	} catch (e) { toast(e.status === 0 ? "Couldn't reach your handheld" : errMsg(e)); return false; }
 }
 

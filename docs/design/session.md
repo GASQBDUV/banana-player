@@ -268,7 +268,7 @@ Named reducer cases (each a sequence of intents with times, then `CHECK_EQ`s on 
   with "This is the first one"`.
 - `end of list stops, says Finished`; `loop one restarts`; `loop all wraps both ways`.
 - `handheld Stop with the browser as output stops the page; next pick goes to the browser` (`pref`).
-- `browser can't play → handheld plays at the same place with the note`; `unanswered load for 8 s → handheld`.
+- `browser can't play → skipped there, the next one plays in the browser (backwards after Previous; a list none of which plays there stops)`; `unanswered load for 8 s → skipped too`.
 - `output tab gone 10 s → handheld paused`; `tab back within 9 s keeps it`.
 - `a second tab takes the output; the first's reports are dropped`.
 - `Woke after sleep pauses`; `new boot resets the page`.
@@ -446,8 +446,9 @@ What moved, what went, and the choices made (the code and tests follow these):
   handheld's end of a file is `Ended` from `"hh"`, a page's from its tab. The executor's `HhLoad` uses the handheld's
   own list (`Player::jumpTo`, keeping its source, names and order), else opens the session's queue (`bringHere`),
   holding it for a page. Effects now run once per pass of main's loop (`pendingFx`, `coalesce`): R×10 then L×4 in one
-  burst loads one file. A browser that can't play a picked file no longer skips it: the session's `CantPlay` plays it on
-  the handheld once, with the note, the browser still where picks go. The page's renderer loads on every `load` change
+  burst loads one file. (0.5.10: a browser that can't play a file now skips it, the owner's choice: `CantPlay` and the load timeout step on
+  in the browser, `cantRun` stops a list none of which plays there, `skipBack` keeps a Previous going backwards; an
+  `Open` of a file the server can't serve still plays on the handheld.) The page's renderer loads on every `load` change
   while it is the output, adopting the file it already plays (a shuffle is an `Open` of the new order from the file
   playing, at its place). Gone: `browserSkip`, `handheld-skip`, `handheld-open`, `pageOpenTok/Path/At/Sent`,
   `toPage()`/`opened()`, `handheldOpenJson`, `B.navTok`/`navTarget`/`openTok`, `browserNext`'s arithmetic, the page's

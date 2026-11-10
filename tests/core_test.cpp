@@ -2902,11 +2902,10 @@ static void testSessionNamed()
 		Intent park = m.mk(IntentType::PhotoPark);
 		m.go(park);
 		CHECK_EQ(m.s.pref, browserOut("tabA"));
-		m.report(IntentType::CantPlay, "tabA", m.s.load);	// can't play it after all: the handheld plays it, once
-		CHECK_EQ(m.s.out, handheldOut());
-		CHECK_EQ(m.s.pref, browserOut("tabA"));
-		m.step(1);	// the next one: the browser again
+		m.report(IntentType::CantPlay, "tabA", m.s.load);	// can't play it after all: skipped, the next one in the browser
 		CHECK_EQ(m.s.out, browserOut("tabA"));
+		CHECK_EQ(m.s.index, 1);
+		CHECK_EQ(m.s.pref, browserOut("tabA"));
 		Intent no = m.mk(IntentType::Open);
 		no.queue = {"/m/x.mkv", "/m/y.mkv"};
 		no.browserCan = false;
@@ -3280,7 +3279,7 @@ static void testSessionNamed()
 		CHECK_EQ(m.s.index, played[4]);
 		m.step(1);
 		CHECK_EQ(m.s.index, played[5]);
-		CHECK_EQ(m.step(1).reject, std::string("last"));
+		CHECK_EQ(hasNext(m.s), true);	// (Next at the round's end: a new round; the Next key isn't dimmed)
 		m.loaded();
 		Intent e = m.mk(IntentType::Ended);
 		e.load = m.s.load;
@@ -3376,28 +3375,46 @@ static void testSessionNamed()
 		CHECK_EQ(m.s.pref, browserOut("tabA"));
 	}
 	{
-		// browser can't play → the handheld plays at the same place, with the note; the next one goes back to the browser
+		// browser can't play → skipped in the browser (said in the page), the next one plays there; after a Previous,
+		// skipped backwards; a whole list it can't play stops once each was tried
 		Sim m;
 		m.open(5, 0, "tabA");
 		m.loaded();
 		m.report(IntentType::Pos, "tabA", m.s.load, 30, true);
 		m.report(IntentType::CantPlay, "tabA", m.s.load);
-		CHECK_EQ(m.s.out, handheldOut());
-		CHECK_EQ(m.s.pos, 30.0);
-		CHECK_EQ(m.s.playing, true);
-		CHECK_EQ(m.said("This one plays on the handheld"), true);
-		m.step(1);
 		CHECK_EQ(m.s.out, browserOut("tabA"));
-		// unanswered load for 8 s → handheld
+		CHECK_EQ(m.s.index, 1);
+		CHECK_EQ(m.s.playing, true);
+		m.loaded();
+		m.step(1);
+		m.step(-1);	// back to 1 (under RESTART_S)
+		CHECK_EQ(m.s.index, 1);
+		m.step(-1);
+		CHECK_EQ(m.s.index, 0);
+		m.report(IntentType::CantPlay, "tabA", m.s.load);	// at the start going back: nothing before it, it stops
+		CHECK_EQ(m.s.index, -1);
+		Sim b;
+		b.open(5, 3, "tabA");
+		b.loaded();
+		b.step(-1);
+		CHECK_EQ(b.s.index, 2);
+		b.report(IntentType::CantPlay, "tabA", b.s.load);
+		CHECK_EQ(b.s.index, 1);	// skipped backwards
+		CHECK_EQ(b.s.out, browserOut("tabA"));
+		Sim all;
+		all.open(3, 0, "tabA");
+		for (int k = 0; k < 3 && all.s.index >= 0; k++) all.report(IntentType::CantPlay, "tabA", all.s.load);
+		CHECK_EQ(all.s.index, -1);	// each tried once, then stopped
+		// unanswered load for 8 s → skipped too
 		Sim u;
 		u.open(5, 0, "tabA");
 		u.now += 7900;
 		u.host(IntentType::Tick);
-		CHECK_EQ(u.s.out, browserOut("tabA"));
+		CHECK_EQ(u.s.index, 0);
 		u.now += 200;
 		u.host(IntentType::Tick);
-		CHECK_EQ(u.s.out, handheldOut());
-		CHECK_EQ(u.said("This one plays on the handheld"), true);
+		CHECK_EQ(u.s.out, browserOut("tabA"));
+		CHECK_EQ(u.s.index, 1);
 	}
 	{
 		// output tab gone 10 s → handheld paused; tab back within 9 s keeps it

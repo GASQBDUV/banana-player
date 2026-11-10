@@ -113,6 +113,10 @@ namespace bp
 		// the list that just ended by itself (nothing plays meanwhile: index -1). Set only by Ended at the end of a list;
 		// gone once anything plays (any apply that leaves an item) and by Stop (Stop means stop)
 		Finished ended;
+		// files skipped in a row because the browser output couldn't play them (a Loaded starts it again): a whole list
+		// it can't play stops once each has been tried, rather than going round for ever
+		int cantRun = 0;
+		bool skipBack = false;	// the item came by Previous: one the browser can't play is skipped backwards
 		// host timers (not published, not a change of v): when this load was asked for; the output's tab gone since
 		int64_t loadAt = 0, goneAt = 0;
 		std::string goneTab;

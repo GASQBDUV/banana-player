@@ -321,8 +321,8 @@ namespace bp
 	bool Player::advance()
 	{
 		if (next()) return true;
-		// Loop all (music): from the last back to the first
-		if (!isAudio || settings.loop != LOOP_ALL || playlist.empty()) return false;
+		// Loop all: from the last back to the first (songs and videos)
+		if (settings.loop != LOOP_ALL || playlist.empty()) return false;
 		int first = step(-1, 1);
 		if (first < 0) return false;
 		moveTo(first);

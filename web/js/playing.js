@@ -1,5 +1,5 @@
 import { html, render, useState, useEffect, useLayoutEffect, useRef, useMemo, useCallback } from '../vendor/htm-preact-standalone.module.js';
-import { intent, B, S, clearFinished, finishedList, playFinished, playBlocked, CUE_SIZES, SPEEDS, SUBS, assBox, setSpeed, toggleCaptions, browserPlay, chooseAudio, chooseSub, directAudio, nativeAudio, playingAudio, streamWhy, continueHere, ctl, cueStyle, el, handoffToHandheld, playParked, probe1, probeOK, setBrowserVol, setCueStyle, setTarget, sizeCues, view } from './browser-player.js';
+import { intent, B, S, clearFinished, finSource, finishedList, playFinished, playListOnHandheld, whereToPlay, playBlocked, CUE_SIZES, SPEEDS, SUBS, assBox, setSpeed, toggleCaptions, browserPlay, chooseAudio, chooseSub, directAudio, nativeAudio, playingAudio, streamWhy, continueHere, ctl, cueStyle, el, handoffToHandheld, playParked, probe1, probeOK, setBrowserVol, setCueStyle, setTarget, sizeCues, view } from './browser-player.js';
 import { AppMenu, Art, Empty, MoreDots, Seek, coverUrl, openSheet, palOf, useHeld, useMedia, useTick } from './components.js';
 import { NO_HERE, NO_HERE_WHY, Q_DESK, Q_WIDE, lsGet, lsSet, notify, phoneNow, set, store, useStore } from './store.js';
 import { baseName, chapterTitle, dirName, fmtDate, fmtSize, fmtTime, isIOS, kindOfName, throttled, titleFor, touchOnly, userTap } from './util.js';
@@ -646,6 +646,15 @@ function UpNext({ v }) {
 	if (items.length < 2 && !fin) return html`<p class="note pad">Nothing else is queued. Play a folder or a playlist to fill it.</p>`;
 	const play = async i => {
 		if (!userTap()) return;
+		// (a row this browser can't play, with the browser chosen: asked first; yes plays the list from it on the handheld)
+		if (store.target === 'browser' && (v.here || fin)) {
+			const where = await whereToPlay(items[i].p);
+			if (!where) return;
+			if (where === 'handheld') {
+				const f = fin && finishedList();
+				return playListOnHandheld(f ? f.queue : B.queue.map(q => q.p), i, f ? finSource(f) : B.source);
+			}
+		}
 		// (a finished list: from that row, where picks go)
 		if (fin) return playFinished(i);
 		// (with Shuffle on, what follows the row is random again: the session's new order from it)

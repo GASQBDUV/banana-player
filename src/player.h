@@ -71,7 +71,7 @@ namespace bp
 		// to that file of the list as it plays (the one nearest hint when it's there twice; the Session's Step and
 		// Ended): false when the list hasn't it
 		bool jumpTo(const std::string& path, int hint);
-		// at a file's end: the next one, or (Loop all, music) the first again; false when that's all
+		// at a file's end: the next one, or (Loop all) the first again; false when that's all
 		bool advance();
 		bool playingAudio() const { return isAudio && !playlist.empty(); }
 		bool playingPhoto() const { return isPhoto && !playlist.empty(); }

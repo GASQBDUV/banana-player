@@ -119,8 +119,8 @@ folders. Playlists have a section of their own, between Files and Network.
 - **Shuffle play** turns **Shuffle** on and starts at a random item; the rest follow in a random order (the list keeps
   its own order where it's shown). Shuffle stays on for what you play next, till you turn it off (**X** on the music
   screen, or the web's Shuffle button).
-- **L / R** go to the previous or next item, as in a folder. For music on **Loop all**, the playlist starts again after
-  its last item. Videos never loop.
+- **L / R** go to the previous or next item, as in a folder. On **Loop all**, the playlist starts again after its last
+  item.
 
 ### Adding items
 
@@ -345,7 +345,8 @@ Songs show their title, artist and album on the top screen. While a song plays:
   - Shuffle and Loop are settings: they stay as they are for every folder, playlist or file you play next, here or from
     the web, and after a restart. The web sets them separately; a pair the key doesn't list shows the shuffle mark with
     **One** (Loop one) or **Once** (no loop), and the next press goes to In order.
-  - Videos never loop.
+  - Loop and Shuffle apply to videos as to songs (set them on a song's **X** key or in the web dashboard: a video's **X**
+    is its audio and subtitles).
 
 Settings › Music has the same two choices as **Music display** and **Visualizer**.
 
@@ -504,9 +505,11 @@ handheld, carries on at 1:27"):
   Only the switch, **Continue here**, **Play here** / **Play on handheld**, the handheld's **Play on** and holding **A**
   change the choice: Stop (on either side), the end of a list, pausing, a photo, a dropped connection and a file the browser can't play leave it
   as it is. Switching in another tab moves it to that tab.
-  These play on the handheld once, with the browser still chosen for the next one: files the browser can't play (AVI,
-  AC3/DTS, WMA, APE…, picked anywhere, the browser's own Next included: the top screen says **This one plays on the
-  handheld**) and network files. A photo opened on the handheld while the browser plays leaves the browser playing;
+  A file the browser can't play (AVI, AC3/DTS, WMA, APE…): picked in the dashboard (a folder, Recent, a playlist, a
+  row of **Up next**), it asks first, **Play on handheld** or **Cancel** (the default); reached by **Next**, **Previous**
+  or the end of the one before, it's skipped in the browser (**… isn't supported in this browser · skipped**) and the
+  list goes on there (backwards after Previous; a list none of which plays in the browser stops once each was tried).
+  Network files play on the handheld once, with the browser still chosen for the next one. A photo opened on the handheld while the browser plays leaves the browser playing;
   closing the photo, the handheld holds the browser's file again. Once the chosen tab has been closed (or lost its connection) for 10 seconds, the
   handheld is chosen again: what the browser played waits there paused at its place (**Your browser went · paused
   here**), and **Play** carries on. **Hold A** is still the way to bring the sound back to the handheld.
@@ -534,7 +537,8 @@ handheld, carries on at 1:27"):
 - Switching the target while something plays carries on from the same place, with the same audio track and subtitles
   (a second language, English subtitles: chosen on one side, they're what the other plays; one the browser can't play
   plays its default there and comes back on the handheld). A paused file stays paused where it goes.
-- A file the browser can't play (AVI, AC3 or DTS sound, WMA, APE and so on) says **Plays on the handheld only**.
+- A file the browser can't play (AVI, AC3 or DTS sound, WMA, APE and so on) says **Plays on the handheld only**, and
+  asks before playing it there.
 - **Tracks** in the browser (a video's audio and subtitles), as Plex does it: the video stays the file itself (Direct
   Play) whenever it can.
   - **Audio:** every track of the file is listed. Safari switches in the file itself. Other browsers play the file's

@@ -70,8 +70,9 @@ namespace bp
 	bool hasNext(const Session& s)
 	{
 		if (s.index < 0) return false;
-		if (s.shuffle && s.order.size() == s.queue.size()) return shufflePlace(s) + 1 < (int)s.order.size() || s.loop == SESSION_LOOP_ALL;
-		return s.index + 1 < (int)s.queue.size() || s.loop == SESSION_LOOP_ALL;
+		// (Next at the last one: Shuffle starts a new round, a Loop goes back to the first; only In order stops there)
+		if (s.shuffle || s.loop != SESSION_LOOP_OFF) return true;
+		return s.index + 1 < (int)s.queue.size();
 	}
 
 	std::string outOrigin(const Session& s) { return s.out.kind == OutKind::Handheld ? "hh" : s.out.tab; }
@@ -85,7 +86,8 @@ namespace bp
 				a.playing == b.playing && a.speed == b.speed && a.loop == b.loop && a.audio == b.audio && a.sub == b.sub &&
 				a.out == b.out && a.pref == b.pref && a.outV == b.outV && a.itemV == b.itemV && a.playV == b.playV &&
 				a.seekN == b.seekN && a.parked == b.parked && a.error == b.error && a.dur == b.dur &&
-				a.audioOnly == b.audioOnly && a.loaded == b.loaded && a.blocked == b.blocked && a.ended == b.ended && a.boot == b.boot;
+				a.audioOnly == b.audioOnly && a.loaded == b.loaded && a.blocked == b.blocked && a.ended == b.ended && a.boot == b.boot &&
+				a.cantRun == b.cantRun && a.skipBack == b.skipBack;
 		}
 
 		bool sameAll(const Session& a, const Session& b)
@@ -145,6 +147,7 @@ namespace bp
 				n.dur = 0;
 				n.audioOnly = false;
 				n.parked = false;
+				n.skipBack = false;
 				newLoad();
 			}
 			void setPlaying(bool on)
@@ -168,7 +171,9 @@ namespace bp
 			// an item picked or stepped to: where the picks go (pref), unless a browser can't have this one
 			void route()
 			{
-				if (n.pref.kind == OutKind::Browser && !i.browserCan)
+				// (one the browser can't have: an Open (a file picked) plays on the handheld; Next, Previous and a file's
+				// end leave it to the browser, which says it can't and the session skips it there: browserCant)
+				if (n.pref.kind == OutKind::Browser && !i.browserCan && i.type == IntentType::Open)
 				{
 					setOut(handheldOut());
 					note("This one plays on the handheld");
@@ -220,22 +225,81 @@ namespace bp
 				effect(Effect::HhUnload);
 			}
 			// a browser output can't play the item (its format, a load that never answered): the handheld, at the place
+			// a browser output can't play the item (its format, a load that never answered): it's skipped there, said in
+			// the page, and the list goes on in the browser (the owner: moving it to the handheld was annoying). A
+			// list none of which plays there stops once each has been tried; the end of the list stops as Ended does
 			void browserCant()
 			{
-				n.pos = posNow(s, now);
-				n.posAt = now;
-				bool wasHeld = s.out.kind != OutKind::Handheld;
-				setOut(handheldOut());
-				newLoad();
-				effect(Effect::HhSeek, n.pos);
-				if (hhShouldPlay(n))
+				// (the page says so: "… isn't supported in this browser · skipped")
+				int size = (int)s.queue.size();
+				int run = s.cantRun + 1;
+				if (run < size && (s.skipBack ? prevItem() : nextItem()))
 				{
-					Effect e;
-					e.kind = Effect::HhPlay;
-					e.aoReload = wasHeld;
-					fx.push_back(e);
+					n.cantRun = run;
+					return;
 				}
-				note("This one plays on the handheld");
+				// the end of the list going forward: finished as Ended's; none of it plays here (or nothing before it
+				// going back): stopped
+				if (run < size && !s.skipBack) { finishList(); return; }
+				stopItem();
+				note("Nothing more plays in this browser", false);
+			}
+			// the end of the list: stopped, and kept for the pages (the list and its last item, to play again from any
+			// row; nothing autoplays)
+			void finishList()
+			{
+				std::string title = s.source.title;
+				stopItem();
+				n.ended.queue = s.queue;
+				n.ended.index = s.index;
+				n.ended.source = s.source;
+				n.ended.dur = s.dur;
+				n.ended.audioOnly = s.audioOnly;
+				note("Finished", false);
+				Effect e;
+				e.kind = Effect::PageToast;
+				e.text = "End of " + (title.empty() ? std::string("the list") : title);
+				fx.push_back(e);
+			}
+			// the item before this one, after a Previous (Shuffle: back along the hidden order); false at the start
+			bool prevItem()
+			{
+				int size = (int)s.queue.size();
+				int to;
+				if (s.shuffle && (int)s.order.size() == size)
+				{
+					int at = shufflePlace(s);
+					if (at <= 0) return false;
+					to = s.order[at - 1];
+				}
+				else if (s.index > 0) to = s.index - 1;
+				else if (s.loop == SESSION_LOOP_ALL && size > 1) to = size - 1;
+				else return false;
+				newItem(to);
+				n.skipBack = true;
+				route();
+				loadHere();
+				return true;
+			}
+			// the item after this one (Shuffle: the hidden order's next, a new round with Loop all), loaded where it
+			// plays; false at the end of the list
+			bool nextItem()
+			{
+				int size = (int)s.queue.size();
+				if (s.shuffle && (int)s.order.size() == size)
+				{
+					int at = shufflePlace(s);
+					if (at + 1 >= size && s.loop != SESSION_LOOP_ALL) return false;
+					newItem(at + 1 < size ? s.order[at + 1] : newRound());
+				}
+				else
+				{
+					if (s.index + 1 >= size && s.loop != SESSION_LOOP_ALL) return false;
+					newItem(s.index + 1 < size ? s.index + 1 : 0);
+				}
+				route();
+				loadHere();
+				return true;
 			}
 			bool guardedStale() const { return i.basis < s.itemV || i.basis < s.outV; }
 
@@ -335,10 +399,10 @@ namespace bp
 						// Shuffle: along the hidden order (Previous back in it), to its ends; Next past its end with
 						// Loop all: a new round
 						int at = shufflePlace(s);
-						if (at + k >= size && k > 0 && s.loop == SESSION_LOOP_ALL) round = true;
+						if (at + k >= size && k > 0) round = true;	// (Next past the round's end: a new one)
 						else to = s.order[std::clamp(at + k, 0, size - 1)];
 					}
-					else if (s.loop == SESSION_LOOP_ALL) to = ((to % size) + size) % size;
+					else if (s.loop != SESSION_LOOP_OFF) to = ((to % size) + size) % size;	// (Loop all or one: round)
 					else to = std::clamp(to, 0, size - 1);
 					if (to == s.index)
 					{
@@ -349,6 +413,7 @@ namespace bp
 					bool wasError = !s.error.empty();
 					if (round) to = newRound();
 					newItem(to);
+					n.skipBack = k < 0;
 					if (wasError) setPlaying(true);	// stepping away from a file that failed: the next one plays
 					route();
 					loadHere();
@@ -501,6 +566,7 @@ namespace bp
 				}
 				case IntentType::Loaded:
 					n.loaded = true;
+					n.cantRun = 0;
 					n.dur = std::max(0.0, i.dur);
 					n.audioOnly = i.audioOnly;
 					n.pos = clampPos(n, n.pos);
@@ -535,41 +601,9 @@ namespace bp
 						if (s.out.kind == OutKind::Handheld) effect(Effect::HhSeek, 0);
 						return "";
 					}
-					int size = (int)s.queue.size();
-					if (s.shuffle && (int)s.order.size() == size)
-					{
-						// Shuffle: the next of the hidden order; its last played, a new round with Loop all, else the
-						// end as In order
-						int at = shufflePlace(s);
-						if (at + 1 < size || s.loop == SESSION_LOOP_ALL)
-						{
-							int to = at + 1 < size ? s.order[at + 1] : newRound();
-							newItem(to);
-							route();
-							loadHere();
-							return "";
-						}
-					}
-					else if (s.index + 1 < size || s.loop == SESSION_LOOP_ALL)
-					{
-						newItem(s.index + 1 < size ? s.index + 1 : 0);
-						route();
-						loadHere();
-						return "";
-					}
-					std::string title = s.source.title;
-					stopItem();
-					// kept for the pages: the list and its last item, to play again from any row (nothing autoplays)
-					n.ended.queue = s.queue;
-					n.ended.index = s.index;
-					n.ended.source = s.source;
-					n.ended.dur = s.dur;
-					n.ended.audioOnly = s.audioOnly;
-					note("Finished", false);
-					Effect e;
-					e.kind = Effect::PageToast;
-					e.text = "End of " + (title.empty() ? std::string("the list") : title);
-					fx.push_back(e);
+					// (Shuffle: the next of the hidden order; its last played, a new round with Loop all, else the end)
+					if (nextItem()) return "";
+					finishList();
 					return "";
 				}
 				case IntentType::CantPlay:
@@ -798,7 +832,9 @@ namespace bp
 			i.type != IntentType::Tick)
 			return std::string("pref: moved by ") + intentName(i.type);
 		// the finished list: made only by a list's own end, put away by a Stop
-		if (old.ended.index < 0 && r.s.ended.index >= 0 && i.type != IntentType::Ended) return std::string("I12: a finished list made by ") + intentName(i.type);
+		// (a list ends by itself: its last file's end, or the browser output skipping the rest it can't play)
+		if (old.ended.index < 0 && r.s.ended.index >= 0 && i.type != IntentType::Ended && i.type != IntentType::CantPlay && i.type != IntentType::Tick)
+			return std::string("I12: a finished list made by ") + intentName(i.type);
 		if (i.type == IntentType::Stop && r.reject.empty() && !r.dup && r.s.ended.index >= 0) return "I12: a Stop kept the finished list";
 		bool report = i.type == IntentType::Loaded || i.type == IntentType::Pos || i.type == IntentType::Ended ||
 			i.type == IntentType::CantPlay || i.type == IntentType::Blocked;
