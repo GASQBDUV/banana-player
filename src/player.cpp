@@ -345,6 +345,16 @@ namespace bp
 		return true;
 	}
 
+	bool Player::back()
+	{
+		if (!playingPhoto() && loaded && position >= RESTART_S)
+		{
+			seekFraction(0);
+			return true;
+		}
+		return prev();
+	}
+
 	const std::vector<std::string>& Player::namesIn(const std::string& dir) const
 	{
 		static const std::vector<std::string> none;

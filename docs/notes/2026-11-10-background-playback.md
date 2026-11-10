@@ -53,3 +53,31 @@ SELECT, the bar and B at Home go back; the next song started by itself is where 
 bar's menu; a photo opened over a song parks it and the bar's mark resumes it at its place. A CDP test (phone size)
 plays a file in the page, presses B then the bar's Stop on the handheld, and checks the page plays on with the
 handheld empty, also after the page pauses and plays again. Not verified on the handheld or in Safari.
+
+## Later: the browser stays the sound
+
+A song or video opened on the handheld while a page is the sound (`Ui::pageOut`: set by the page's `browser-play`,
+cleared by its stop, by `handheld-play` (the handheld played aloud: a hold of A, `/api/play`, a refusal), but not by the
+handheld's own Stop) goes to the page, if that page's tab still has its SSE stream (`WebServer::tabConnected`). Every
+handheld pick ends in `takeOpenRequest` or `takePlayRequest` (the list's A or tap, Recent, a playlist item, Play,
+Shuffle play, the mini bar's resume, START › Playing), and main's `toPage` decides there: a photo plays here and leaves the
+page alone (the take-over check now skips photos, which had sent `handheld-play`); a file the web doesn't serve (network)
+or that `playableByName` calls No plays here with the note "This one plays on the handheld" (the page then gets
+`handheld-play` as before); the page's own file is just held again. Otherwise the handheld opens it as usual but held
+(`holdPaused`), so the screens follow at once and it never sounds, and once it's loaded sends `handheld-open {tok, tab, p,
+list, index, source, pos}` (`handheldOpenJson`: the handheld's list as served, less photos; pos: its kept place, or a
+parked one's). The page (`handheldOpen`) probes the file, refuses one it can't play (`/api/browser-refuse {tok}`: the
+handheld plays it), else plays the list from there through `browserPlay`, whose `browser-play` carries `open=tok`. An
+answer to an older pick while a newer waits is dropped (`browser-play dropped (handheld-open …)`); no answer in 6 s plays
+it here. Tested with a fake page (python: song to the page, AVI here, photo untouched, no page, three picks with 4 s
+answers: the two late answers dropped) and once in headless Chrome. Not verified on the handheld or in Safari (an
+`el.play()` from an SSE event relies on the page's earlier gesture).
+
+## Later: Previous as YouTube Music's
+
+`Player::back()` (the handheld's L and its Prev button, the web's `prev` command): 5 s (`RESTART_S`) or more into a song
+or video, back to its start; else `prev()`. The Prev button is never dimmed. The page's `browserNext` does the same for
+its own Previous and the Media Session's, and for the handheld's L while the page plays: a burst (`handheld-skip {dir:-1,
+n}`) starting 5 s or more in restarts the song and goes back n − 1 (the old note said the handheld's L never restarted
+the page's song). On the first item under 5 s nothing happens: the handheld says "This is the first one" itself and sends
+no skip; the page toasts it.

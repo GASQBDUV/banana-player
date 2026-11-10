@@ -121,6 +121,12 @@ namespace bp
 	// Ui's insides the routes need (a friend of Ui's), all on the main thread
 	struct WebPlayerGlue
 	{
+		// where the file just opened starts: where a parked one was (applied once it knows its length), else its place
+		static double openPos(Player& p, Ui& u)
+		{
+			return u.seekPath == p.currentPath() && SDL_GetTicks() < u.seekUntil && u.seekTo >= 0 ? u.seekTo : p.position;
+		}
+
 		// the source's queue as it plays: its files and where the one playing is among them
 		static std::vector<std::string> queue(Player& p, Ui& u, int& index)
 		{
@@ -562,7 +568,7 @@ namespace bp
 				else if (c == "pause") { if (!p.paused) p.togglePause(); }
 				else if (c == "play") { if (p.paused) p.unpause(); }
 				else if (c == "next") { if (!p.next()) p.osd("This is the last one"); }
-				else if (c == "prev") { if (!p.prev()) p.osd("This is the first one"); }
+				else if (c == "prev") { if (!p.back()) p.osd("This is the first one"); }
 				else if (c == "stop") u.stopRequest = true;
 				else if (c == "seek") { if (p.duration > 0) p.seekFraction(std::clamp(t / p.duration, 0.0, 1.0)); }
 				else if (c == "seekrel") p.seekRelative(d);
@@ -822,8 +828,17 @@ namespace bp
 			if (!stop && !vp.empty() && !w->resolve(vp, real, false, res)) return;
 			std::string tab = value(req, "tab");
 			long long seq = atoll(value(req, "seq").c_str());
+			// open: the handheld-open it answers (its tok), when it does
+			int open = atoi(value(req, "open").c_str());
 			int status = 200;
-			std::string body = w->call([stop, real, tab, seq](Player& p, Ui& u) {
+			std::string body = w->call([stop, real, tab, seq, open](Player& p, Ui& u) {
+				// an answer to an older handheld-open, while a newer one waits: the page moves on to the newer at once,
+				// and the handheld already holds that one (opening the older here would undo the latest pick)
+				if (!stop && open > 0 && open != u.pageOpenTok && !u.pageOpenPath.empty() && real != u.pageOpenPath)
+				{
+					fprintf(stderr, "web: browser-play dropped (handheld-open %d, waiting for %d): %s\n", open, u.pageOpenTok, real.substr(real.rfind('/') + 1).c_str());
+					return std::string("{\"ok\":true,\"stale\":true}");
+				}
 				// a page skipping fast sends one of these per file: one overtaken by the next must not open its older file
 				if (staleBrowserWord(u, tab, seq))
 				{
@@ -836,11 +851,15 @@ namespace bp
 					// it; the screens change only if the player showed)
 					bool held = u.browserPlaying && p.playing() && p.paused && !u.browserFile.empty() && p.currentPath() == u.browserFile;
 					u.browserPlaying = false;
+					u.pageOut = false;
 					u.browserFile.clear();
+					u.pageOpenPath.clear();
 					if (held) u.stopRequest = true;
 				}
 				else
 				{
+					// what the handheld sent (handheld-open), now playing there; or the page chose another file itself
+					if (!u.pageOpenPath.empty()) u.pageOpenPath.clear();
 					if (!real.empty()) u.browserFile = real;
 					if (!real.empty() && isMediaFile(real) && !isPhotoFile(real) && !(p.playing() && p.currentPath() == real))
 					{
@@ -853,6 +872,7 @@ namespace bp
 					}
 					else WebPlayerGlue::pauseHandheld(p);
 					u.browserPlaying = true;
+					u.pageOut = true;
 					u.browserPlayAt = SDL_GetTicks();
 					u.browserSawPause = false;
 				}
@@ -860,9 +880,54 @@ namespace bp
 			}, 2000, status);
 			answer(res, body, status);
 		});
+
+		// the page can't play what the handheld sent it (handheld-open {tok}): the handheld plays it itself
+		s.Post("/api/browser-refuse", [w](const httplib::Request& req, httplib::Response& res) {
+			int tok = atoi(value(req, "tok").c_str());
+			int status = 200;
+			std::string body = w->call([tok](Player&, Ui& u) {
+				if (tok <= 0 || tok != u.pageOpenTok || u.pageOpenPath.empty()) return std::string("{\"ok\":true,\"stale\":true}");
+				u.pageOpenRefused = true;
+				return std::string("{\"ok\":true}");
+			}, 2000, status);
+			answer(res, body, status);
+		});
 	}
 
 	void registerPlayerRoutes(WebServer& ws) { WebPlayerGlue::routes(ws); }
+
+	std::string handheldOpenJson(WebServer& ws, Player& p, Ui& u)
+	{
+		std::string path = p.currentPath();
+		std::string vp = ws.servedVirtual(path);
+		if (vp.empty()) return "";
+		// the list as the handheld plays it, less what the web never serves and photos (the page's list is songs and videos)
+		std::vector<std::string> paths = p.paths();
+		int at = p.index();
+		JsonWriter j;
+		j.obj().key("tok").num(u.pageOpenTok).key("tab").str(u.browserTab).key("p").str(vp);
+		j.key("list").arr();
+		int index = -1, n = 0;
+		for (int i = 0; i < (int)paths.size(); i++)
+		{
+			std::string v = paths[i] == path ? vp : isPhotoFile(paths[i]) ? "" : ws.servedVirtual(paths[i]);
+			if (v.empty()) continue;
+			if (i == at || (index < 0 && paths[i] == path)) index = n;
+			j.str(v);
+			n++;
+		}
+		if (index < 0) { j.str(vp); index = n; }
+		j.end();
+		const PlaySource& src = p.source();
+		j.key("index").num(index);
+		j.key("source").obj().key("kind").str(src.kind == SourceKind::Playlist ? (src.id.empty() ? "selection" : "playlist") : "folder")
+			.key("title").str(src.title)
+			.key("id").str(src.kind == SourceKind::Playlist ? (src.id.empty() ? "" : playlistId(src.id)) : ws.toVirtual(src.id)).end();
+		// where it starts: its kept place, or where a parked one was (applied here once it knows its length)
+		double pos = WebPlayerGlue::openPos(p, u);
+		j.key("pos").num(std::max(0.0, pos));
+		return j.end().out();
+	}
 
 	bool stopIfPlaying(WebServer& ws, const std::string& real)
 	{

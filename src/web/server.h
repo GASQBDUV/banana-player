@@ -110,6 +110,8 @@ namespace bp
 		std::string newPin();
 		// open SSE streams: the browsers watching
 		int clients() const { return streams; }
+		// that tab's stream is open (its ?tab= id, any session); "" asks for any stream at all
+		bool tabConnected(const std::string& tab) const;
 		// the browser's roots changed (a card in or out)
 		void setRoots(const std::vector<WebRoot>& roots);
 		std::vector<WebRoot> roots() const;
@@ -202,4 +204,7 @@ namespace bp
 	// web's Stop does (back to the browser); false if it didn't (it plays something else, or nothing). Waits for the
 	// main thread (2 s at most): for "Stop and delete", before the file goes
 	bool stopIfPlaying(WebServer& ws, const std::string& real);
+	// main thread: handheld-open's data, for what the handheld just opened held for the page (its list as served, the
+	// file's place in it, its source, where it starts); "" when the file isn't served (the handheld plays it)
+	std::string handheldOpenJson(WebServer& ws, Player& p, Ui& u);
 }

@@ -391,8 +391,20 @@ namespace bp
 		case Button::L:
 		case Button::R:
 			// a page plays it: the page's song moves on, not this paused copy (which would start sounding here)
-			if (pageDrives(p)) { browserSkip += b == Button::R ? 1 : -1; break; }
-			if (b == Button::L ? !p.prev() : !p.next()) p.osd(b == Button::L ? "This is the first one" : "This is the last one");
+			if (pageDrives(p))
+			{
+				// the page's Previous follows the same rule (browserNext): the first press of a burst, RESTART_S or more
+				// in, restarts it; on the first one before that, nothing, said here
+				if (b == Button::L && !browserSkip && !p.loading())
+				{
+					double t = shownPosition(p);
+					if (t >= Player::RESTART_S) noteSeek(p, 0);
+					else if (p.index() == 0 && p.settings.loop != LOOP_ALL) { p.osd("This is the first one"); break; }
+				}
+				browserSkip += b == Button::R ? 1 : -1;
+				break;
+			}
+			if (b == Button::L ? !p.back() : !p.next()) p.osd(b == Button::L ? "This is the first one" : "This is the last one");
 			break;
 		case Button::Up: case Button::Down:
 		{

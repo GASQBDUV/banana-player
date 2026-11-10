@@ -58,7 +58,10 @@ under the header shows where you are (`share / Movies`), and the bottom line sho
 button's name in yellow, then what it does. See [Playlists](#playlists).
 
 Everything in a folder plays as one playlist: **L/R** go to the previous or next file, and the next one starts when
-the current one ends. Folders can mix videos and music. Photos are a list of their own: from a photo you step through
+the current one ends. **Previous** works as in YouTube Music: 5 seconds or more into a song or video, it goes back to
+its start; before that, to the file before. On the first file in its first 5 seconds it does nothing (the top screen
+says **This is the first one**), so the Prev button is never greyed out. The web dashboard's Previous (both targets, and
+a headset's or the lock screen's) follows the same rule. Photos simply step back. Folders can mix videos and music. Photos are a list of their own: from a photo you step through
 the folder's photos, and from a video or a song through its videos and songs. When you stop something, you're back in
 its folder on that file.
 
@@ -185,7 +188,7 @@ Like a song or a video to keep it in **Liked**, a playlist of its own. Photos an
 |---|---|
 | **A** | Play / pause |
 | **LEFT / RIGHT** | Back 5 seconds / forward 10 seconds (hold to keep going; there's no on-screen button for these: drag the bar) |
-| **L / R** | Previous / next file in the folder |
+| **L / R** | Previous (5 s or more in: back to the start) / next file in the folder |
 | **L2 / R2** | Previous / next chapter (**F + L2** is still the screenshot) |
 | **UP / DOWN** | Faster / slower (0.5x, 1x, 1.5x, 2x, 2.5x); the speed button becomes a yellow key when it isn't 1x |
 | **X** | Video: audio and subtitles (one page, two tabs: **Y** / **X** or **L / R** switch them) · Music: No loop → Loop all → Loop one |
@@ -472,7 +475,13 @@ handheld, carries on at 1:27"):
   the handheld stays quiet. **Hold A** (or hold the Play button) for 0.6 s to play it on the handheld instead, from where
   the browser was: the button fills as you hold, the top screen says **Playing on the handheld**, and the browser stops.
   **L / R** on the handheld move the browser's list on, however fast they're pressed: every press counts, and both end
-  on the same file.
+  on the same file (**L** 5 s or more into the browser's song restarts it first, as Previous does everywhere).
+- The browser stays the sound while it plays: a song or video opened on the handheld (from the list, Recent, a
+  playlist, Play folder, Shuffle play, the mini bar) plays **in the browser**, in the handheld's list, and the handheld
+  holds it paused, as if the browser had picked it. Picked fast, the last pick wins. These still play on the handheld:
+  photos (the browser plays on while you look), files the browser can't play (AVI, AC3/DTS, WMA, APE…: the top screen
+  says **This one plays on the handheld** and the browser stops), network files, and anything opened once the browser's
+  tab is closed or the browser has stopped. **Hold A** is still the way to bring the sound back to the handheld.
   Leaving the handheld's player (**B**) changes nothing for the browser: its mini bar reads **Playing in your browser**
   (tap its mark to play or pause the browser, hold the mark to take it over). **Stop** on the handheld only lets go of
   its paused copy: the browser plays on. **Stop** in the browser unloads the handheld's copy too.

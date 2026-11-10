@@ -206,7 +206,7 @@ if (location.search.includes('debug')) {
 		else if (k === 'click') { const b = [...document.querySelectorAll('button')].find(x => x.offsetParent && (x.textContent.trim() === v || x.getAttribute('aria-label') === v)); if (b) b.click(); }
 	}, 2500 + i * 1500));
 }
-if (location.search.includes('debug')) window.__bp = { store, set, closePanel, setTarget, continueHere, B, C, SUBS, startUpload, entriesFromDrop, browserPlay, toast, go, goDown, connFail, el };	// for the headless tests
+if (location.search.includes('debug')) window.__bp = { store, set, closePanel, setTarget, continueHere, B, C, SUBS, startUpload, entriesFromDrop, browserPlay, toast, go, goDown, connFail, el, ctl };	// for the headless tests
 // the icons first (their sizes come from the sprite), but never a blank page waiting for them
 (async () => {
 	let rendered = false;

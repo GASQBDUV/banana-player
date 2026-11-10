@@ -22,6 +22,7 @@
 #include "webstate.h"
 #include "web/netif.h"
 #include "web/server.h"
+#include "webmedia.h"
 #endif
 #include <SDL.h>
 #include <SDL_ttf.h>
@@ -787,6 +788,39 @@ int main(int argc, char** argv)
 				player.saveResume();
 				savedAt = SDL_GetTicks();
 			}
+			// a song or video picked here while a page is the sound (it plays, or did till the handheld's Stop, and its tab
+			// still listens): it goes to the page. 0: it plays here; 1: to the page (opened here held, sent once loaded);
+			// 2: here, said so (the web doesn't serve it, or no browser plays its format). A photo leaves the page alone
+			auto toPage = [&](const std::string& pick) {
+#ifdef BP_WEB
+				if (!webServer || !webServer->running() || !ui.pageOut || isPhotoFile(pick)) return 0;
+				if (!webServer->tabConnected(ui.browserTab)) return 0;
+				if (pick == ui.browserFile) return 1;
+				if (webServer->servedVirtual(pick).empty() || playableByName(pick) == Playable::No) return 2;
+				return 1;
+#else
+				(void)pick;
+				return 0;
+#endif
+			};
+			// after the open: held for the page (it never sounds here), or the note
+			auto opened = [&](const std::string& pick, int to) {
+				if (to == 2)
+				{
+					fprintf(stderr, "web: %s plays on the handheld (the browser can't)\n", pick.substr(pick.rfind('/') + 1).c_str());
+					player.osd("This one plays on the handheld", 2400);
+					return;
+				}
+				if (to != 1) return;
+				player.holdPaused();
+				ui.browserPlaying = true;
+				// the page's own file again (back from a photo): nothing to tell it
+				if (pick == ui.browserFile) return;
+				ui.pageOpenTok++;
+				ui.pageOpenPath = pick;
+				ui.pageOpenSent = ui.pageOpenRefused = false;
+				ui.pageOpenAt = SDL_GetTicks();
+			};
 			// a video picked in the browser: it and the videos beside it
 			if (std::string pick = ui.takeOpenRequest(); !pick.empty())
 			{
@@ -808,7 +842,9 @@ int main(int argc, char** argv)
 				std::string note = (player.title.empty() ? was.substr(was.rfind('/') + 1) : player.title) + " stopped \xC2\xB7 kept at " +
 					formatTime(std::max(0.0, player.position));
 				if (parks) ui.park(player);
+				int to = toPage(pick);
 				player.open(list, index, names);
+				opened(pick, to);
 				ui.showPlayer();
 				if (parks && ui.parkedShown())
 				{
@@ -819,8 +855,11 @@ int main(int argc, char** argv)
 			// a playlist picked in the browser: its items, in its order (or shuffled); or what a photo stopped, again
 			if (Ui::PlayRequest pr; ui.takePlayRequest(pr))
 			{
+				std::string pick = pr.paths[std::clamp(pr.index, 0, (int)pr.paths.size() - 1)];
+				int to = toPage(pick);
 				if (pr.source.kind == SourceKind::Playlist) player.openPlaylist(pr.paths, pr.index, pr.source);
 				else player.open(pr.paths, pr.index, pr.names);
+				opened(pick, to);
 				if (pr.stay) ui.playBehind();
 				else ui.showPlayer();
 			}
@@ -1030,13 +1069,40 @@ int main(int argc, char** argv)
 			{
 				// the handheld playing again after a page took over: the page pauses its own
 				// (a file still opening isn't playing yet: "Play in this browser" opens it here paused, and that takes a moment)
-				if (ui.browserPlaying && player.playing() && !player.loading())
+				// (also after the handheld's Stop, while the page plays on; not a photo, which has no sound to clash)
+				if ((ui.browserPlaying || ui.pageOut) && player.playing() && !player.loading() && !player.playingPhoto())
 				{
 					if (player.paused) ui.browserSawPause = true;
 					else if (ui.browserSawPause || SDL_GetTicks() - ui.browserPlayAt > 1500)
 					{
 						ui.browserPlaying = false;
+						ui.pageOut = false;
 						webServer->notify("handheld-play", "{}");
+					}
+				}
+				// a pick sent to the page: told once it's loaded here (its place known); refused, or no word in 6 s (a page
+				// from before this, a dropped connection), it plays here
+				if (!ui.pageOpenPath.empty())
+				{
+					if (!player.playing() || player.currentPath() != ui.pageOpenPath || !player.error.empty()) ui.pageOpenPath.clear();
+					else if (!ui.pageOpenSent && player.loaded && !player.loading())
+					{
+						std::string d = handheldOpenJson(*webServer, player, ui);
+						ui.pageOpenSent = true;
+						ui.pageOpenAt = SDL_GetTicks();
+						if (d.empty()) ui.pageOpenRefused = true;
+						else
+						{
+							webServer->notify("handheld-open", d);
+							fprintf(stderr, "web: handheld-open %d %s\n", ui.pageOpenTok, ui.pageOpenPath.substr(ui.pageOpenPath.rfind('/') + 1).c_str());
+						}
+					}
+					if (ui.pageOpenSent && (ui.pageOpenRefused || SDL_GetTicks() - ui.pageOpenAt > 6000))
+					{
+						fprintf(stderr, "web: handheld-open %d %s: plays here\n", ui.pageOpenTok, ui.pageOpenRefused ? "refused" : "unanswered");
+						ui.pageOpenPath.clear();
+						if (player.paused) player.unpause();
+						player.osd("This one plays on the handheld", 2400);
 					}
 				}
 				// Prev / Next pressed here while a page plays: the page moves on, by as many as were pressed since the last

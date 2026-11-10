@@ -467,7 +467,7 @@ namespace bp
 				bool off = false;
 				switch (which)
 				{
-				case Button::L: label = "Prev"; g = &G_PREV; off = p.index() == 0; break;
+				case Button::L: label = "Prev"; g = &G_PREV; break;	// never dimmed: it can always go back to the start
 				// Like and Add work on a file that didn't open too (it's still a file)
 				case Button::L3: label = likedNow(p) ? "Liked" : "Like"; g = likedNow(p) ? &G_HEART : &G_HEART_O; off = !actions; break;
 				case Button::A:

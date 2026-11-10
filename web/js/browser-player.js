@@ -49,7 +49,8 @@ function announce() {
 	const p = B.meta.p;
 	if (B.announced === p && Date.now() - B.announcedAt < 1500) return;
 	B.announced = p; B.announcedAt = Date.now(); B.handheldQuiet = false;
-	post('/api/browser-play', word({ p })).catch(() => {});
+	// (open: the handheld's pick this plays, so the handheld can tell an answer to an older pick from a newer one)
+	post('/api/browser-play', word(B.openTok ? { p, open: B.openTok } : { p })).catch(() => {});
 }
 
 export function probeOK(m) {
@@ -71,11 +72,13 @@ export const fileUrl = p => '/api/file?p=' + encodeURIComponent(p);
 export async function browserPlay(items, index, source, pos, auto, dir, nav, tok) {
 	if (store.conn !== 'ok') return false;
 	if (NO_HERE) { toast(NO_HERE_WHY + ': it plays on the handheld'); return false; }
-	if (tok == null) { tok = ++B.navTok; B.navTarget = null; }
+	if (tok == null) { tok = ++B.navTok; B.navTarget = null; B.openTok = 0; }
 	dir = dir || 1;
 	let skipped = 0;
 	for (let i = index; i >= 0 && i < items.length; i += dir) {
-		const it = items[i], m = await probe1(it.p);
+		// (m: looked into already, by handheldOpen)
+		const it = items[i], m = it.m !== undefined ? it.m : await probe1(it.p);
+		delete it.m;
 		if (tok !== B.navTok) return null;
 		if (m && !probeOK(m)) { skipped++; continue; }
 		if (auto && store.conn !== 'ok') return false;
@@ -96,11 +99,18 @@ export async function browserPlay(items, index, source, pos, auto, dir, nav, tok
 	if (skipped && !nav) toast('Plays on the handheld only', null);
 	return false;
 }
-// steps: how many at once (the handheld's presses, summed); fromHandheld: its L, which never restarts the song (as
-// there). Pressed fast, each counts from where the one before is going, and only the last one's file loads
+// steps: how many at once (the handheld's presses, summed); fromHandheld: its L. Pressed fast, each counts from where
+// the one before is going, and only the last one's file loads
+const RESTART_S = 5;
 export async function browserNext(auto, dir, steps, fromHandheld) {
 	dir = dir || 1; steps = Math.max(1, steps || 1);
 	const n = B.queue.length, pending = B.navTarget != null, from = pending ? B.navTarget : B.index;
+	// Previous as YouTube Music's (the handheld's too): RESTART_S or more in, back to the start; a burst of them from
+	// there (the handheld's n) is that and then the ones before. Before RESTART_S, the one before
+	if (dir < 0 && !auto && !pending && el.currentTime >= RESTART_S) {
+		if (steps === 1) { el.currentTime = 0; return; }
+		steps--;
+	}
 	let i = from + dir * steps;
 	if (auto && B.loop === 'one') { el.currentTime = 0; el.play(); return; }
 	if (i >= n)
@@ -112,10 +122,14 @@ export async function browserNext(auto, dir, steps, fromHandheld) {
 		else if (from >= n - 1) { toast('This is the last one'); return; }
 		else i = n - 1;
 	}
-	if (i < 0) i = B.loop === 'all' && n ? ((i % n) + n) % n : 0;
-	if (dir < 0 && !pending && !fromHandheld && el.currentTime > 3) { el.currentTime = 0; return; }
+	if (i < 0) {
+		if (B.loop === 'all' && n) i = ((i % n) + n) % n;
+		// on the first one, under RESTART_S in: nothing (as on the handheld)
+		else if (from <= 0) { toast('This is the first one'); return; }
+		else i = 0;
+	}
 	const tok = ++B.navTok;
-	B.navTarget = i;
+	B.navTarget = i; B.openTok = 0;
 	// (the ones it can't play are passed over; none left that way: the end, as on the last one)
 	const ok = await browserPlay(B.queue, i, B.source, 0, auto, dir, true, tok);
 	if (tok !== B.navTok || ok === null) return;	// a newer one took over
@@ -169,6 +183,23 @@ export function handheldToggle(play) {
 	if (play && el.paused) el.play().catch(() => sendPos());
 	else if (!play && !el.paused) el.pause();
 	else sendPos();
+}
+// a song or video picked on the handheld while this page is the sound ({tok, tab, p, list, index, source, pos}): it
+// plays here, in the handheld's list, and the handheld holds it paused (browser-play). One this browser can't play
+// (the probe says so) is refused, and the handheld plays it. Picked fast, only the latest loads (navTok)
+export async function handheldOpen(d) {
+	if (d.tab && d.tab !== TAB_ID) return;
+	const refuse = why => { console.log('handheld-open refused: ' + why); post('/api/browser-refuse', { tok: d.tok }).catch(() => {}); };
+	if (!B.active || B.leaving || B.parked != null || NO_HERE || store.conn !== 'ok' || !Array.isArray(d.list) || !d.list[d.index]) return refuse('not playing here');
+	const tok = ++B.navTok; B.navTarget = null; B.openTok = d.tok;
+	const items = d.list.map(p => ({ p })), first = items[d.index];
+	first.m = await probe1(first.p);
+	if (tok !== B.navTok) return;
+	if (first.m && !probeOK(first.m)) return refuse('format');
+	const src = d.source && d.source.kind ? { kind: d.source.kind, title: d.source.title, id: d.source.id } : null;
+	const ok = await browserPlay(items, d.index, src, d.pos > 0 ? d.pos : 0, false, 1, true, tok);
+	if (ok === false) refuse('failed');
+	else if (ok && store.target !== 'browser') chooseTarget('browser');
 }
 export function setBrowserVol(v) { B.vol = v; el.volume = v / 100; lsSet('bpVol', v); notify(); }
 function bPos() { return B.parked != null ? B.parked : el.currentTime || 0; }

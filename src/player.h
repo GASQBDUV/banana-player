@@ -68,6 +68,10 @@ namespace bp
 		const PlaySource& source() const { return src; }
 		bool next();	// false on the last one
 		bool prev();	// false on the first one
+		// Previous as YouTube Music's: RESTART_S or more into a song or video, back to its start (it stays); before that,
+		// the one before. A photo always steps. false: the first one, under RESTART_S in (nothing happens)
+		static constexpr double RESTART_S = 5;
+		bool back();
 		// at a file's end: the next one, or (Loop all, music) the first again; false when that's all
 		bool advance();
 		bool playingAudio() const { return isAudio && !playlist.empty(); }

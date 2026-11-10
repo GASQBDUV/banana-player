@@ -530,6 +530,16 @@ namespace bp
 		return id;
 	}
 
+	bool WebServer::tabConnected(const std::string& tab) const
+	{
+		if (tab.empty()) return streams > 0;
+		std::lock_guard<std::mutex> g(hubLock);
+		std::string end = "|" + tab;
+		for (auto& [key, token] : tabStreams)
+			if (key.size() >= end.size() && key.compare(key.size() - end.size(), end.size(), end) == 0) return true;
+		return false;
+	}
+
 	void WebServer::notify(const std::string& event, const std::string& dataJson)
 	{
 		{

@@ -233,6 +233,15 @@ namespace bp
 		std::string browserTab;
 		long long browserSeq = 0;
 		std::string browserFile;	// the file the page last said it plays (browser-play)
+		// a page is the sound: it said it plays (browser-play), and hasn't stopped or been taken over since. Unlike
+		// browserPlaying, the handheld's own Stop leaves it (the page plays on): a song or video picked here goes there
+		bool pageOut = false;
+		// the last pick sent to the page (main: opened here held, then handheld-open {tok} once it's loaded): answered by
+		// the page's browser-play for it, or refused (/api/browser-refuse: it plays here)
+		int pageOpenTok = 0;
+		std::string pageOpenPath;
+		Uint32 pageOpenAt = 0;
+		bool pageOpenSent = false, pageOpenRefused = false;
 		// an audio track or subtitles (id 0: off) chosen, as the Audio & Subtitles page chooses one (and the web): the
 		// language remembered as the settings say, and "Audio: <its label>" over the top panel. false: no such track
 		bool chooseTrack(Player& p, TrackType type, int64_t id);
