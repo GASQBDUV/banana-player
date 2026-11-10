@@ -67,6 +67,9 @@ tools/make-sprite.py                                 # regenerates web/sprite.sv
 - Web: `src/web/` (server, API), `web/app.js` (entry) + `web/js/*.js` (ES modules, no build step), `web/style.css`,
   `web/vendor/`; `cmake/EmbedWeb.cmake` embeds every file under `web/` into the binary.
 - Network: `net*.cpp`, `netstore`, `networker`, `netstream`, `discovery`. Updater: `updater.*`, `update.cpp`.
+- Session (`docs/design/session.md`): `session.*` (bpcore) is the one playback state and its pure reducer `apply()`
+  (invariants and a fuzz test in core-test); `session_host.*` is its shadow (step a): fed from today's hooks, it acts on
+  nothing and logs `session: disagree <what>` where it differs from today's flags.
 
 ## Hard rules (the reasons are in docs/architecture.md)
 

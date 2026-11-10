@@ -1,6 +1,10 @@
 # One playback Session (design, 2026-11-10)
 
-Status: proposal, nothing built. Goal: every way the handheld and a browser tab share playback goes through one value,
+**Status: step (a) done** (2026-11-11): `src/session.{h,cpp}` (bpcore) with its tests in `core-test`, and a shadow
+`SessionHost` (`src/session_host.{h,cpp}`) that logs `session: …` and `session: disagree <what>` lines and acts on
+nothing. Where this text left a choice open, §9 says what was chosen.
+
+Goal: every way the handheld and a browser tab share playback goes through one value,
 the **Session**, changed only by **intents** through one pure reducer, and followed by two **renderers** (the
 handheld's mpv, the page's `<video>`), Spotify Connect / Chromecast style. Today the same facts live in ~35 flags on
 both sides, each added for one race; this replaces them with invariants checked by tests, including a fuzz test.
@@ -328,3 +332,40 @@ The owner approved this design on 2026-11-11 and took the recommendation on ever
 7. **The page as a plain remote while the handheld plays** (iPhone, `NO_HERE`) is just `out = Handheld` with intents
    from the tab: no special case. *Recommend*: keep `NO_HERE` only as "can't be the output".
 8. **EQ/effects** don't apply to the browser; the top card's "+4" note stays a pure function of `s` and settings.
+
+## 9. Notes from step (a)
+
+Choices made where the text above was open (the code and tests follow these):
+
+- `itemV`/`outV`/`playV` are set to the **new** `v` (old + 1), so a sender who saw the old `v` is behind them (rule 3).
+  `playV` is new: the `v` of the last Play/Pause.
+- `seq == 0` means "not deduplicated": the host's own `Tick`, `TabGone`/`TabBack`, `Slept`/`Woke`. A `seq` under an
+  origin's last one is a dup too (it gets the last answer back), so same-origin intents that overtake each other drop.
+- A rejected intent can still carry `Note`/`PageToast` effects ("This is the first one"); nothing else.
+- Reports while `parked` are rejected (`parked`): a late `Pos(playing)` from the handheld would otherwise play under
+  the photo (I9).
+- A `Pos` report's `playing` is taken only when its `basis ≥ playV`: one sent before the last Play/Pause doesn't undo
+  that wish ("A x3"). A `Pos` implies `Loaded`.
+- `posNow` runs only once the output said `Loaded` (`Session::loaded`); `Loaded` and `Pos` restamp `posAt`.
+- `SetOutput` bumps `load` (the old output's late reports drop; the new one reports for the new load) and clears
+  `parked`; to the current output it only sets `pref`; with nothing playing it sets `out`/`pref` and nothing else.
+- `Open` without `audio`/`sub` resets the picks to the default (`Step` keeps them); an `Open` that names `out` sets
+  `pref` too (the page's Play here / Play in this browser).
+- The tab-gone timeout freezes `pos` at `posNow` as of when the tab went, and drops `pref` back to the handheld too
+  (else the next pick would go to a tab that isn't there).
+- A load nobody answers within 8 s on the **handheld** sets `error = "timeout"` (a later `Loaded` clears it).
+- `Step` away from an item in `error` plays the next one; a Prev burst whose restart used up the presses is accepted.
+- `Stop` empties the queue (`index = -1`); `out` stays as it was, `pref` too.
+- `PlaySource` is mirrored as `SessionSource` (bpcore can't include `player.h`: it pulls in mpv). `TrackPick` gains
+  `of` (how many tracks of its kind the chooser listed), which "by place when both list as many" needs.
+- `coalesce()` (bpcore) is the executor's pass rule: the last `HhLoad`/`HhUnload` only, seeks/tracks/play only after
+  it, the last play/pause only, notes once.
+- The shadow lives in `src/session_host.{h,cpp}`, not `main.cpp`, and logs `session: disagree <what>` (output, file,
+  tab, playing; only what lasts 1.5 s, one line per 2 s). The old routes carry no `basis`: the shadow uses the `v` of
+  the last snapshot published (`publishedV`) for the page's words (`browser-play`, its `stop=1`, `browser-pos`,
+  `/api/cmd stop`) and the current `v` for `/api/play`. It hears only what today's guards let through.
+  The snapshot carries `session: {boot, v}`, which the page ignores for now.
+- First disagreements seen (fake page, Mac): **file** after the handheld's Next/Prev while a page plays (today the
+  handheld's file follows only once the page answers `handheld-skip`; a page that never answers leaves it behind for
+  good, with no timeout), and **playing** after A while a page plays (today's wish lapses after `WANT_MS` back to the
+  page's last word if the page doesn't confirm; the session keeps the wish). Both are what steps (c)/(d) replace.

@@ -1,4 +1,5 @@
 #include "ui.h"
+#include "session_host.h"
 #include "format.h"
 #include "playlist.h"
 #include "netpath.h"
@@ -367,6 +368,7 @@ namespace bp
 		case Button::A:
 			// a page plays it: the page's play/pause as A lets go (release()), here only once held (tick())
 			if (pageDrives(p)) { if (!playHoldAt) { playHoldAt = SDL_GetTicks(); playHoldTouch = false; } break; }
+			SessionHost::shadow().play(p.paused);	// (mpv answers the flip later: paused is still the old state)
 			if (p.paused) resumeFromBrowser(p);
 			p.togglePause();
 			break;
@@ -398,6 +400,7 @@ namespace bp
 			break;
 		case Button::L:
 		case Button::R:
+			SessionHost::shadow().step(b == Button::R ? 1 : -1);
 			// a page plays it: the page's song moves on, not this paused copy (which would start sounding here)
 			if (pageDrives(p))
 			{

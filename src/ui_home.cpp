@@ -1,4 +1,5 @@
 #include "ui.h"
+#include "session_host.h"
 #include "format.h"
 #include "playlist.h"
 #include "netpath.h"
@@ -584,6 +585,7 @@ namespace bp
 			// a page plays it: the page's play / pause (as A on the player)
 			if (pageDrives(p)) { toggleBrowser(p); return; }
 			if (!p.error.empty()) return;
+			SessionHost::shadow().play(p.paused);
 			if (p.paused) resumeFromBrowser(p);
 			p.togglePause();
 			return;

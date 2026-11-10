@@ -11,6 +11,7 @@
 #include "substyle.h"
 #include "tracks.h"
 #include "ui.h"
+#include "session_host.h"
 #include "webstate.h"
 #include <httplib.h>
 #include <SDL.h>
@@ -252,6 +253,8 @@ namespace bp
 			s.fx = soundFxKey(p.settings.soundFx);
 			s.loop = p.settings.loop == LOOP_ALL ? "all" : p.settings.loop == LOOP_ONE ? "one" : "no";
 			s.browserPlaying = u.browserPlaying;
+			s.sessionBoot = SessionHost::shadow().boot();
+			s.sessionV = SessionHost::shadow().version();
 			s.clients = ws.clients();
 			s.playlistSerial = u.playlistSerial();
 			s.showHiddenFolders = p.settings.showHiddenFolders;
@@ -458,6 +461,7 @@ namespace bp
 
 		static bool stopIfPlaying(Player& p, Ui& u, const std::string& real)
 		{
+			if (!real.empty()) SessionHost::shadow().fileGone(real);
 			if (!p.playing() || real.empty()) return false;
 			const std::string& cur = p.currentPath();
 			std::string dir = real.back() == '/' ? real : real + "/";
@@ -494,7 +498,13 @@ namespace bp
 				std::string id = value(req, "playlist");
 				int index = atoi(value(req, "index").c_str());
 				int status = 200;
-				std::string body = w->call([=](Player& p, Ui& u) { WebPlayerGlue::soundBackHere(u); return WebPlayerGlue::playPlaylist(p, u, id, index, shuffle, t, aid, sid); }, 2000, status);
+				std::string body = w->call([=](Player& p, Ui& u) {
+					WebPlayerGlue::soundBackHere(u);
+					std::string before = p.currentPath();
+					std::string r = WebPlayerGlue::playPlaylist(p, u, id, index, shuffle, t, aid, sid);
+					SessionHost::shadow().handheldAsked(p, p.currentPath() != before, t);
+					return r;
+				}, 2000, status);
 				answer(res, body, status);
 				return;
 			}
@@ -516,7 +526,9 @@ namespace bp
 				}
 				int status = 200;
 				std::string body = w->call([=](Player& p, Ui& u) {
+					std::string before = p.currentPath();
 					WebPlayerGlue::openFile(p, u, path, t, aid, sid);
+					SessionHost::shadow().handheldAsked(p, p.currentPath() != before, t);
 					return std::string("{\"ok\":true}");
 				}, 2000, status);
 				answer(res, body, status);
@@ -541,8 +553,10 @@ namespace bp
 			std::string title = real.size() == 1 ? baseOf(real[0]) : "Selection";
 			int status = 200;
 			std::string body = w->call([=](Player& p, Ui& u) {
+				std::string before = p.currentPath();
 				if (oneFolder) WebPlayerGlue::openFile(p, u, list[0], 0);
 				else { WebPlayerGlue::soundBackHere(u); WebPlayerGlue::openSelection(p, u, list, title, shuffle); }
+				SessionHost::shadow().handheldAsked(p, oneFolder ? p.currentPath() != before : true, 0);
 				return std::string("{\"ok\":true}");
 			}, 2000, status);
 			answer(res, body, status);
@@ -577,6 +591,7 @@ namespace bp
 					Settings st = p.settings;
 					st.loop = loop;
 					p.setSettings(st);
+					SessionHost::shadow().loop(loop);
 					if (p.playingAudio()) p.osd(loopLabel(loop));
 					return "{\"ok\":true}";
 				}
@@ -592,6 +607,13 @@ namespace bp
 					if (u.parkedShown() && (c == "toggle" || c == "play")) u.resumeParked(p, false);
 					return "{\"ok\":true}";
 				}
+				// (the Session's shadow: the same, as intents from the web)
+				SessionHost& sh = SessionHost::shadow();
+				if (c == "toggle") sh.play(p.paused, "web");
+				else if (c == "pause" || c == "play") sh.play(c == "play", "web");
+				else if (c == "next" || c == "prev") sh.step(c == "next" ? 1 : -1, "web");
+				else if (c == "stop") sh.stop("web", true);
+				else if (c == "seek" || c == "seekrel") sh.seek(c == "seek" ? t : d, c == "seekrel", "web");
 				if (c == "toggle") p.togglePause();
 				else if (c == "pause") { if (!p.paused) p.togglePause(); }
 				else if (c == "play") { if (p.paused) p.unpause(); }
@@ -840,6 +862,7 @@ namespace bp
 				if (staleBrowserWord(u, tab, seq) || (!u.browserFile.empty() && real != u.browserFile))
 					return std::string("{\"ok\":true,\"stale\":true}");
 				u.browserPos = {real, t, SDL_GetTicks(), playing};
+				SessionHost::shadow().pagePos(tab, real, t, playing);
 				// what A asked of it, done: its word counts again (till then, an older word can't undo the press)
 				if (u.browserWant == (int)playing) u.browserWant = -1;
 				return std::string("{\"ok\":true}");
@@ -883,6 +906,7 @@ namespace bp
 					u.browserFile.clear();
 					u.pageOpenPath.clear();
 					if (held) u.stopRequest = true;
+					SessionHost::shadow().stop(tab.empty() ? "web" : tab, true);
 				}
 				else
 				{
@@ -903,6 +927,7 @@ namespace bp
 					u.pageOut = true;
 					u.browserPlayAt = SDL_GetTicks();
 					u.browserSawPause = false;
+					if (!real.empty() && isMediaFile(real) && !isPhotoFile(real)) SessionHost::shadow().pagePlays(tab, real, p.paths(), p.index());
 				}
 				return std::string("{\"ok\":true}");
 			}, 2000, status);
@@ -916,6 +941,7 @@ namespace bp
 			std::string body = w->call([tok](Player&, Ui& u) {
 				if (tok <= 0 || tok != u.pageOpenTok || u.pageOpenPath.empty()) return std::string("{\"ok\":true,\"stale\":true}");
 				u.pageOpenRefused = true;
+				SessionHost::shadow().pageRefused();
 				return std::string("{\"ok\":true}");
 			}, 2000, status);
 			answer(res, body, status);

@@ -1,4 +1,5 @@
 #include "ui.h"
+#include "session_host.h"
 #include "format.h"
 #include "playlist.h"
 #include "netpath.h"
@@ -67,12 +68,14 @@ namespace bp
 		browserWant = play;
 		browserWantAt = SDL_GetTicks();
 		browserToggleSend = true;
+		SessionHost::shadow().play(play);
 	}
 
 	void Ui::takeOver(Player& p)
 	{
 		browserWant = -1;
 		if (!p.paused) return;
+		SessionHost::shadow().takeOver();
 		resumeFromBrowser(p);
 		p.togglePause();
 		p.osd("Playing on the handheld");

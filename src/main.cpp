@@ -12,6 +12,7 @@
 #include "levelwatch.h"
 #include "touch.h"
 #include "ui.h"
+#include "session_host.h"
 #include "updater.h"
 #include "netstore.h"
 #include "networker.h"
@@ -375,6 +376,14 @@ int main(int argc, char** argv)
 			if (!getenv("BP_WEB_FAIL")) webServer->start(wc);
 		};
 		ui.webPower = webPower;
+		// the Session's shadow (docs/design/session.md, step a): fed today's events, it acts on nothing and logs where it
+		// disagrees. A browser can have a file the web serves in a format a browser plays (toPage's rule)
+		SessionHost& shadow = SessionHost::shadow();
+#ifdef BP_WEB
+		shadow.browserCan = [&webServer](const std::string& path) {
+			return webServer && webServer->running() && !webServer->servedVirtual(path).empty() && playableByName(path) != Playable::No;
+		};
+#endif
 		// tests: BP_WEB_FORCE=1 starts it whatever the settings say (as if it were on, not written)
 		if (getenv("BP_WEB_FORCE") && atoi(getenv("BP_WEB_FORCE"))) player.settings.webDashboard = true;
 		if (player.settings.webDashboard) webPower(true);
@@ -432,6 +441,7 @@ int main(int argc, char** argv)
 			int index;
 			std::vector<std::string> list = siblingVideos(file, index);
 			player.open(list, index);
+			if (!isPhotoFile(file)) shadow.open(list, index, 0, "", "hh", nullptr, 0);
 		}
 		bool topDark = false;	// the top panel cleared while there's no video
 		Uint32 levelUntil = 0;
@@ -756,7 +766,11 @@ int main(int argc, char** argv)
 			// the web's Stop (a file deleted or renamed from the web, the page's own Stop for its held copy) and the
 			// player's own
 			if (ui.takeStopRequest()) stopPlaying(StopWhy::Web);
-			if (ui.takeStopPressed()) stopPlaying(StopWhy::Handheld);
+			if (ui.takeStopPressed())
+			{
+				if (player.playing() && !player.playingPhoto()) shadow.stop("hh", false);
+				stopPlaying(StopWhy::Handheld);
+			}
 			if (int ms = ui.takeLevelShown())
 			{
 				levelUntil = SDL_GetTicks() + ms;
@@ -772,6 +786,12 @@ int main(int argc, char** argv)
 				// played to its end: next time from the start; on to the next video, or out after the last
 				player.saveResume();
 				player.finished = false;
+				if (shadow.session().out.kind == OutKind::Handheld && shadow.session().index >= 0 && !player.playingPhoto())
+				{
+					Intent end = shadow.make(IntentType::Ended);
+					end.load = shadow.session().load;
+					shadow.submit(end);
+				}
 				if (!player.advance()) stopPlaying(StopWhy::End);
 			}
 			// the place is kept now and then too: a battery that runs out, a power-off after sleeping
@@ -783,6 +803,7 @@ int main(int argc, char** argv)
 #endif
 			// a photo has no Play: an animated one paused by the lid goes on at the wake (a video waits for A)
 			if (woke && player.playingPhoto()) player.unpause();
+			if (woke) shadow.woke();
 			if (woke || (player.loaded && !player.paused && SDL_GetTicks() - savedAt > 60000))
 			{
 				player.saveResume();
@@ -842,6 +863,8 @@ int main(int argc, char** argv)
 				std::string note = (player.title.empty() ? was.substr(was.rfind('/') + 1) : player.title) + " stopped \xC2\xB7 kept at " +
 					formatTime(std::max(0.0, player.position));
 				if (parks) ui.park(player);
+				if (parks) shadow.photoPark(std::max(0.0, player.position));
+				if (!isPhotoFile(pick)) shadow.open(list, index, isNetPath(pick) ? 1 : 0, "", "hh", nullptr, 0);
 				int to = toPage(pick);
 				player.open(list, index, names);
 				opened(pick, to);
@@ -856,6 +879,10 @@ int main(int argc, char** argv)
 			if (Ui::PlayRequest pr; ui.takePlayRequest(pr))
 			{
 				std::string pick = pr.paths[std::clamp(pr.index, 0, (int)pr.paths.size() - 1)];
+				// what a photo stopped, played again (resumeParked), else a pick
+				if (shadow.session().parked && pick == shadow.file()) shadow.photoResume();
+				else shadow.open(pr.paths, pr.index, pr.source.kind == SourceKind::Playlist ? 2 : pr.source.kind == SourceKind::NetFolder ? 1 : 0,
+					pr.source.title, "hh", nullptr, 0);
 				int to = toPage(pick);
 				if (pr.source.kind == SourceKind::Playlist) player.openPlaylist(pr.paths, pr.index, pr.source);
 				else player.open(pr.paths, pr.index, pr.names);
@@ -1078,6 +1105,7 @@ int main(int argc, char** argv)
 						ui.browserPlaying = false;
 						ui.pageOut = false;
 						webServer->notify("handheld-play", "{}");
+						shadow.takeOver();
 					}
 				}
 				// a pick sent to the page: told once it's loaded here (its place known); refused, or no word in 6 s (a page
@@ -1150,6 +1178,7 @@ int main(int argc, char** argv)
 					if (webForce || snapshotChanged(webLast, snap))
 					{
 						webServer->publish(webSnapshotJson(snap, ui));
+						shadow.publishedV = snap.sessionV;
 						webLast = snap;
 						webForce = false;
 						webPublishedAt = SDL_GetTicks();
@@ -1157,6 +1186,14 @@ int main(int argc, char** argv)
 				}
 			}
 #endif
+			if (haveUi)
+			{
+#ifdef BP_WEB
+				shadow.pass(player, ui, [&webServer](const std::string& tab) { return webServer && webServer->running() && webServer->tabConnected(tab); });
+#else
+				shadow.pass(player, ui, nullptr);
+#endif
+			}
 			Uint32 now = SDL_GetTicks();
 			// a chapter or equalizer card shown: it goes the way the volume card does, after its time
 			if (int ms = player.takeCardShown())

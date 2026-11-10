@@ -47,6 +47,7 @@ namespace bp
 		std::vector<WebTrack> audioTracks, subTracks;
 		int64_t aid = 0, sid = 0;	// the chosen ones' ids, 0 none (subtitles off)
 		bool browserPlaying = false;
+		uint64_t sessionBoot = 0, sessionV = 0;	// the Session's (boot, v): "session" {boot, v}; the page ignores it for now
 		int clients = 0;
 		int playlistSerial = 0;
 		bool liked = false;	// what plays is in the Liked playlist
@@ -56,7 +57,7 @@ namespace bp
 	// The JSON a page gets in `event: state`. Keys: path, title, artist, album, kind, source {kind, title, id, index,
 	// count}, screen, loading, paused, position, positionAt, duration, speed, volume, eq {on, preset, gains[10]}, fx, loop,
 	// shuffled, chapters [{title, start}], chapter, tracks (null, or {audio: [{id, label, selected, default, forced,
-	// external}], sub: [the same], aid, sid}), browserPlaying, clients, playlistSerial, liked, showHiddenFolders.
+	// external}], sub: [the same], aid, sid}), browserPlaying, clients, session {boot, v}, playlistSerial, liked, showHiddenFolders.
 	std::string toJson(const WebSnapshot&);
 	// true when anything but position/positionAtMs differs, or b's position is more than 1.5 s from where a's
 	// would be by now (a's position plus the time between them times its speed, unless a is paused)

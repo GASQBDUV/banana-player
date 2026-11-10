@@ -44,6 +44,7 @@ namespace bp
 			j.key("aid").num(s.aid).key("sid").num(s.sid).end();
 		}
 		j.key("browserPlaying").boolean(s.browserPlaying).key("clients").num(s.clients);
+		j.key("session").obj().key("boot").num(s.sessionBoot).key("v").num(s.sessionV).end();
 		j.key("playlistSerial").num(s.playlistSerial).key("liked").boolean(s.liked).key("showHiddenFolders").boolean(s.showHiddenFolders);
 		j.end();
 		return j.out();

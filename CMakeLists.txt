@@ -34,14 +34,14 @@ find_package(OpenSSL REQUIRED)
 
 # what doesn't need a window: unit-tested on its own
 add_library(bpcore STATIC src/aspect.cpp src/tracks.cpp src/format.cpp src/substyle.cpp src/settings.cpp src/resume.cpp src/playlist.cpp src/browser.cpp src/history.cpp src/png.cpp src/battery.cpp src/photo.cpp src/update.cpp src/backlight.cpp src/netstore.cpp src/netpath.cpp src/servers.cpp src/secret.cpp src/sidecar.cpp src/ftplist.cpp src/keyboard.cpp src/eq.cpp src/soundfx.cpp src/playlists.cpp
-	src/webauth.cpp src/webpath.cpp src/json.cpp src/webmedia.cpp src/webstate.cpp src/crashlog.cpp)
+	src/webauth.cpp src/webpath.cpp src/json.cpp src/webmedia.cpp src/webstate.cpp src/crashlog.cpp src/session.cpp)
 target_include_directories(bpcore PUBLIC src)
 target_link_libraries(bpcore PUBLIC PkgConfig::MPV PkgConfig::ZLIB OpenSSL::Crypto ${CMAKE_DL_LIBS})
 if(APPLE)
 	target_link_libraries(bpcore PUBLIC iconv)	# glibc has iconv in libc; macOS has it apart
 endif()
 
-add_executable(banana-player src/main.cpp src/player.cpp src/ui.cpp src/ui_draw.cpp src/ui_menus.cpp src/ui_browse.cpp src/ui_forms.cpp src/ui_playlists.cpp src/ui_settings.cpp src/ui_main.cpp src/ui_sound.cpp src/ui_web.cpp src/ui_home.cpp src/input.cpp src/sleepwatch.cpp src/touch.cpp src/panel.cpp src/levelwatch.cpp src/updater.cpp src/volume.cpp src/networker.cpp src/netstream.cpp src/netresolve.cpp src/discovery.cpp)
+add_executable(banana-player src/main.cpp src/player.cpp src/ui.cpp src/ui_draw.cpp src/ui_menus.cpp src/ui_browse.cpp src/ui_forms.cpp src/ui_playlists.cpp src/ui_settings.cpp src/ui_main.cpp src/ui_sound.cpp src/ui_web.cpp src/ui_home.cpp src/input.cpp src/sleepwatch.cpp src/touch.cpp src/panel.cpp src/levelwatch.cpp src/updater.cpp src/volume.cpp src/networker.cpp src/netstream.cpp src/netresolve.cpp src/discovery.cpp src/session_host.cpp)
 target_link_libraries(banana-player PRIVATE bpcore PkgConfig::SDL2 PkgConfig::SDL2_TTF)
 # SMB through libsmb2 (bundled on the handheld; on a Mac, built into .cache/mac/libsmb2). Without it the browser's
 # Network tab says no server can be reached

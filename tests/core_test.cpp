@@ -19,6 +19,7 @@
 #include "sidecar.h"
 #include "soundfx.h"
 #include "resume.h"
+#include "session.h"
 #include "settings.h"
 #include "tracks.h"
 #include "json.h"
@@ -39,6 +40,7 @@
 #include <climits>
 #include <functional>
 #include <map>
+#include <random>
 #include <set>
 #include <string>
 #include <vector>
@@ -2459,7 +2461,7 @@ static void testWeb()
 			"\"paused\":false,\"position\":1.5,\"positionAt\":42,\"duration\":0,\"speed\":1,\"volume\":0,"
 			"\"eq\":{\"on\":false,\"preset\":\"\",\"gains\":[-3,0,0,0,0,0,0,0,0,0]},\"fx\":\"\",\"loop\":\"one\","
 			"\"shuffled\":false,\"chapters\":[{\"title\":\"A\",\"start\":0}],\"chapter\":0,\"tracks\":null,\"browserPlaying\":false,"
-			"\"clients\":1,\"playlistSerial\":0,\"liked\":false,\"showHiddenFolders\":false}"));
+			"\"clients\":1,\"session\":{\"boot\":0,\"v\":0},\"playlistSerial\":0,\"liked\":false,\"showHiddenFolders\":false}"));
 
 		// the handheld's screen (its player left, or back to it) is news: the dashboard says "in the background"
 		{
@@ -2602,8 +2604,700 @@ static void testCrashLog()
 	rmdir(dir);
 }
 
+
+// ---- the playback Session's reducer (docs/design/session.md §6) ----
+
+namespace
+{
+	// a session driven by hand: each origin's seq grows, the basis is what it last saw (the latest, unless given)
+	struct Sim
+	{
+		Session s;
+		int64_t now = 100000;
+		std::map<std::string, uint64_t> seqs;
+		std::vector<Effect> fx;	// everything since the last clear
+		Result last;
+		Sim() { s.boot = 7; }
+		Intent mk(IntentType t, const std::string& origin = "hh")
+		{
+			Intent i;
+			i.type = t;
+			i.origin = origin;
+			i.seq = ++seqs[origin];
+			i.basis = s.v;
+			return i;
+		}
+		Result go(const Intent& i)
+		{
+			Result r = apply(s, i, now);
+			std::string bad = checkTransition(s, i, r, now);
+			if (!bad.empty())
+			{
+				failures++;
+				fprintf(stderr, "session: %s (after %s)\n", bad.c_str(), intentName(i.type));
+			}
+			s = r.s;
+			last = r;
+			fx.insert(fx.end(), r.fx.begin(), r.fx.end());
+			return r;
+		}
+		Result open(int count, int index, const std::string& tab = "")
+		{
+			Intent i = mk(IntentType::Open, tab.empty() ? "hh" : tab);
+			for (int k = 0; k < count; k++)
+			{
+				char p[32];
+				snprintf(p, sizeof p, "/m/%02d.mp4", k);
+				i.queue.push_back(p);
+			}
+			i.index = index;
+			i.source.title = "Films";
+			if (!tab.empty())
+			{
+				i.hasOut = true;
+				i.out = browserOut(tab);
+			}
+			return go(i);
+		}
+		Result report(IntentType t, const std::string& origin, uint64_t load, double tPos = 0, bool playing = true)
+		{
+			Intent i = mk(t, origin);
+			i.load = load;
+			i.dur = 100;
+			i.t = tPos;
+			i.playing = playing;
+			i.reason = "format";
+			return go(i);
+		}
+		Result loaded() { return report(IntentType::Loaded, outOrigin(s), s.load); }
+		Result step(int n, const std::string& origin = "hh")
+		{
+			Intent i = mk(IntentType::Step, origin);
+			i.n = n;
+			return go(i);
+		}
+		Result output(const Output& to, const std::string& origin, uint64_t basis, double at = -1)
+		{
+			Intent i = mk(IntentType::SetOutput, origin);
+			i.hasOut = true;
+			i.out = to;
+			i.basis = basis;
+			if (at >= 0) { i.hasT = true; i.t = at; }
+			return go(i);
+		}
+		Result host(IntentType t, const std::string& tab = "")
+		{
+			Intent i;
+			i.type = t;
+			i.path = tab;
+			return go(i);
+		}
+		// A (or the page's play button): the opposite of what it knows, resolved at the edge
+		Result toggle(const std::string& origin = "hh") { return go(mk(s.playing ? IntentType::Pause : IntentType::Play, origin)); }
+		int count(Effect::Kind k, const std::vector<Effect>& list) const
+		{
+			int n = 0;
+			for (auto& e : list) n += e.kind == k;
+			return n;
+		}
+		bool said(const std::string& text) const
+		{
+			for (auto& e : fx)
+				if (e.kind == Effect::Note && e.text == text) return true;
+			return false;
+		}
+	};
+}
+
+static void testSessionNamed()
+{
+	{
+		// fast Next x15 Prev x7 ends at +8, reports arriving shuffled; one HhLoad per pass
+		for (int browser = 0; browser < 2; browser++)
+		{
+			Sim m;
+			m.open(30, 3, browser ? "tabA" : "");
+			m.loaded();
+			m.fx.clear();
+			std::vector<uint64_t> loads;
+			for (int k = 0; k < 15; k++) { m.step(1); loads.push_back(m.s.load); }
+			for (int k = 0; k < 7; k++) { m.step(-1); loads.push_back(m.s.load); }
+			std::vector<Effect> pass = m.fx;
+			// the renderer's Loaded for older loads, in any order: all dropped
+			for (int k = (int)loads.size() - 2; k >= 0; k -= 3)
+				CHECK_EQ(m.report(IntentType::Loaded, browser ? "tabA" : "hh", loads[k]).reject, std::string("stale-report"));
+			CHECK_EQ(m.s.index, 11);
+			std::vector<Effect> run = coalesce(pass);
+			CHECK_EQ(m.count(Effect::HhLoad, run), 1);
+			for (auto& e : run)
+				if (e.kind == Effect::HhLoad) { CHECK_EQ(e.path, std::string("/m/11.mp4")); CHECK_EQ(e.hold, browser == 1); }
+			CHECK_EQ(m.loaded().reject, std::string(""));
+		}
+	}
+	{
+		// two Next in one loop pass both count
+		Sim m;
+		m.open(10, 0);
+		m.step(1);
+		m.step(1);
+		CHECK_EQ(m.s.index, 2);
+	}
+	{
+		// Next while the held copy loads goes to the page's session, never unpauses mpv (I2)
+		Sim m;
+		m.open(10, 2, "tabA");
+		m.fx.clear();
+		m.step(1);
+		CHECK_EQ(m.s.out, browserOut("tabA"));
+		CHECK_EQ(m.s.index, 3);
+		CHECK_EQ(m.count(Effect::HhPlay, m.fx), 0);
+		CHECK_EQ(m.fx.size() > 0 && m.fx[0].kind == Effect::HhLoad && m.fx[0].hold, true);
+	}
+	{
+		// late browser-pos for the previous file is dropped / reordered Loaded from an older load is dropped
+		Sim m;
+		m.open(10, 0, "tabA");
+		m.loaded();
+		uint64_t first = m.s.load;
+		m.report(IntentType::Pos, "tabA", first, 50);
+		m.step(1);
+		CHECK_EQ(m.report(IntentType::Pos, "tabA", first, 60).reject, std::string("stale-report"));
+		CHECK_EQ(m.s.pos, 0.0);
+		CHECK_EQ(m.report(IntentType::Loaded, "tabA", first).reject, std::string("stale-report"));
+		CHECK_EQ(m.s.loaded, false);
+	}
+	{
+		// A x3 from playing ends paused; a toggle seen twice (dup seq) flips once
+		Sim m;
+		m.open(3, 0);
+		m.loaded();
+		m.toggle();
+		m.toggle();
+		m.toggle();
+		CHECK_EQ(m.s.playing, false);
+		Intent play = m.mk(IntentType::Play, "tabA");
+		m.go(play);
+		uint64_t v = m.s.v;
+		Result again = m.go(play);
+		CHECK_EQ(again.dup, true);
+		CHECK_EQ(m.s.playing, true);
+		CHECK_EQ(m.s.v, v);
+	}
+	{
+		// stop right after play from a never-played file keeps playing (9434cb7)
+		Sim m;
+		m.open(5, 1, "tabA");
+		uint64_t seen = m.s.v;	// what the page saw
+		m.output(handheldOut(), "tabA", seen, 12);
+		Intent play = m.mk(IntentType::Play, "tabA");
+		play.basis = seen;
+		m.go(play);
+		Intent stop = m.mk(IntentType::Stop, "tabA");
+		stop.basis = seen;	// the page's trailing stop, aimed at the browser's playing
+		CHECK_EQ(m.go(stop).reject, std::string("stale"));
+		CHECK_EQ(m.s.index, 1);
+		CHECK_EQ(m.s.playing, true);
+		CHECK_EQ(m.s.out, handheldOut());
+	}
+	{
+		// handoff to the handheld of a file it only held keeps playing there (ao-reload on the first HhPlay)
+		Sim m;
+		m.open(5, 1, "tabA");
+		m.loaded();
+		m.fx.clear();
+		m.output(handheldOut(), "tabA", m.s.v, 42);
+		CHECK_EQ(m.s.out, handheldOut());
+		CHECK_EQ(m.s.pos, 42.0);
+		bool reload = false;
+		for (auto& e : m.fx) reload |= e.kind == Effect::HhPlay && e.aoReload;
+		CHECK_EQ(reload, true);
+		CHECK_EQ(m.loaded().reject, std::string(""));	// the handheld is the one that reports now
+	}
+	{
+		// tracks survive browser→handheld→browser (renderer counts differ); an unplayable audio pick plays the default
+		// in the browser and comes back on the handheld
+		Sim m;
+		m.open(5, 0, "tabA");
+		Intent a = m.mk(IntentType::SetAudio, "tabA");
+		a.audio = {2, 3, "jpn", "Japanese (DTS 5.1)", false, true};
+		m.go(a);
+		Intent sb = m.mk(IntentType::SetSub, "tabA");
+		sb.sub = {1, 2, "eng", "English [ASS]", true, true};
+		m.go(sb);
+		m.output(handheldOut(), "tabA", m.s.v);
+		std::vector<TrackInfo> hhAudio = {{"eng", "English (AAC)"}, {"eng", "Commentary"}, {"jpn", "Japanese (DTS 5.1)"}};
+		std::vector<TrackInfo> hhSubs = {{"eng", "English"}, {"fre", "French"}, {"spa", "Spanish"}, {"eng", "English [ASS]", true}};
+		CHECK_EQ(matchTrack(m.s.audio, hhAudio), 2);
+		CHECK_EQ(matchTrack(m.s.sub, hhSubs), 3);
+		m.output(browserOut("tabA"), "hh", m.s.v);
+		CHECK_EQ(m.s.audio.ord, 2);
+		CHECK_EQ(m.s.sub.label, std::string("English [ASS]"));
+		std::vector<TrackInfo> chromeAudio = hhAudio;
+		chromeAudio[2].playable = false;
+		CHECK_EQ(matchTrack(m.s.audio, chromeAudio), MATCH_DEFAULT);
+		std::vector<TrackInfo> pageSubs = {{"eng", "English [ASS]", true}};
+		CHECK_EQ(matchTrack(m.s.sub, pageSubs), 0);
+		m.output(handheldOut(), "tabA", m.s.v);
+		CHECK_EQ(matchTrack(m.s.audio, hhAudio), 2);
+		CHECK_EQ(matchTrack(TrackPick(), hhAudio), MATCH_DEFAULT);
+		TrackPick off;
+		off.set = true;
+		CHECK_EQ(matchTrack(off, hhSubs), MATCH_OFF);
+		TrackPick byLang;
+		byLang.set = true;
+		byLang.ord = 5;
+		byLang.lang = "FRE";
+		CHECK_EQ(matchTrack(byLang, hhSubs), 1);
+	}
+	{
+		// photo over music keeps the browser's song
+		Sim m;
+		m.open(5, 0, "tabA");
+		m.loaded();
+		m.fx.clear();
+		m.go(m.mk(IntentType::PhotoPark));
+		CHECK_EQ(m.s.out, browserOut("tabA"));
+		CHECK_EQ(m.s.playing, true);
+		CHECK_EQ(m.s.parked, false);
+		CHECK_EQ(m.count(Effect::HhPhoto, m.fx), 1);
+	}
+	{
+		// photo over music on the handheld parks and resumes at its place
+		Sim m;
+		m.open(5, 0);
+		m.loaded();
+		m.report(IntentType::Pos, "hh", m.s.load, 42);
+		Intent park = m.mk(IntentType::PhotoPark);
+		park.hasT = true;
+		park.t = 42;
+		m.go(park);
+		CHECK_EQ(m.s.parked, true);
+		CHECK_EQ(m.s.playing, false);
+		m.now += 60000;
+		CHECK_EQ(posNow(m.s, m.now), 42.0);
+		CHECK_EQ(m.report(IntentType::Pos, "hh", m.s.load, 50).reject, std::string("parked"));
+		m.fx.clear();
+		uint64_t load = m.s.load;
+		m.go(m.mk(IntentType::PhotoResume));
+		CHECK_EQ(m.s.parked, false);
+		CHECK_EQ(m.s.playing, true);
+		CHECK_EQ(m.s.load, load + 1);
+		CHECK_EQ(m.fx.size() == 2 && m.fx[0].kind == Effect::HhLoad && m.fx[0].t == 42.0 && m.fx[1].kind == Effect::HhPlay, true);
+	}
+	{
+		// Prev ≥5 s restarts, Prev <5 s goes back, a Prev burst from 7 s restarts then n-1, Prev on the first <5 s rejects
+		Sim m;
+		m.open(10, 5);
+		m.loaded();
+		m.report(IntentType::Pos, "hh", m.s.load, 7);
+		uint64_t seekN = m.s.seekN;
+		m.step(-1);
+		CHECK_EQ(m.s.index, 5);
+		CHECK_EQ(m.s.seekN, seekN + 1);
+		CHECK_EQ(m.s.pos, 0.0);
+		m.now += 3000;
+		m.step(-1);
+		CHECK_EQ(m.s.index, 4);
+		m.loaded();
+		m.report(IntentType::Pos, "hh", m.s.load, 7);
+		m.step(-3);
+		CHECK_EQ(m.s.index, 2);
+		Sim f;
+		f.open(10, 0);
+		f.loaded();
+		f.now += 2000;
+		f.fx.clear();
+		CHECK_EQ(f.step(-1).reject, std::string("first"));
+		CHECK_EQ(f.said("This is the first one"), true);
+		CHECK_EQ(f.s.index, 0);
+	}
+	{
+		// end of list stops, says Finished; loop one restarts; loop all wraps both ways
+		Sim m;
+		m.open(3, 2);
+		m.loaded();
+		m.report(IntentType::Ended, "hh", m.s.load);
+		CHECK_EQ(m.s.index, -1);
+		CHECK_EQ(m.s.playing, false);
+		CHECK_EQ(m.said("Finished"), true);
+		Sim one;
+		one.open(3, 1);
+		Intent l = one.mk(IntentType::SetLoop);
+		l.loop = SESSION_LOOP_ONE;
+		one.go(l);
+		one.loaded();
+		uint64_t seekN = one.s.seekN;
+		one.report(IntentType::Ended, "hh", one.s.load);
+		CHECK_EQ(one.s.index, 1);
+		CHECK_EQ(one.s.seekN, seekN + 1);
+		Sim all;
+		all.open(3, 2);
+		l = all.mk(IntentType::SetLoop);
+		l.loop = SESSION_LOOP_ALL;
+		all.go(l);
+		all.loaded();
+		all.report(IntentType::Ended, "hh", all.s.load);
+		CHECK_EQ(all.s.index, 0);
+		all.step(-1);
+		CHECK_EQ(all.s.index, 2);
+		all.step(1);
+		CHECK_EQ(all.s.index, 0);
+	}
+	{
+		// handheld Stop with the browser as output stops the page; the next pick goes to the browser (pref)
+		Sim m;
+		m.open(5, 0, "tabA");
+		m.loaded();
+		m.go(m.mk(IntentType::Stop));
+		CHECK_EQ(m.s.index, -1);
+		CHECK_EQ(m.s.playing, false);
+		m.open(5, 3);
+		CHECK_EQ(m.s.out, browserOut("tabA"));
+		Intent unserved = m.mk(IntentType::Open);
+		unserved.queue = {"/m/x.mkv"};
+		unserved.browserCan = false;
+		m.go(unserved);
+		CHECK_EQ(m.s.out, handheldOut());
+		CHECK_EQ(m.s.pref, browserOut("tabA"));
+	}
+	{
+		// browser can't play → the handheld plays at the same place, with the note; the next one goes back to the browser
+		Sim m;
+		m.open(5, 0, "tabA");
+		m.loaded();
+		m.report(IntentType::Pos, "tabA", m.s.load, 30, true);
+		m.report(IntentType::CantPlay, "tabA", m.s.load);
+		CHECK_EQ(m.s.out, handheldOut());
+		CHECK_EQ(m.s.pos, 30.0);
+		CHECK_EQ(m.s.playing, true);
+		CHECK_EQ(m.said("This one plays on the handheld"), true);
+		m.step(1);
+		CHECK_EQ(m.s.out, browserOut("tabA"));
+		// unanswered load for 8 s → handheld
+		Sim u;
+		u.open(5, 0, "tabA");
+		u.now += 7900;
+		u.host(IntentType::Tick);
+		CHECK_EQ(u.s.out, browserOut("tabA"));
+		u.now += 200;
+		u.host(IntentType::Tick);
+		CHECK_EQ(u.s.out, handheldOut());
+		CHECK_EQ(u.said("This one plays on the handheld"), true);
+	}
+	{
+		// output tab gone 10 s → handheld paused; tab back within 9 s keeps it
+		Sim m;
+		m.open(5, 0, "tabA");
+		m.loaded();
+		m.report(IntentType::Pos, "tabA", m.s.load, 20, true);
+		m.host(IntentType::TabGone, "tabA");
+		m.now += 9999;
+		m.host(IntentType::Tick);
+		CHECK_EQ(m.s.out, browserOut("tabA"));
+		m.now += 2;
+		m.host(IntentType::Tick);
+		CHECK_EQ(m.s.out, handheldOut());
+		CHECK_EQ(m.s.playing, false);
+		CHECK_EQ(m.s.pref, handheldOut());
+		CHECK_EQ(m.said("Your browser went \xC2\xB7 paused here"), true);
+		CHECK_EQ(m.count(Effect::HhPlay, m.fx), 0);
+		Sim b;
+		b.open(5, 0, "tabA");
+		b.loaded();
+		b.host(IntentType::TabGone, "tabA");
+		b.now += 9000;
+		b.host(IntentType::TabBack, "tabA");
+		b.now += 5000;
+		b.host(IntentType::Tick);
+		CHECK_EQ(b.s.out, browserOut("tabA"));
+		CHECK_EQ(b.s.playing, true);
+	}
+	{
+		// a second tab takes the output; the first's reports are dropped
+		Sim m;
+		m.open(5, 0, "tabA");
+		m.loaded();
+		uint64_t loadA = m.s.load;
+		m.output(browserOut("tabB"), "tabB", m.s.v);
+		CHECK_EQ(m.report(IntentType::Pos, "tabA", loadA, 70).reject, std::string("stale-report"));
+		CHECK_EQ(m.report(IntentType::Pos, "tabA", m.s.load, 70).reject, std::string("stale-report"));
+		CHECK_EQ(m.report(IntentType::Loaded, "tabB", m.s.load).reject, std::string(""));
+	}
+	{
+		// Woke after sleep pauses; a new boot resets the page
+		Sim m;
+		m.open(5, 0);
+		m.loaded();
+		m.host(IntentType::Slept);
+		m.host(IntentType::Woke);
+		CHECK_EQ(m.s.playing, false);
+		CHECK_EQ(takesSnapshot(7, 10, 8, 1), true);
+		CHECK_EQ(takesSnapshot(7, 10, 7, 9), false);
+		CHECK_EQ(takesSnapshot(7, 10, 7, 10), false);
+		CHECK_EQ(takesSnapshot(7, 10, 7, 11), true);
+		// a host-only intent from a tab is refused
+		Intent t;
+		t.type = IntentType::Woke;
+		t.origin = "tabA";
+		CHECK_EQ(m.go(t).reject, std::string("origin"));
+	}
+	{
+		// FileGone of the current file stops; of an earlier one shifts the index; of a later one keeps it
+		Sim m;
+		m.open(6, 3);
+		Intent g = m.mk(IntentType::FileGone);
+		g.path = "/m/01.mp4";
+		m.go(g);
+		CHECK_EQ(m.s.index, 2);
+		CHECK_EQ(m.s.queue[2], std::string("/m/03.mp4"));
+		g = m.mk(IntentType::FileGone);
+		g.path = "/m/05.mp4";
+		m.go(g);
+		CHECK_EQ(m.s.index, 2);
+		CHECK_EQ(m.s.queue.size(), (size_t)4);
+		g = m.mk(IntentType::FileGone);
+		g.path = "/m/";
+		m.go(g);
+		CHECK_EQ(m.s.index, -1);
+		CHECK_EQ(m.said("Stopped: the file was deleted"), true);
+	}
+	{
+		// the handheld playing again (hold A) makes it the output
+		Sim m;
+		m.open(5, 0, "tabA");
+		m.loaded();
+		m.toggle("tabA");	// the page paused
+		m.fx.clear();
+		m.output(handheldOut(), "hh", m.s.v);
+		m.go(m.mk(IntentType::Play));
+		CHECK_EQ(m.s.out, handheldOut());
+		CHECK_EQ(m.s.playing, true);
+		CHECK_EQ(m.count(Effect::HhPlay, m.fx), 1);
+	}
+	{
+		// photos never enter the queue; a photo picked alone is refused
+		Sim m;
+		Intent o = m.mk(IntentType::Open);
+		o.queue = {"/m/a.jpg", "/m/b.mp3", "/m/c.png", "/m/d.mp3"};
+		o.index = 3;
+		m.go(o);
+		CHECK_EQ(m.s.queue.size(), (size_t)2);
+		CHECK_EQ(m.s.index, 1);
+		o = m.mk(IntentType::Open);
+		o.queue = {"/m/a.jpg"};
+		CHECK_EQ(m.go(o).reject, std::string("empty"));
+	}
+	{
+		// the seen store keeps the last 16 origins: a retry from one pushed out is taken as new
+		Sim m;
+		m.open(5, 0);
+		std::vector<Intent> first;
+		for (int k = 0; k < 17; k++)
+		{
+			Intent i = m.mk(IntentType::Seek, "tab" + std::to_string(k));
+			i.t = k;
+			first.push_back(i);
+			m.go(i);
+		}
+		CHECK_EQ(m.s.seen.size(), (size_t)16);
+		CHECK_EQ(m.go(first[16]).dup, true);
+		CHECK_EQ(m.go(first[0]).dup, false);
+		CHECK_EQ(m.s.pos, 0.0);
+	}
+}
+
+// the property test: a model network (delay, reordering, 10 % duplicates, 5 % drops retried with the same seq), model
+// renderers for the output, random intents of every kind; I1–I10 after every apply, liveness once it all settles
+static bool fuzzSession(uint32_t seed, int steps)
+{
+	std::mt19937 rng(seed);
+	auto pick = [&](int n) { return (int)(rng() % (uint32_t)n); };
+	Session s;
+	s.boot = seed + 1;
+	int64_t now = 1000;
+	struct Msg { Intent i; int64_t at; };
+	std::vector<Msg> net;
+	std::map<std::string, uint64_t> seqs;
+	std::map<std::string, Session> view;	// each tab's last snapshot
+	const char* TABS[] = {"tabA", "tabB"};
+	const char* FILES[] = {"/m/01.mp3", "/m/02.mp3", "/m/03.mkv", "/m/04.mp4", "/m/05.mp3", "/m/06.jpg", "/m/07.mp3"};
+	std::string why;
+	int at = 0;
+	auto run = [&](const Intent& i) {
+		Result r = apply(s, i, now);
+		std::string bad = checkTransition(s, i, r, now);
+		if (bad.empty() && i.seq > 0)
+		{
+			// the same message again at once: the same answer, nothing done twice (I10)
+			Result again = apply(r.s, i, now);
+			if (!again.dup || again.reject != r.reject || !again.fx.empty() || again.s.v != r.s.v) bad = "I10: a repeat wasn't a dup";
+		}
+		if (!bad.empty() && why.empty()) why = bad + " (" + intentName(i.type) + " from " + i.origin + ", step " + std::to_string(at) + ")";
+		s = r.s;
+	};
+	auto userIntent = [&](const std::string& origin) {
+		Intent i;
+		i.origin = origin;
+		i.seq = ++seqs[origin];
+		i.basis = origin == "hh" ? s.v : view[origin].v;
+		static const IntentType KINDS[] = {IntentType::Open, IntentType::Play, IntentType::Pause, IntentType::Seek,
+			IntentType::SeekBy, IntentType::Step, IntentType::Step, IntentType::Step, IntentType::SetAudio, IntentType::SetSub,
+			IntentType::SetSpeed, IntentType::SetLoop, IntentType::SetOutput, IntentType::SetOutput, IntentType::Stop,
+			IntentType::PhotoPark, IntentType::PhotoResume, IntentType::FileGone};
+		i.type = KINDS[pick((int)(sizeof KINDS / sizeof KINDS[0]))];
+		switch (i.type)
+		{
+		case IntentType::Open:
+		{
+			int n = 1 + pick(6);
+			for (int k = 0; k < n; k++) i.queue.push_back(FILES[pick(7)]);
+			i.index = pick(n + 1) - (pick(10) == 0 ? 1 : 0);
+			i.t = pick(4) ? 0 : pick(200);
+			i.browserCan = pick(5) != 0;
+			if (pick(2))
+			{
+				i.hasOut = true;
+				int o = pick(3);
+				i.out = o == 0 ? handheldOut() : browserOut(TABS[o - 1]);
+			}
+			break;
+		}
+		case IntentType::Seek: i.t = pick(400) - 50; break;
+		case IntentType::SeekBy: i.t = pick(60) - 30; break;
+		case IntentType::Step: i.n = pick(9) - 4; i.browserCan = pick(5) != 0; break;
+		case IntentType::SetAudio: case IntentType::SetSub:
+			i.audio = i.sub = {pick(4) - 1, pick(4), "eng", "Track " + std::to_string(pick(3)), false, true};
+			break;
+		case IntentType::SetSpeed: i.speed = 0.25 * pick(12); break;
+		case IntentType::SetLoop: i.loop = pick(4) - (pick(8) == 0 ? 1 : 0); break;
+		case IntentType::SetOutput:
+		{
+			i.hasOut = pick(20) != 0;
+			int o = pick(3);
+			i.out = o == 0 ? handheldOut() : browserOut(TABS[o - 1]);
+			if (pick(2)) { i.hasT = true; i.t = pick(300); }
+			break;
+		}
+		case IntentType::PhotoPark: if (pick(2)) { i.hasT = true; i.t = pick(300); } break;
+		case IntentType::FileGone: i.path = pick(6) ? FILES[pick(7)] : "/m"; break;
+		default: break;
+		}
+		return i;
+	};
+	// a renderer's report, from what it last saw (a tab's view lags; the handheld's is the session)
+	auto rendererReport = [&](const std::string& origin) -> bool {
+		const Session& v = origin == "hh" ? s : view[origin];
+		if (v.index < 0 || outOrigin(v) != origin) return false;
+		Intent i;
+		i.origin = origin;
+		i.seq = ++seqs[origin];
+		i.basis = v.v;
+		i.load = v.load;
+		int r = pick(20);
+		i.type = r < 6 ? IntentType::Loaded : r < 16 ? IntentType::Pos : r < 18 ? IntentType::Ended : IntentType::CantPlay;
+		i.dur = 30 + pick(300);
+		i.audioOnly = pick(2);
+		i.t = pick(330);
+		i.playing = pick(4) ? v.playing : !v.playing;
+		static const char* REASONS[] = {"format", "net", "error", "timeout"};
+		i.reason = REASONS[pick(4)];
+		if (origin == "hh") run(i);
+		else net.push_back({i, now + pick(2000)});
+		return true;
+	};
+	auto send = [&](const Intent& i) {
+		int r = pick(100);
+		if (r < 5) net.push_back({i, now + 3000 + pick(3000)});	// dropped, retried with the same seq later
+		else
+		{
+			net.push_back({i, now + pick(800)});
+			if (r < 15) net.push_back({i, now + pick(1500)});	// duplicated
+		}
+	};
+	auto deliver = [&](size_t k) {
+		Intent i = net[k].i;
+		net.erase(net.begin() + k);
+		run(i);
+	};
+	for (at = 0; at < steps && why.empty(); at++)
+	{
+		now += pick(300);
+		int r = pick(100);
+		if (r < 25) run(userIntent("hh"));
+		else if (r < 50) send(userIntent(TABS[pick(2)]));
+		else if (r < 68)
+		{
+			const char* ORIGINS[] = {"hh", "tabA", "tabB"};
+			rendererReport(ORIGINS[pick(3)]);
+		}
+		else if (r < 80) { if (!net.empty()) deliver(pick((int)net.size())); }
+		else if (r < 88)
+		{
+			now += pick(15001);
+			Intent t;
+			run(t);
+		}
+		else if (r < 93)
+		{
+			Intent t;
+			t.type = pick(2) ? IntentType::TabGone : IntentType::TabBack;
+			t.path = TABS[pick(2)];
+			run(t);
+		}
+		else if (r < 95)
+		{
+			Intent t;
+			t.type = pick(2) ? IntentType::Slept : IntentType::Woke;
+			run(t);
+		}
+		else view[TABS[pick(2)]] = s;
+		// what's due arrives (in its own order)
+		for (size_t k = 0; k < net.size() && why.empty();)
+			if (net[k].at <= now && pick(3)) deliver(k);
+			else k++;
+	}
+	// settle: everything delivered, the renderers up to date, time passing: something plays, or it stopped, or it says
+	// why it can't
+	while (!net.empty() && why.empty()) deliver(pick((int)net.size()));
+	for (int round = 0; round < 4 && why.empty(); round++)
+	{
+		now += 30000;
+		run(Intent());
+		if (s.index >= 0 && !s.loaded && s.error.empty() && !s.parked)
+		{
+			Intent i;
+			i.type = IntentType::Loaded;
+			i.origin = outOrigin(s);
+			i.seq = ++seqs[i.origin];
+			i.basis = s.v;
+			i.load = s.load;
+			i.dur = 120;
+			run(i);
+		}
+	}
+	if (why.empty() && !(s.index == -1 || s.loaded || !s.error.empty() || s.parked)) why = "I6: stuck after settling";
+	if (!why.empty())
+	{
+		fprintf(stderr, "fuzzSession seed %u: %s\n", seed, why.c_str());
+		return false;
+	}
+	return true;
+}
+
+static void testSessionFuzz()
+{
+	int runs = 2000;
+	if (const char* n = getenv("BP_FUZZ")) runs = std::max(1, atoi(n));
+	int bad = 0;
+	for (int k = 0; k < runs && bad < 5; k++)
+		if (!fuzzSession(1000 + k, 200)) bad++;
+	failures += bad;
+}
+
 int main()
 {
+	testSessionNamed();
+	testSessionFuzz();
 	testCrashLog();
 	testWeb();
 	testChapters();
