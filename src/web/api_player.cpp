@@ -282,8 +282,20 @@ namespace bp
 
 		// one file with the files beside it, as the browser opens it (at t: the hand-off); already open: there, playing.
 		// aid > 0: with that audio track (the browser's "Change it on the handheld")
+		// a page asks the handheld to play (/api/play): the sound comes back here. The page is no longer the output, so
+		// its stop that follows (browser-play stop=1) isn't taken for "the page stopped its file" (which unloads the
+		// handheld's copy: that copy is now what plays, its unpause still on its way)
+		static void soundBackHere(Ui& u)
+		{
+			u.browserPlaying = false;
+			u.pageOut = false;
+			u.browserFile.clear();
+			u.pageOpenPath.clear();
+		}
+
 		static void openFile(Player& p, Ui& u, const std::string& path, double t, int64_t aid = 0)
 		{
+			soundBackHere(u);
 			if (p.playing() && p.currentPath() == path)
 			{
 				if (t > 0) seekWhenOpen(p, u, path, t);
@@ -466,7 +478,7 @@ namespace bp
 				std::string id = value(req, "playlist");
 				int index = atoi(value(req, "index").c_str());
 				int status = 200;
-				std::string body = w->call([=](Player& p, Ui& u) { return WebPlayerGlue::playPlaylist(p, u, id, index, shuffle, t, aid); }, 2000, status);
+				std::string body = w->call([=](Player& p, Ui& u) { WebPlayerGlue::soundBackHere(u); return WebPlayerGlue::playPlaylist(p, u, id, index, shuffle, t, aid); }, 2000, status);
 				answer(res, body, status);
 				return;
 			}
@@ -514,7 +526,7 @@ namespace bp
 			int status = 200;
 			std::string body = w->call([=](Player& p, Ui& u) {
 				if (oneFolder) WebPlayerGlue::openFile(p, u, list[0], 0);
-				else WebPlayerGlue::openSelection(p, u, list, title, shuffle);
+				else { WebPlayerGlue::soundBackHere(u); WebPlayerGlue::openSelection(p, u, list, title, shuffle); }
 				return std::string("{\"ok\":true}");
 			}, 2000, status);
 			answer(res, body, status);
