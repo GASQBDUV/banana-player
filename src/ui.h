@@ -27,6 +27,7 @@
 namespace bp
 {
 	class WebServer;
+	class DurationWorker;
 
 	// The bottom panel: what is playing and where, the transport (previous, -5 s, play, +10 s, next), the choices
 	// (audio, subtitles, aspect, speed, settings) and their pages. Laid out on 640x480 (the RG DS's panel) and scaled
@@ -132,6 +133,10 @@ namespace bp
 		NetWorker* netWorker = nullptr;
 		// a network folder's listing, from the worker (forwarded by main); dropped if the browser has moved on
 		void netListed(NetListing* listing, Player& p);
+		// the local file rows' durations, probed on main's worker (null: only the ones already known are shown), and
+		// its answers (main forwards its event): into the rows' notes
+		DurationWorker* durWorker = nullptr;
+		void durationsReady(Player& p);
 		// the on-screen keyboard is up: its caret blinks (the loop wakes often enough to draw it)
 		bool typing() const { return kbOpen; }
 		// Find on the network: discovery runs here, its hosts sent to hostFound (on the main thread: main forwards them)
@@ -219,6 +224,8 @@ namespace bp
 		SDL_Surface* capture(const Player& p);
 
 	private:
+		// "at 12:03": where a video was left (a song: "")
+		std::string resumeNote(const std::string& path, Player& p);
 		friend struct WebPlayerGlue;
 		friend class SessionHost;
 		friend struct WebPlaylistGlue;
@@ -466,6 +473,7 @@ namespace bp
 		int sideSerial = 1 << 30;
 		// a network folder listing: what's asked of the worker now, and what went wrong last
 		int netSerial = 0;
+		int durSerial = 0, durLo = -1;	// the worker's list (one a listing) and the rows on screen it was last told
 		bool netLoading = false;
 		std::string netSelect;	// a file to put the cursor on once its folder is listed (back from playing it)
 		std::map<std::string, std::vector<std::string>> netNames;	// netFolderNames'

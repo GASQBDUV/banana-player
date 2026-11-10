@@ -53,7 +53,11 @@ from L/R, a marker or its tile on Home. **B** goes up a folder, and from the sec
 tile.
 
 Folders come first, then files in natural order (episode 2 before episode 10). Each row has an icon (folder, video,
-song, photo), and each file shows its size. Anything you stopped part-way through shows where you left off. The line
+song, photo), and each file shows its size. Songs and videos on the card show their length too (`3:34 · 3.5 MB`; a
+video you stopped part-way, `at 12:03 / 1:45:00 · 1.2 GB`), filled in a moment after the folder opens, the rows on
+screen first. A file whose format keeps no length in its header (MPEG-TS `.ts`/`.m2ts`/`.mts`, `.mpg`/`.mpeg`/`.vob`,
+raw `.aac`) or that can't be read (empty, cut short, broken) shows only its size; so do network files. Anything you
+stopped part-way through shows where you left off. The line
 under the header shows where you are (`share / Movies`), and the bottom line shows what each button does there: the
 button's name in yellow, then what it does. See [Playlists](#playlists).
 
@@ -526,6 +530,8 @@ handheld, carries on at 1:27"):
 - **Up next**, **Chapters**, **Tracks** (audio and subtitles), **Sound** (the volume, the equalizer's presets and its ten
   bands, the effects) and **Details**: on a phone three keys under the controls open them as a sheet; on a tablet
   they're a card under the player; on a computer a column beside it, while the controls are in the player bar.
+  **Up next** shows each item's length: a playlist's own, else (a folder, this browser's queue) asked of the handheld
+  for the rows as they scroll into view.
 
 **Files** lists the card's folders:
 
@@ -544,6 +550,8 @@ handheld, carries on at 1:27"):
   time.
 - **Up a folder** (the first row, **..**, and the arrow beside the folder path) goes to the parent folder;
   on a computer **Backspace** or **Alt+Up** does too. A place's top has none.
+- Songs and videos on the card show their length before their size (`3:34 · 3.5 MB · Nov 10, 2026`), asked of the
+  handheld for the rows as they scroll into view (none for the formats and files the handheld's list shows none for).
 - On a computer, **Filter this folder** narrows the list as you type (**/** goes there).
 - Uploads and new names are limited to music, video, photo and subtitle files, and images for covers. A folder can be
   deleted from the page only if everything in it is one of those.

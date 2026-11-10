@@ -7,6 +7,7 @@
 #include "tracks.h"
 #include "playlist.h"
 #include "web/probe.h"
+#include "durprobe.h"
 #include "web/remux.h"
 #include "web/subs.h"
 #include "webmedia.h"
@@ -15,6 +16,8 @@
 
 #include <algorithm>
 #include <atomic>
+#include <chrono>
+#include <cmath>
 #include <cerrno>
 #include <climits>
 #include <cstdio>
@@ -25,6 +28,7 @@
 #include <memory>
 #include <mutex>
 #include <random>
+#include <set>
 #include <sys/stat.h>
 #include <sys/statvfs.h>
 #include <unistd.h>
@@ -542,6 +546,31 @@ namespace bp
 			ws.post(WebCall::Kind::FsChanged, dirName(real));
 			JsonWriter w;
 			w.obj().key("ok").boolean(true).key("hidden").boolean(isHiddenFolder(real)).end();
+			WebServer::json(res, w.out());
+		});
+
+		// the lengths of up to 32 files at once (the rows of Up next and Files as they scroll into view): {"<p>": seconds,
+		// or -1 for none (not media, empty, corrupt)}. A path that can't be had (outside the roots, gone) is -1 too; one
+		// left out (the request's 6 s spent: slow probes) is to be asked again
+		svr.Post("/api/durations", [&ws](const httplib::Request& req, httplib::Response& res) {
+			auto items = paramList(req, "p");
+			if (items.empty()) return WebServer::fail(res, 400, "no paths");
+			if (items.size() > 32) return WebServer::fail(res, 400, "32 paths at most");
+			auto end = std::chrono::steady_clock::now() + std::chrono::seconds(6);
+			std::set<std::string> seen;
+			JsonWriter w;
+			w.obj();
+			for (auto& vp : items)
+			{
+				if (!seen.insert(vp).second) continue;
+				if (std::chrono::steady_clock::now() > end) break;
+				std::string real;
+				httplib::Response scratch;
+				double d = -1;
+				if (ws.resolve(vp, real, false, scratch) && (isAudioFile(real) || isVideoFile(real))) d = probeDuration(real);
+				w.key(vp).num(d > 0 ? std::round(d * 1000) / 1000 : -1.0);
+			}
+			w.end();
 			WebServer::json(res, w.out());
 		});
 

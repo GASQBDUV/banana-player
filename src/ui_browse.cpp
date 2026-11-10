@@ -16,6 +16,7 @@
 #include <qrcodegen.hpp>
 #endif
 #include "ui_internal.h"
+#include "durworker.h"
 
 namespace bp
 {
@@ -132,10 +133,15 @@ namespace bp
 			browseRows.push_back({id, label, false, note});
 			browsePaths.push_back(path);
 		};
-		auto at = [&](const std::string& path) {
-			const ResumeEntry* e = p.resumeStore().find(path);
-			// a song's (kept by an earlier version) left out: songs start from their start
-			return e && e->position >= 0 && !isAudioFile(path) ? "at " + formatTime(e->position) : std::string();
+		auto at = [&](const std::string& path) { return resumeNote(path, p); };
+		// a local file's note: its length too when it's known; else asked of the worker (the note redone as it answers)
+		std::vector<std::pair<int, std::string>> durWant;
+		auto localNote = [&](const std::string& path) {
+			long long size = -1;
+			double secs = -1;
+			if (!cachedDuration(path, secs, &size) && size > 0 && (isAudioFile(path) || isVideoFile(path)) && durationInHeader(path))
+				durWant.emplace_back((int)browseRows.size(), path);
+			return fileNote(at(path), secs, size);
 		};
 		netLoading = false;
 		plMissing.clear();
@@ -234,13 +240,13 @@ namespace bp
 		{
 			// All recent: the history (a file taken away or on a card taken out left out); X clears it
 			listRecent(p);
-			for (auto& it : recent) add(2, baseName(it.path), it.path, fileNote(at(it.path), it.net ? -1 : fileSize(it.path)));
+			for (auto& it : recent) add(2, baseName(it.path), it.path, it.net ? fileNote(at(it.path), -1) : localNote(it.path));
 		}
 		else
 		{
 			bool ok;
 			for (auto& e : listFolder(dir, ok, p.settings.showHiddenFolders))
-				add(e.dir ? 1 : 2, e.name, e.path, e.dir ? (isHiddenFolder(e.path) ? "hidden" : "") : fileNote(at(e.path), fileSize(e.path)));
+				add(e.dir ? 1 : 2, e.name, e.path, e.dir ? (isHiddenFolder(e.path) ? "hidden" : "") : localNote(e.path));
 			if (!ok) add(-1, "This folder can't be opened", "", "");
 		}
 		if (browseRows.empty() && !isPlDir(dir) && dir != HOMEDIR) add(-1, "Nothing to play here", "", "");
@@ -251,6 +257,31 @@ namespace bp
 		if (dir == RECENT) cursor = scroll = 0;
 		fitList();
 		browseVersion++;
+		// (an empty list too: the last folder's probes stop)
+		if (durWorker) durWorker->want(++durSerial, std::move(durWant));
+		durLo = -1;
+	}
+
+	std::string Ui::resumeNote(const std::string& path, Player& p)
+	{
+		const ResumeEntry* e = p.resumeStore().find(path);
+		// a song's (kept by an earlier version) left out: songs start from their start
+		return e && e->position >= 0 && !isAudioFile(path) ? "at " + formatTime(e->position) : std::string();
+	}
+
+	void Ui::durationsReady(Player& p)
+	{
+		if (!durWorker) return;
+		bool shown = false;
+		for (auto& r : durWorker->take())
+		{
+			// a folder left since, or its rows listed again: dropped (the cache has it for next time)
+			if (r.serial != durSerial || r.secs <= 0 || r.row < 0 || r.row >= (int)browseRows.size() || browsePaths[r.row] != r.path) continue;
+			browseRows[r.row].note = fileNote(resumeNote(r.path, p), r.secs, fileSize(r.path));
+			if (r.row >= scroll && r.row < scroll + ROWS_SHOWN) shown = true;
+		}
+		// only a row on screen needs a redraw: the others are drawn as they scroll in
+		if (shown) browseVersion++;
 	}
 
 	void Ui::netListed(NetListing* l, Player& p)

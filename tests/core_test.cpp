@@ -3,6 +3,12 @@
 #include "battery.h"
 #include "browser.h"
 #include "crashlog.h"
+#include "durations.h"
+#include "durprobe.h"
+extern "C"
+{
+#include <libavutil/log.h>
+}
 #include "eq.h"
 #include "format.h"
 #include "ftplist.h"
@@ -85,6 +91,151 @@ static void testTime()
 	CHECK_EQ(formatTime(75.9), std::string("1:15"));
 	CHECK_EQ(formatTime(3725), std::string("1:02:05"));
 	CHECK_EQ(formatTime(-1), std::string("--:--"));
+}
+
+// the file lists' durations: the cache (keys, cap, -1 kept), the notes, and the probe on files that aren't what they say
+static void testDurations()
+{
+	// a file rewritten (another size or mtime) is another key
+	CHECK_EQ(durationKey("/a.mp3", 10, 5) == durationKey("/a.mp3", 11, 5), false);
+	CHECK_EQ(durationKey("/a.mp3", 10, 5) == durationKey("/a.mp3", 10, 6), false);
+	CHECK_EQ(durationKey("/a.mp3", 10, 5) == durationKey("/a.mp3", 10, 5), true);
+	DurationCache c(3);
+	double d = 0;
+	CHECK_EQ(c.find("a", d), false);
+	c.put("a", 1);
+	c.put("b", -1);	// a known "none" is kept, never probed again
+	c.put("c", 3);
+	CHECK_EQ(c.find("b", d), true);
+	CHECK_EQ(d, -1.0);
+	CHECK_EQ(c.find("a", d), true);	// a, then b: c is the least recently used
+	c.put("d", 4);
+	CHECK_EQ(c.size(), (size_t)3);
+	CHECK_EQ(c.find("c", d), false);
+	CHECK_EQ(c.find("a", d) && d == 1, true);
+	c.put("a", 2);	// replaced, not added
+	CHECK_EQ(c.size(), (size_t)3);
+	CHECK_EQ(c.find("a", d) && d == 2, true);
+	DurationCache big(5000);
+	for (int i = 0; i < 6000; i++) big.put(std::to_string(i), i);
+	CHECK_EQ(big.size(), (size_t)5000);
+	CHECK_EQ(big.find("0", d), false);
+	CHECK_EQ(big.find("5999", d), true);
+
+	CHECK_EQ(saneDuration(214.5), 214.5);
+	CHECK_EQ(saneDuration(0), -1.0);
+	CHECK_EQ(saneDuration(-3), -1.0);
+	CHECK_EQ(saneDuration(NAN), -1.0);
+	CHECK_EQ(saneDuration(INFINITY), -1.0);
+	CHECK_EQ(saneDuration(9e9), -1.0);
+	CHECK_EQ(saneDuration(268435, 16000), -1.0);	// 16 KB "lasting" three days: a header that lies
+	CHECK_EQ(saneDuration(214, 3500000), 214.0);
+
+	const std::string DOT = " \xC2\xB7 ";
+	CHECK_EQ(fileNote("", 214, 3670016), "3:34" + DOT + "3.5 MB");
+	CHECK_EQ(fileNote("at 12:03", 6300, 1288490188), "at 12:03 / 1:45:00" + DOT + "1.2 GB");
+	CHECK_EQ(fileNote("at 0:42", -1, 14575206), "at 0:42" + DOT + "13.9 MB");
+	CHECK_EQ(fileNote("", -1, 1536), std::string("1.5 KB"));
+	CHECK_EQ(fileNote("", 59.9, -1), std::string("0:59"));
+	CHECK_EQ(fileNote("", -1, -1), std::string());
+
+	// the probe: a real (if tiny) file, then ones that aren't: -1 each, fast, no crash, and cached
+	char dir[] = "/tmp/bp-dur-XXXXXX";
+	if (!mkdtemp(dir)) { failures++; return; }
+	int level = av_log_get_level();
+	av_log_set_level(AV_LOG_QUIET);	// (what libavformat says of each broken file)
+	std::string D = dir;
+	auto write = [&](const std::string& name, const std::string& bytes) {
+		std::ofstream(D + "/" + name, std::ios::binary) << bytes;
+		return D + "/" + name;
+	};
+	auto le = [](uint32_t v, int n) { std::string s; for (int i = 0; i < n; i++) s += char((v >> (8 * i)) & 0xff); return s; };
+	// 2 s of 8 kHz mono 16-bit silence
+	std::string pcm(32000, '\0');
+	std::string wav = "RIFF" + le(36 + pcm.size(), 4) + "WAVEfmt " + le(16, 4) + le(1, 2) + le(1, 2) + le(8000, 4) + le(16000, 4) + le(2, 2) + le(16, 2)
+		+ "data" + le(pcm.size(), 4) + pcm;
+	std::mt19937 rng(7);
+	std::string noise(256 * 1024, '\0');
+	for (auto& ch : noise) ch = (char)(rng() & 0xff);
+	// an ID3v2 tag that claims 100 MB, then nothing; an EBML header with absurd sizes; a WAV cut short claiming 4 GB
+	std::string id3 = std::string("ID3\x04\x00\x00", 6) + std::string("\x7f\x7f\x7f\x7f", 4) + "TIT2";
+	std::string ebml = std::string("\x1a\x45\xdf\xa3\x01\xff\xff\xff\xff\xff\xff\xff", 12) + std::string("\x18\x53\x80\x67\xff", 5) + noise.substr(0, 4096);
+	std::string cut = wav.substr(0, 40) + le(0xffffffffu, 4) + pcm.substr(0, 100);
+	// want: seconds, or -1 none
+	// a CBR MP3 with no Xing frame (200 silent 128 kb/s frames of 417 bytes): its length from its bitrate
+	std::string cbr;
+	for (int i = 0; i < 200; i++) cbr += std::string("\xff\xfb\x90\x64", 4) + std::string(413, '\0');
+	struct Case { std::string name, bytes; double want; };
+	std::vector<Case> cases = {
+		{"ok.wav", wav, 2},
+		{"cbr.mp3", cbr, 200 * 417 * 8 / 128000.0},
+		{"empty.mp3", "", -1},
+		{"noise.mkv", noise, -1},
+		{"noise.mp3", noise, -1},
+		{"tag-only.mp3", id3, -1},
+		{"broken.mkv", ebml, -1},
+		{"cut.wav", cut, -1},
+		{"truncated.mp3", noise.substr(0, 3), -1},
+	};
+	for (auto& k : cases)
+	{
+		std::string path = write(k.name, k.bytes);
+		auto t0 = std::chrono::steady_clock::now();
+		double secs = probeDuration(path);
+		double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
+		if (k.want > 0 ? std::fabs(secs - k.want) > 0.001 : secs != -1)
+		{
+			failures++;
+			fprintf(stderr, "probeDuration(%s) = %.3f\n", k.name.c_str(), secs);
+		}
+		if (ms > 2500)
+		{
+			failures++;
+			fprintf(stderr, "probeDuration(%s) took %.0f ms\n", k.name.c_str(), ms);
+		}
+		double took = 1;
+		CHECK_EQ(probeDuration(path, &took), secs);
+		CHECK_EQ(took, 0.0);	// cached, -1 too
+		double cached = 0;
+		CHECK_EQ(cachedDuration(path, cached) && cached == secs, true);
+		unlink(path.c_str());
+	}
+	// the kinds with no length in their headers: not even opened (the probe would read their ends)
+	CHECK_EQ(durationInHeader("a/b.TS"), false);
+	CHECK_EQ(durationInHeader("x.m2ts"), false);
+	CHECK_EQ(durationInHeader("x.vob"), false);
+	CHECK_EQ(durationInHeader("x.aac"), false);
+	CHECK_EQ(durationInHeader("x.mkv"), true);
+	CHECK_EQ(durationInHeader("x.mp3"), true);
+	CHECK_EQ(durationInHeader("noext"), true);
+	CHECK_EQ(durationInHeader("x.AC3"), false);
+	CHECK_EQ(durationInHeader("x.m2v"), false);
+	CHECK_EQ(durationInHeader("x.h264"), false);
+	CHECK_EQ(durationInHeader("x.mp4"), true);
+	const unsigned char m1[] = {0xff, 0xfb, 0x90, 0x64}, m2[] = {0xff, 0xf3, 0x80, 0xc4}, l2[] = {0xff, 0xfd, 0x90, 0x64}, junk[] = {0x49, 0x44, 0x33, 0x04};
+	CHECK_EQ(mp3FrameBitrate(m1, 4), 128000);	// MPEG-1 Layer III, 128 kb/s, 44.1 kHz
+	CHECK_EQ(mp3FrameBitrate(m2, 4), 64000);	// MPEG-2 Layer III, 64 kb/s
+	CHECK_EQ(mp3FrameBitrate(l2, 4), 0);		// Layer II
+	CHECK_EQ(mp3FrameBitrate(junk, 4), 0);
+	CHECK_EQ(mp3FrameBitrate(m1, 3), 0);
+	// frames that agree (CBR) give their bitrate; one that differs (VBR), or too few, none
+	std::string frames;
+	for (int i = 0; i < 10; i++) frames += std::string("\xff\xfb\x90\x64", 4) + std::string(413, '\0');
+	CHECK_EQ(mp3CbrBitrate((const unsigned char*)frames.data(), frames.size()), 128000);
+	CHECK_EQ(mp3CbrBitrate((const unsigned char*)frames.data(), 417 * 5), 0);
+	std::string vbr = frames.substr(0, 417 * 4) + std::string("\xff\xfb\xa0\x64", 4) + std::string(518, '\0') + frames;	// a 160 kb/s frame
+	CHECK_EQ(mp3CbrBitrate((const unsigned char*)vbr.data(), vbr.size()), 0);
+	{
+		std::string ts = write("clip.ts", wav);	// (a WAV inside: opened, it would say 2 s)
+		double took = 1;
+		CHECK_EQ(probeDuration(ts, &took), -1.0);
+		CHECK_EQ(took, 0.0);
+		unlink(ts.c_str());
+	}
+	CHECK_EQ(probeDuration(D + "/gone.mp3"), -1.0);
+	CHECK_EQ(probeDuration(D), -1.0);	// a folder
+	rmdir(dir);
+	av_log_set_level(level);
 }
 
 static void testLabels()
@@ -3421,6 +3572,7 @@ int main()
 	testBattery();
 	testAspect();
 	testTime();
+	testDurations();
 	testLabels();
 	testTrackList();
 	if (failures) fprintf(stderr, "%d failed\n", failures);

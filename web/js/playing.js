@@ -10,6 +10,7 @@ import { LikeBtn, addToPlaylist, likable, showInFiles } from './plshared.js';
 import { signOut } from './session.js';
 import { videoHere } from './events.js';
 import { errMsg, errToast, get, post } from './api.js';
+import { durable, durationOf, useDurations } from './durations.js';
 import { Files, downloadPaths, rootName } from './files.js';
 
 /* ================= now playing =================
@@ -575,11 +576,13 @@ function UpNext({ v }) {
 	const box = useRef();
 	const key = v.here ? B.queue.length + ':' + B.index + ':' + (B.queue[0] && B.queue[0].p) : (sn && sn.path) + '|' + s.epoch + '|' + s.plTick;
 	useEffect(() => {
-		if (v.here) { setItems(B.queue.map(q => ({ p: q.p, title: titleFor(q.p, q.title) }))); setIdx(B.index); return; }
+		if (v.here) { setItems(B.queue.map(q => ({ p: q.p, title: titleFor(q.p, q.title), duration: q.duration }))); setIdx(B.index); return; }
 		let dead = false;
 		get('/api/source').then(r => { if (!dead) { setItems((r.items || []).map(q => ({ p: q.p, title: titleFor(q.p, q.title), duration: q.duration }))); setIdx(r.index); } }).catch(() => { if (!dead) setItems([]); });
 		return () => { dead = true; };
 	}, [key]);
+	// a folder's or this browser's queue has no lengths: asked for the rows that come into view
+	useDurations(box, [items]);
 	useLayoutEffect(() => {
 		const b = box.current, c = b && b.querySelector('.cur'), sc = b && b.closest('.tabbody');
 		if (!c || !sc) return;
@@ -600,10 +603,10 @@ function UpNext({ v }) {
 	const src = v.source && v.source.title, pad = n => String(n).padStart(2, '0');
 	return html`<section aria-label="Queue"><div class="band queue-band"><span class="kicker ell" style="max-width:70%">${src ? 'From ' + src : 'Up next'}</span><span class="rule"></span><span class="num">${pad(idx + 1)} / ${pad(items.length)}</span></div>
 		<div class="upnext list-lines" ref=${box}>
-		${items.map((it, i) => html`<button class="line ${i === idx ? 'cur' : ''} ${i < idx ? 'past' : ''}" onClick=${() => play(i)} aria-current=${i === idx ? 'true' : undefined}>
+		${items.map((it, i) => { const d = it.duration > 0 ? it.duration : durationOf(it.p); return html`<button class="line ${i === idx ? 'cur' : ''} ${i < idx ? 'past' : ''}" data-dur=${!d && durable(it.p) ? it.p : undefined} onClick=${() => play(i)} aria-current=${i === idx ? 'true' : undefined}>
 			<span class="tile sm"><${Art} src=${kindOfName(it.p) === 'audio' ? coverUrl(it.p) : ''} seed=${it.p} kind=${kindOfName(it.p)} k=${1} /></span>
 			<span class="tt"><span class="ell" style="display:block">${it.title}</span>${i === idx && html`<span class="m"><span class="chip y tiny"><${Icon} n="play" k=${1} />Now</span></span>`}</span>
-			${it.duration > 0 && html`<span class="tm">${fmtTime(it.duration)}</span>`}</button>`)}</div></section>`;
+			${d > 0 && html`<span class="tm">${fmtTime(d)}</span>`}</button>`; })}</div></section>`;
 }
 
 /* ---- audio and subtitles ---- */

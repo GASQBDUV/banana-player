@@ -1,6 +1,7 @@
 // libavformat probe, chapters and cover art for the web dashboard (see probe.h).
 #include "web/probe.h"
 #include "webmedia.h"
+#include "durations.h"
 #include <algorithm>
 #include <chrono>
 #include <cmath>
@@ -298,6 +299,8 @@ namespace bp
 			if (pf) m.pixFmt = pf;
 		}
 		m.hasCover = pic || !sidecarCover(real).empty();
+		// (the file lists' lengths: known now, so never probed for them)
+		if (saneDuration(m.duration) > 0) DurationCache::shared().put(durationKey(real, (long long)st.st_size, (long long)st.st_mtime), m.duration);
 
 		{
 			std::lock_guard<std::mutex> g(c.m);

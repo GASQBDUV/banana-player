@@ -17,6 +17,7 @@
 #include <qrcodegen.hpp>
 #endif
 #include "ui_internal.h"
+#include "durworker.h"
 
 namespace bp
 {
@@ -420,6 +421,16 @@ namespace bp
 
 	void Ui::tick(Player& p)
 	{
+		// the rows' durations: none probed while a file opens; the rows on screen first
+		if (durWorker)
+		{
+			durWorker->setBusy(p.loading());
+			if (page == Page::Browse && scroll != durLo)
+			{
+				durLo = scroll;
+				durWorker->focus(scroll, scroll + ROWS_SHOWN);
+			}
+		}
 		// a playlist's edits, written once they've stopped for a second
 		if (plDirty && SDL_GetTicks() - plDirtyAt >= 1000) plFlush(p);
 		// the web's equalizer: what mpv keeps, and settings.conf, once its sliders stop for a second

@@ -82,16 +82,28 @@ const PAL = [['#E8823A', '#6B1E4A'], ['#3AA7A0', '#18234F'], ['#F2C14E', '#B0413
 const MOTIFS = ['note', 'sun', 'moon', 'eq', 'vis-waves', 'vis-bars', 'vis-spectrum', 'note'];
 function hashOf(s) { let h = 5381; s = s || ''; for (let i = 0; i < s.length; i++) h = (h * 33 + s.charCodeAt(i)) | 0; return h >>> 0; }
 export const palOf = s => PAL[hashOf(s) % PAL.length];
-function GenCover({ seed, kind, k }) {
+function GenCover({ seed, kind, k, r }) {
 	const h = hashOf(seed), [a, b] = PAL[h % PAL.length];
 	const n = kind === 'video' ? 'film' : kind === 'photo' ? 'picture' : MOTIFS[(h >>> 5) % MOTIFS.length];
-	return html`<span class="gc" style=${`background:linear-gradient(135deg,${a},${b})`}><${Icon} n=${n} k=${k || 2} /></span>`;
+	return html`<span class="gc" ref=${r} style=${`background:linear-gradient(135deg,${a},${b})`}><${Icon} n=${n} k=${k || 2} /></span>`;
+}
+// a cover asked for only once its tile comes near the screen (a long list asks for the rows you scroll to). Not the
+// browser's loading="lazy": in a scrolling part of the page (the shell's lists) Safari and Chrome could leave those
+// images unrequested until a reload. One observer for every tile
+const nearFns = new WeakMap();
+let nearObs = null;
+function observeNear(el, fn) {
+	if (typeof IntersectionObserver === 'undefined') { fn(); return () => {}; }
+	if (!nearObs) nearObs = new IntersectionObserver(es => { for (const e of es) if (e.isIntersecting) { const f = nearFns.get(e.target); if (f) { nearFns.delete(e.target); nearObs.unobserve(e.target); f(); } } }, { rootMargin: '300px 0px' });
+	nearFns.set(el, fn); nearObs.observe(el);
+	return () => { nearFns.delete(el); nearObs.unobserve(el); };
 }
 export const coverUrl = p => p ? '/api/cover?p=' + encodeURIComponent(p) : '';
 export function Art({ src, seed, kind, k }) {
-	const [st, setSt] = useState('');
+	const [st, setSt] = useState(''), [near, setNear] = useState(false), gc = useRef(null);
 	useEffect(() => setSt(''), [src]);
-	return html`<${GenCover} seed=${seed} kind=${kind} k=${k} />${src && st !== 'bad' && html`<img class=${'cvimg' + (st === 'ok' ? ' on' : '')} src=${src} alt="" decoding="async" loading="lazy" onLoad=${() => setSt('ok')} onError=${() => setSt('bad')} />`}`;
+	useEffect(() => { if (!src || near || !gc.current) return; return observeNear(gc.current, () => setNear(true)); }, [src, near]);
+	return html`<${GenCover} seed=${seed} kind=${kind} k=${k} r=${gc} />${src && near && st !== 'bad' && html`<img class=${'cvimg' + (st === 'ok' ? ' on' : '')} src=${src} alt="" decoding="async" onLoad=${() => setSt('ok')} onError=${() => setSt('bad')} />`}`;
 }
 // a playlist's cover: Liked's heart on dark gold; else a 2×2 mosaic
 export function PlArt({ p, k }) {

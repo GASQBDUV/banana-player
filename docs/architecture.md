@@ -123,7 +123,9 @@ Moved out of `CLAUDE.md`, which keeps the one-line rules and the map; the reason
   `webpath`'s `resolveVirtual`; the deny list holds the state dir (it has `servers.key`), `/data/home`, `/data/banana`
   and `/data/store`. httplib's keep-alive poll interval is overridden to 1 s (`CMakeLists.txt`) for battery, and httplib
   ignores SIGPIPE process-wide. bpcore gains `webauth`, `webpath`, `json`, `webmedia`, `webstate`; the app links
-  libavformat/libavcodec/libavutil for the file probe (`src/web/probe.cpp`) when BP_WEB. Test hooks: `BP_WEB_FORCE=1`
+  libavformat/libavcodec/libavutil for the file probe (`src/web/probe.cpp`) when BP_WEB, and always for the lists'
+  durations (`bpprobe`: `src/durprobe.cpp`; cache and the skipped formats in `src/durations.cpp`, the handheld's
+  thread in `src/durworker.cpp`; docs/notes/2026-11-10-file-durations.md). Test hooks: `BP_WEB_FORCE=1`
   (on at start), `BP_WEB_PIN`, `BP_WEB_PORT`, `BP_WEB_DIR`, `BP_WEB_IP` (`none` = no Wi-Fi), `BP_WEB_FAIL` (the server
   won't start), `BP_WEB_KEEPALIVE` (idle seconds), and the scripted `web` step. Icons in `web/sprite.svg` come from the
   same `G_*` glyphs as the bottom panel: regenerate with `tools/make-sprite.py` after changing one.

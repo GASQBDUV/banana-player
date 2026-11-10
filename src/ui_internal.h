@@ -3,6 +3,7 @@
 #pragma once
 #include "ui.h"
 #include "ui_glyphs.h"
+#include "durations.h"
 #include "format.h"
 #include "playlist.h"
 #include "netpath.h"
@@ -96,11 +97,7 @@ namespace bp
 	// a note drawn dim (a placeholder: what an empty field comes out as)
 	inline const char DIM_NOTE = '\x02';
 	// a file's note: where it was left and its size ("at 0:42 · 13.9 MB")
-	inline std::string fileNote(const std::string& at, long long size)
-	{
-		std::string sz = size >= 0 ? formatBytes(size) : "";
-		return at.empty() ? sz : sz.empty() ? at : at + " \xC2\xB7 " + sz;
-	}
+	inline std::string fileNote(const std::string& at, long long size) { return fileNote(at, -1, size); }
 	inline long long fileSize(const std::string& path)
 	{
 		struct stat st;

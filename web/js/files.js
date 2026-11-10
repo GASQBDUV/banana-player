@@ -1,7 +1,8 @@
 import { html, useState, useEffect, useRef, useMemo, useCallback } from '../vendor/htm-preact-standalone.module.js';
 import { NO_HERE, NO_HERE_WHY, Q_DESK, Q_WIDE, notify, phoneNow, set, store, useStore } from './store.js';
 import { errMsg, errToast, get, post } from './api.js';
-import { baseName, cmpName, dirName, fmtDate, fmtSize, isIOS, itemsText, joinPath, plural, titleFor, touchOnly } from './util.js';
+import { durable, durationOf, useDurations } from './durations.js';
+import { baseName, cmpName, dirName, fmtDate, fmtSize, fmtTime, isIOS, itemsText, joinPath, plural, titleFor, touchOnly } from './util.js';
 import { addToPlaylist, isLiked, nameDialog, plEdit, setLike } from './plshared.js';
 import { ask, openModal, toast } from './toasts.js';
 import { AppMenu, Art, Empty, Modal, MoreDots, Skeleton, Storage, openSheet, useLater, useMedia } from './components.js';
@@ -141,7 +142,10 @@ export function Files() {
 	useEffect(() => { if (seenHidden.current !== showHidden) { seenHidden.current = showHidden; if (data) load(true); } }, [showHidden]);
 	const selFolders = [...sel].filter(p => dirName(p) === path && byName[baseName(p)] && byName[baseName(p)].dir);
 	const selAllHidden = selFolders.length > 0 && selFolders.every(p => byName[baseName(p)].hidden);
-	const metaOf = it => it.dir ? itemsText(it.items, it.itemsMore) : fmtSize(it.size) + (wide && it.mtime ? ' · ' + fmtDate(it.mtime) : '');
+	// a song's or video's length first, once it's known (asked as its row comes into view)
+	const metaOf = it => { const d = it.dir ? 0 : durationOf(full(it.name)); return it.dir ? itemsText(it.items, it.itemsMore) : (d ? fmtTime(d) + ' · ' : '') + fmtSize(it.size) + (wide && it.mtime ? ' · ' + fmtDate(it.mtime) : ''); };
+	const listRef = useRef();
+	useDurations(listRef, [data, f, path]);
 
 	// a row's ⋯: where it plays · Like, Add · Rename, Move, Download, Delete
 	function rowSheet(it, anchor) {
@@ -224,7 +228,7 @@ export function Files() {
 			!data ? (slow ? html`<${Skeleton} />` : null) :
 			all.length === 0 ? html`<${Empty} icon="folder" title="This folder is empty" sub=${touchOnly ? 'Upload music, videos or photos from this device.' : 'Drop files or folders here, or use Upload files.'} button=${pick ? undefined : 'Upload'} onClick=${() => pickUpload('files')} />` :
 			items.length === 0 ? html`<p class="note pad">Nothing here has “${filter.trim()}” in its name.</p>` : html`
-			<div class="box surface listbox"><ul class="flist">${!showSel && crumbs.length > 1 && html`<li class="frow uprow"><button class="main-btn" onClick=${goUp}><span class="tile xs"><${Icon} n="up" k=${2} /></span><span class="grow"><div class="fn ell" aria-label="Up a folder">..</div></span></button></li>`}${items.map(it => { const p = full(it.name), on = sel.has(p), now = p === nowPath, playable = !it.dir && (it.kind === 'audio' || it.kind === 'video'); return html`<li class=${'frow' + (on ? ' sel' : '') + (s.fresh[p] ? ' fresh' : '') + (it.hidden ? ' hiddenf' : '') + (now && !showSel ? ' cur nowp' : '')} key=${it.name}>
+			<div class="box surface listbox"><ul class="flist" ref=${listRef}>${!showSel && crumbs.length > 1 && html`<li class="frow uprow"><button class="main-btn" onClick=${goUp}><span class="tile xs"><${Icon} n="up" k=${2} /></span><span class="grow"><div class="fn ell" aria-label="Up a folder">..</div></span></button></li>`}${items.map(it => { const p = full(it.name), on = sel.has(p), now = p === nowPath, playable = !it.dir && (it.kind === 'audio' || it.kind === 'video'); return html`<li class=${'frow' + (on ? ' sel' : '') + (s.fresh[p] ? ' fresh' : '') + (it.hidden ? ' hiddenf' : '') + (now && !showSel ? ' cur nowp' : '')} key=${it.name} data-dur=${playable && durable(p) && !durationOf(p) ? p : undefined}>
 				<button class="chk" aria-label=${(on ? 'Deselect ' : 'Select ') + it.name} aria-pressed=${on} onClick=${() => toggle(p)}><span class=${'check' + (on ? ' on' : '')}>${on && html`<${Icon} n="check" k=${2} />`}</span></button>
 				<button class="main-btn" onClick=${() => rowClick(it)} onPointerDown=${e => lpStart(e, it)} onPointerMove=${lpMove} onPointerUp=${lpEnd} onPointerCancel=${lpEnd} onContextMenu=${e => { e.preventDefault(); if (lp.current.mouse !== false && !lp.current.fired) rowSheet(it, { x: e.clientX, y: e.clientY }); }}>
 					<${RowTile} it=${it} p=${p} art=${art} />
