@@ -508,6 +508,8 @@ handheld, carries on at 1:27"):
 
 **Files** lists the card's folders:
 
+- **A tap** on a file plays it on the handheld or in this browser (where you last played). A song keeps you on the
+  list, with the small player showing it; a video opens the player, to watch it.
 - **Upload files** and **Upload folder** in the folder's toolbar (no Upload folder on iPhone or iPad), or drag files
   and folders onto the page (a tablet or a computer). While files go up, a round key at the bottom right shows how
   many (**5/12**) and a ring fills by the bytes sent; a failed file shows red on the ring and a red badge. A tap on it lists each file:

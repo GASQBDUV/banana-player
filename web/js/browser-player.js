@@ -569,6 +569,9 @@ async function collectMedia(paths) {
 	return out;
 }
 // "Play" for files/folders, on a target; the target changes only once it plays there
+// stay: a row's tap plays and the page stays (the small player shows it) — for a song; a video opens the player,
+// where it's watched (sv: stay for this file?)
+const sv = (stay, p) => stay && kindOfName(p || '') !== 'video';
 // stay: a row's tap plays and the page stays (the small player shows it); true when it plays
 export async function playPaths(paths, folderSet, target, stay) {
 	if (!userTap()) return;
@@ -588,7 +591,7 @@ export async function playPaths(paths, folderSet, target, stay) {
 		}
 		if (!await browserPlay(items, idx, src, 0)) return false;
 		chooseTarget('browser');
-		if (!stay) go('#/playing');
+		if (!sv(stay, items[idx] && items[idx].p)) go('#/playing');
 		return true;
 	} else {
 		const was = B.active && !el.paused; el.pause();
@@ -596,7 +599,7 @@ export async function playPaths(paths, folderSet, target, stay) {
 		catch (e) { if (was && store.conn === 'ok') el.play().catch(() => {}); toast(e.status === 0 ? "Couldn't start it on your handheld" : errMsg(e)); return false; }
 		if (B.active) browserStop();
 		chooseTarget('handheld');
-		if (!stay) go('#/playing');
+		if (!sv(stay, paths.length === 1 && !folderSet.has(paths[0]) ? paths[0] : '')) go('#/playing');
 		return true;
 	}
 }
@@ -607,7 +610,7 @@ export async function playPlaylist(id, name, items, index, shuffle, target, tapp
 		let list = items.filter(i => !i.missing && i.p).map(i => ({ p: i.p, title: i.title }));
 		if (shuffle) list = list.sort(() => Math.random() - .5);
 		const idx = shuffle ? 0 : Math.max(0, list.findIndex(i => i.p === items[index || 0].p));
-		if (await browserPlay(list, idx, { kind: 'playlist', title: name, id }, 0)) { markUsed(id); chooseTarget('browser'); if (!stay) go('#/playing'); return true; }
+		if (await browserPlay(list, idx, { kind: 'playlist', title: name, id }, 0)) { markUsed(id); chooseTarget('browser'); if (!sv(stay, list[idx] && list[idx].p)) go('#/playing'); return true; }
 		return false;
 	} else {
 		const was = B.active && !el.paused; el.pause();
@@ -615,7 +618,7 @@ export async function playPlaylist(id, name, items, index, shuffle, target, tapp
 		catch (e) { if (was && store.conn === 'ok') el.play().catch(() => {}); toast(e.status === 0 ? "Couldn't start it on your handheld" : errMsg(e)); return false; }
 		if (B.active) browserStop();
 		chooseTarget('handheld');
-		if (!stay) go('#/playing');
+		if (!sv(stay, !shuffle && items[index || 0] ? items[index || 0].p : '')) go('#/playing');
 		return true;
 	}
 }
@@ -625,7 +628,7 @@ export async function playAt(p, pos, target, stay) {
 	if (target === 'browser') {
 		if (!await browserPlay([{ p }], 0, { kind: 'playlist', title: 'Recent' }, pos > 0 ? pos : 0)) return false;
 		chooseTarget('browser');
-		if (!stay) go('#/playing');
+		if (!sv(stay, p)) go('#/playing');
 		return true;
 	}
 	const was = B.active && !el.paused; el.pause();
@@ -633,7 +636,7 @@ export async function playAt(p, pos, target, stay) {
 	catch (e) { if (was && store.conn === 'ok') el.play().catch(() => {}); toast(e.status === 0 ? "Couldn't start it on your handheld" : errMsg(e)); return false; }
 	if (B.active) browserStop();
 	chooseTarget('handheld');
-	if (!stay) go('#/playing');
+	if (!sv(stay, p)) go('#/playing');
 	return true;
 }
 // a row's tap: it plays at once where the last choice was; one this browser can't play goes to the handheld (said so)
