@@ -14,6 +14,7 @@ cmake -S . -B build && cmake --build build -j       # desktop build (macOS: brew
 ./build/banana-player [FILE|FOLDER]                  # two windows = the two panels; no file: the file browser
 BP_BROWSE=dir1:dir2 ./build/banana-player            # the browser's top-level places
 packaging/build-bundle.sh [--quick|--clean]          # aarch64 bundle (Docker arm64 Debian 12; libs kept in .cache/bundle: ~2 s when nothing changed; --quick: no zip)
+tools/push-handheld.sh root@<ip>                     # the --quick bundle onto the handheld over SSH: only changed files, clean quit, folder swap
 docs/make-screenshots.sh <library>                   # the README's docs/img/screen-*.png (library layout: the script's header)
 python3 tools/web-mock.py [port]                     # the web app without the player (http://127.0.0.1:8099/)
 tools/web-smoke.sh                                   # the web dashboard end to end with curl (needs a player with BP_WEB_FORCE=1)
