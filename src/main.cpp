@@ -457,6 +457,17 @@ int main(int argc, char** argv)
 		enum class StopWhy { Handheld, Web, End };
 		auto stopPlaying = [&](StopWhy why) {
 			if (!player.playing()) return;
+#ifdef BP_WEB
+			// the handheld's Stop while a page is the sound: one Stop, everywhere (docs/design/session.md §8.1). The page
+			// stops its file too; it stays the output for the next pick (pageOut kept)
+			if (why == StopWhy::Handheld && webServer && webServer->running() && ui.browserPlaying)
+			{
+				webServer->notify("handheld-stop", "{}");
+				ui.browserPlaying = false;
+				ui.browserFile.clear();
+				ui.pageOpenPath.clear();
+			}
+#endif
 			// started with a file: its end still quits (as it always did)
 			if (!browserMode && why == StopWhy::End) { running = false; return; }
 			bool shown = !haveUi || ui.playerShown(player);

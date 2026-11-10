@@ -1,8 +1,8 @@
 import { TAB_ID, set, store } from './store.js';
-import { B, bPos, browserNext, el, handheldOpen, handheldToggle, handheldTookOver, seekTo, updateMediaSession } from './browser-player.js';
+import { B, bPos, browserNext, dropBrowser, el, handheldOpen, handheldToggle, handheldTookOver, seekTo, updateMediaSession } from './browser-player.js';
 import { markUsed } from './plshared.js';
 import { C, connFail, goDown, signOutHere } from './connection.js';
-import { markTrack } from './toasts.js';
+import { markTrack, toast } from './toasts.js';
 import { fetchT, get } from './api.js';
 
 /* ================= live updates ================= */
@@ -50,6 +50,8 @@ export function openSSE() {
 	on('handheld-skip', d => { if (B.active && B.meta && B.parked == null && (d.dir === 1 || d.dir === -1)) { markTrack(d.dir); browserNext(false, d.dir, d.n || 1, true); } });
 	// A (or its Play) on the handheld while this page plays: this page plays or pauses ({play}: the state wanted)
 	on('handheld-toggle', d => handheldToggle(d.play === 1));
+	// Stop on the handheld while this page plays: one Stop, everywhere (the handheld already stopped: nothing to tell it)
+	on('handheld-stop', () => { if (B.active) { dropBrowser(); toast('Stopped on the handheld'); } });
 	// a song or video picked on the handheld while this page is the sound: it plays here (or, one it can't, is refused)
 	on('handheld-open', d => handheldOpen(d));
 	// the handheld seeked while this page plays its file: here too
