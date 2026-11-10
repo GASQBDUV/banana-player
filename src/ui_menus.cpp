@@ -619,7 +619,7 @@ namespace bp
 				const Glyph* ng = it == CTX_NP_NOW ? &G_RIGHT : it == CTX_NP_PLAY ? (on ? &G_PAUSE : &G_PLAY)
 					: it == CTX_NP_LIKE ? (liked ? &G_HEART_O : &G_HEART) : it == CTX_NP_ADD ? &G_PL_ADD
 					: it == CTX_NP_SHOW ? &G_FOLDER : &G_STOP;
-				std::string npNote = it == CTX_NP_SHOW ? where : it == CTX_NP_STOP ? "Place kept in Recent" : it == CTX_NP_NOW && p.settings.buttonHotkeys ? "SELECT" : "";
+				std::string npNote = it == CTX_NP_SHOW ? where : it == CTX_NP_NOW && p.settings.buttonHotkeys ? "SELECT" : "";
 				drawDialogRow(ctxRow(i), ng, npLabel, i == ctxCursor, pressedBtn == 100 + i,
 					it == CTX_NP_STOP ? DANGER : it == CTX_NP_NOW ? ACCENT : TEXT, npNote, noteInk);
 				continue;
@@ -979,7 +979,6 @@ namespace bp
 			case PR_STOP:
 				g = &G_STOP;
 				label = "Stop";
-				note = "Place kept in Recent";
 				ink = DANGER;
 				break;
 			case PR_SHOW:
