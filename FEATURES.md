@@ -510,6 +510,8 @@ handheld, carries on at 1:27"):
   - When a Direct Stream doesn't play, it says why (**this browser can't play this video's format in a new stream**,
     or **the stream from your handheld broke off**), goes back to the default track, and the handheld's log keeps
     what the browser said.
+  - The audio track and subtitles go with the video when the target switches, both ways, and stay through a reload
+    of the page; one the browser can't play starts on its default track, said so.
 - **Up next**, **Chapters**, **Tracks** (audio and subtitles), **Sound** (the volume, the equalizer's presets and its ten
   bands, the effects) and **Details**: on a phone three keys under the controls open them as a sheet; on a tablet
   they're a card under the player; on a computer a column beside it, while the controls are in the player bar.

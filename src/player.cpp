@@ -505,6 +505,12 @@ namespace bp
 			sid = e->sid ? std::to_string(e->sid) : "no";
 		}
 		else if (settings.rememberSubs && !e && resume.lastSubOff) sid = "no";
+		if (graph.empty() && nextSid >= 0)
+		{
+			wantSid = nextSid;
+			sid = nextSid ? std::to_string(nextSid) : "no";
+		}
+		nextSid = -1;
 		if (graph.empty()) fileOpts += ",sid=" + sid;
 		else wantSid = 0;
 		std::string slang = opts.lang;

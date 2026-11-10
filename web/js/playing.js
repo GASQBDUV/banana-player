@@ -289,7 +289,7 @@ function VidMenu({ page, setPage, fs, box, float }) {
 	let body;
 	if (page === 'audio') {
 		const pick = (a, i) => {
-			if (why(i)) { toast(trackName(a.label)[0] + ': ' + why(i), { label: 'Play on handheld', fn: () => handoffToHandheld(a.i + 1) }, 8000); return; }
+			if (why(i)) { toast(trackName(a.label)[0] + ': ' + why(i), { label: 'Play on handheld', fn: () => handoffToHandheld({ a: a.i }) }, 8000); return; }
 			chooseAudio(i); setPage(null);
 		};
 		body = html`<${VmBack} setPage=${setPage} title="Audio track" />${audio.map((a, i) => { const [l, c] = trackName(a.label); return html`<${VmRow} on=${switching != null ? i === switching : i === playing} label=${l}
@@ -300,7 +300,7 @@ function VidMenu({ page, setPage, fs, box, float }) {
 			${subs.map(x => { const [l] = trackName(x.label), pic = x.kind === 'image';
 				const sub = pic ? 'Shows on the handheld only' : x.i === SUBS.chosen && SUBS.progress != null ? 'Preparing… ' + Math.round(SUBS.progress * 100) + '%'
 					: SUBS.failed[x.i] || [trackName(x.label)[1], x.external ? 'beside the video' : ''].filter(Boolean).join(' · ');
-				return html`<${VmRow} on=${x.i === SUBS.chosen} label=${l} sub=${sub} dim=${pic} onClick=${() => pic ? toast(l + ': shows on the handheld only (picture subtitles)', { label: 'Watch on handheld', fn: () => handoffToHandheld() }, 8000) : pick(x.i)} />`; })}
+				return html`<${VmRow} on=${x.i === SUBS.chosen} label=${l} sub=${sub} dim=${pic} onClick=${() => pic ? toast(l + ': shows on the handheld only (picture subtitles)', { label: 'Watch on handheld', fn: () => handoffToHandheld({ s: x.i }) }, 8000) : pick(x.i)} />`; })}
 			<button class="vm-item vm-more" role="menuitem" onClick=${() => { setPage(null); if (fs) toggleFullscreen(box.current); showTracks('sub'); }}><span class="vm-tick"></span><span class="grow">Size and position…</span></button>`;
 	} else if (page === 'speed') {
 		body = html`<${VmBack} setPage=${setPage} title="Speed" />${SPEEDS.map(r => html`<${VmRow} on=${Math.abs(rate - r) < .01} label=${speedName(r)} onClick=${() => { setSpeed(r); setPage(null); }} />`)}`;
@@ -688,7 +688,7 @@ function BrowserAudio() {
 	return html`<div class="radios" role="radiogroup" aria-label="Audio track">${list.map((a, i) => html`<${TrackRow} on=${want >= 0 ? i === want : switching != null ? i === switching : i === playing}
 			label=${a.label} sub=${subOf(a, i)} tag=${i === playing && switching == null ? 'Playing here' : ''} onClick=${() => pick(i)} />`)}</div>
 		${blocked && html`<div class="track-note"><p class="note">${list[want].label}: ${why(want)}.</p>
-			<button class="btn sm primary" onClick=${() => handoffToHandheld(list[want].i + 1)}><${Icon} n="card" k=${2} />Play this one on the handheld</button></div>`}
+			<button class="btn sm primary" onClick=${() => handoffToHandheld({ a: list[want].i })}><${Icon} n="card" k=${2} />Play this one on the handheld</button></div>`}
 		${!native && B.remux && html`<p class="note pad">Direct Stream: the handheld sends the video and this audio track as they are, without converting them. Seeking takes a moment.</p>`}`;
 }
 function BrowserSubs() {

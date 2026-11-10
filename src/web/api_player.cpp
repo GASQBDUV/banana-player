@@ -281,7 +281,8 @@ namespace bp
 		}
 
 		// one file with the files beside it, as the browser opens it (at t: the hand-off); already open: there, playing.
-		// aid > 0: with that audio track (the browser's "Change it on the handheld")
+		// aid > 0: with that audio track (the browser's "Change it on the handheld", or the one it played); sid: the
+		// subtitles it showed (0 off, -1 the handheld's own choice)
 		// a page asks the handheld to play (/api/play): the sound comes back here. The page is no longer the output, so
 		// its stop that follows (browser-play stop=1) isn't taken for "the page stopped its file" (which unloads the
 		// handheld's copy: that copy is now what plays, its unpause still on its way)
@@ -293,13 +294,14 @@ namespace bp
 			u.pageOpenPath.clear();
 		}
 
-		static void openFile(Player& p, Ui& u, const std::string& path, double t, int64_t aid = 0)
+		static void openFile(Player& p, Ui& u, const std::string& path, double t, int64_t aid = 0, int64_t sid = -1)
 		{
 			soundBackHere(u);
 			if (p.playing() && p.currentPath() == path)
 			{
 				if (t > 0) seekWhenOpen(p, u, path, t);
 				if (aid > 0) chooseAudio(p, u, aid);
+				if (sid >= 0) chooseSub(p, u, sid);
 				if (p.paused) p.unpause();
 				u.showPlayer();
 				return;
@@ -308,6 +310,7 @@ namespace bp
 			int index = 0;
 			std::vector<std::string> list = siblingVideos(path, index);
 			p.nextAid = aid;
+			p.nextSid = sid;
 			p.open(list, index);
 			u.showPlayer();
 			if (t > 0) seekWhenOpen(p, u, path, t);
@@ -318,6 +321,11 @@ namespace bp
 		{
 			const Track* cur = p.selected(TrackType::Audio);
 			if (!cur || cur->id != aid) u.chooseTrack(p, TrackType::Audio, aid);
+		}
+		static void chooseSub(Player& p, Ui& u, int64_t sid)
+		{
+			const Track* cur = p.selected(TrackType::Sub);
+			if ((cur ? cur->id : 0) != sid) u.chooseTrack(p, TrackType::Sub, sid);
 		}
 
 		static void openSelection(Player& p, Ui& u, std::vector<std::string> paths, const std::string& title, bool shuffle)
@@ -341,7 +349,7 @@ namespace bp
 		}
 
 		// a saved playlist from item index (shuffled: from a random one), at t if given
-		static std::string playPlaylist(Player& p, Ui& u, const std::string& id, int index, bool shuffle, double t, int64_t aid = 0)
+		static std::string playPlaylist(Player& p, Ui& u, const std::string& id, int index, bool shuffle, double t, int64_t aid = 0, int64_t sid = -1)
 		{
 			std::string file = u.plWebFile(id);
 			if (file.empty())
@@ -369,13 +377,18 @@ namespace bp
 			{
 				seekWhenOpen(p, u, p.currentPath(), t);
 				if (aid > 0) chooseAudio(p, u, aid);
+				if (sid >= 0) chooseSub(p, u, sid);
 				if (p.paused) p.unpause();
 				u.showPlayer();
 				return "{\"ok\":true}";
 			}
 			// (main opens it as the loop comes round: Ui's play request, as the browser's own Play; the track waits for
 			// that load)
-			if (!shuffle) p.nextAid = aid;
+			if (!shuffle)
+			{
+				p.nextAid = aid;
+				p.nextSid = sid;
+			}
 			u.plPlay(pl, index, shuffle, p);
 			u.showPlayer();
 			if (t > 0 && !shuffle) seekWhenOpen(p, u, pl.entries[index].path, t);
@@ -472,13 +485,16 @@ namespace bp
 		auto play = [w](const httplib::Request& req, httplib::Response& res) {
 			double t = atof(value(req, "t").c_str());
 			int64_t aid = std::max(0LL, atoll(value(req, "aid").c_str()));
+			// sid: "no" off, a number that track, absent the handheld's own choice
+			std::string sv = value(req, "sid");
+			int64_t sid = sv.empty() ? -1 : sv == "no" || sv == "off" ? 0 : std::max(-1LL, atoll(sv.c_str()));
 			bool shuffle = value(req, "shuffle") == "1" || value(req, "shuffle") == "true";
 			if (req.has_param("playlist"))
 			{
 				std::string id = value(req, "playlist");
 				int index = atoi(value(req, "index").c_str());
 				int status = 200;
-				std::string body = w->call([=](Player& p, Ui& u) { WebPlayerGlue::soundBackHere(u); return WebPlayerGlue::playPlaylist(p, u, id, index, shuffle, t, aid); }, 2000, status);
+				std::string body = w->call([=](Player& p, Ui& u) { WebPlayerGlue::soundBackHere(u); return WebPlayerGlue::playPlaylist(p, u, id, index, shuffle, t, aid, sid); }, 2000, status);
 				answer(res, body, status);
 				return;
 			}
@@ -500,7 +516,7 @@ namespace bp
 				}
 				int status = 200;
 				std::string body = w->call([=](Player& p, Ui& u) {
-					WebPlayerGlue::openFile(p, u, path, t, aid);
+					WebPlayerGlue::openFile(p, u, path, t, aid, sid);
 					return std::string("{\"ok\":true}");
 				}, 2000, status);
 				answer(res, body, status);

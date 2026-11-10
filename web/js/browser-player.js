@@ -94,11 +94,28 @@ export async function browserPlay(items, index, source, pos, auto, dir, nav, tok
 		Object.assign(B, { shuffled: items === B.queue && B.shuffled, active: true, queue: items, index: i, source, error: false, leaving: false, parked: null, parkedPlaying: false,
 			meta: { p: it.p, title: titleFor(it.p, m && m.title), artist: m && m.artist || '', album: m && m.album || '', kind, chapters: m && m.chapters || [], duration: m && m.duration || 0, media: m } });
 		B.remux = null; clearTimeout(remuxTimer);
-		el.src = fileUrl(it.p);
-		subsForFile(m);
-		if (pos > 0) el.addEventListener('loadedmetadata', () => { el.currentTime = pos; }, { once: true });
+		// the tracks it starts with: the handheld's (a hand-off) or this tab's last for the file, else the defaults
+		const w = startTracks(it.p, m);
+		subsForFile(m, w.s);
+		const a = w.a != null && m && w.a !== directAudio(m) ? w.a : null;
 		announce();
-		el.play().catch(() => {});
+		// another audio track: Safari switches it in the file (once it knows its tracks); elsewhere a Direct Stream
+		// from pos, never the file first (its clock is the stream's)
+		if (a != null && !('audioTracks' in el) && !streamWhy(m, a)) {
+			// (meanwhile the position is pos; no stream: the file as it is)
+			B.remux = { a, base: pos, pending: pos };
+			remuxAt(a, pos, true).then(() => { if (B.meta && B.meta.p === it.p && !el.getAttribute('src') && B.parked == null) directPlay(pos, true); });
+		}
+		else {
+			el.src = fileUrl(it.p);
+			if (pos > 0) el.addEventListener('loadedmetadata', () => { el.currentTime = pos; }, { once: true });
+			if (a != null) el.addEventListener('loadedmetadata', () => {
+				if (nativeAudio() && el.audioTracks[a]) [...el.audioTracks].forEach((t, j) => t.enabled = j === a);
+				else { const l = m.audio[a] ? m.audio[a].label : 'That audio track'; toast(l.split(' · ')[0] + ' ' + (streamWhy(m, a) || 'plays on the handheld only').toLowerCase() + ': the default track here', null, 6000); keepTracks({ a: directAudio(m) }); }
+				notify();
+			}, { once: true });
+			el.play().catch(() => {});
+		}
 		if (skipped) toast('Skipped ' + plural(skipped, 'file', 'files') + " this browser can't play");
 		// no word on it in time: playing anyway; its tags, chapters and tracks when they come
 		if (!m) probe1(it.p).then(m2 => { if (!m2 || !B.meta || B.meta.p !== it.p) return; Object.assign(B.meta, { title: titleFor(it.p, m2.title), artist: m2.artist || '', album: m2.album || '', chapters: m2.chapters || [], duration: m2.duration || 0, media: m2 }); subsForFile(m2); notify(); });
@@ -203,6 +220,7 @@ export async function handheldOpen(d) {
 	if (!B.active || B.leaving || B.parked != null || NO_HERE || store.conn !== 'ok' || !Array.isArray(d.list) || !d.list[d.index]) return refuse('not playing here');
 	const tok = ++B.navTok; B.navTarget = null; B.openTok = d.tok;
 	const items = d.list.map(p => ({ p })), first = items[d.index];
+	wantHandheldTracks(store.snap);
 	first.m = await probe1(first.p);
 	if (tok !== B.navTok) return;
 	if (first.m && !probeOK(first.m)) return refuse('format');
@@ -260,6 +278,7 @@ export function playingAudio() {
 // the chosen track: in place (Safari), the file itself (its default track), else a Direct Stream from here
 export async function chooseAudio(i) {
 	const m = B.meta && B.meta.media; if (!m || B.parked != null) return;
+	keepTracks({ a: i });
 	if (nativeAudio()) { [...el.audioTracks].forEach((t, j) => t.enabled = j === i); notify(); return; }
 	if (i === playingAudio() && !B.switching) return;
 	if (i === directAudio(m)) { directPlay(bPos(), !el.paused); return; }
@@ -272,6 +291,7 @@ function remuxFailed(err) {
 	const format = code === 3 || code === 4;
 	const why = format ? "This browser can't play this video's format in a new stream" : 'The stream from your handheld broke off';
 	if (format && B.meta) B.noStream = B.meta.p;
+	if (B.meta) keepTracks({ a: directAudio(B.meta.media) });
 	post('/api/remux-failed', { p: B.meta ? B.meta.p : '', a: r ? r.a : '', t: pos.toFixed(1), why: 'MediaError ' + code + ' ' + (err && err.message || ''), ua: navigator.userAgent }).catch(() => {});
 	toast("Couldn't switch the audio track: " + why.charAt(0).toLowerCase() + why.slice(1), null, 8000);
 	directPlay(pos, true);
@@ -308,11 +328,14 @@ function clearSubs() {
 	Object.values(SUBS.urls).forEach(u => URL.revokeObjectURL(u));
 	Object.assign(SUBS, { file: '', list: [], chosen: -1, last: -1, urls: {}, progress: null, failed: {}, seq: SUBS.seq + 1, noAss: {}, ass: false });
 }
-function subsForFile(m) {
+// s: the one to show (-1 none), else the usual choice
+function subsForFile(m, s) {
 	clearSubs();
 	SUBS.file = B.meta ? B.meta.p : '';
 	SUBS.list = m && m.subs || [];
-	const want = lsGet('bpSubOff') === '1' ? -1 : m && m.subDefault != null ? m.subDefault : -1;
+	const want = s != null ? s : lsGet('bpSubOff') === '1' ? -1 : m && m.subDefault != null ? m.subDefault : -1;
+	const x = SUBS.list.find(y => y.i === want);
+	if (s != null && x && x.kind === 'image') toast(x.label.split(' · ')[0] + ' subtitles show on the handheld only', null, 6000);
 	const sub = SUBS.list.find(x => x.i === want);
 	if (sub && sub.kind !== 'image') chooseSub(want);
 }
@@ -339,6 +362,7 @@ function restoreSubs() { const c = SUBS.chosen; if (c >= 0) { SUBS.chosen = -1; 
 export async function chooseSub(i) {
 	const file = SUBS.file, seq = SUBS.seq;
 	SUBS.chosen = i; SUBS.progress = null; delete SUBS.failed[i];
+	if (file && B.meta && B.meta.p === file) keepTracks({ s: i });
 	if (i >= 0) rememberSub(i);
 	[...el.textTracks].forEach(t => t.mode = 'disabled');
 	assOff();
@@ -564,6 +588,7 @@ export async function continueHere() {
 	const s = store.snap; if (!s || !s.path || !userTap()) return;
 	const pos = s.paused ? s.position : s.position + (Date.now() - store.snapAt) / 1000 * (s.speed || 1);
 	const src = s.source ? { kind: s.source.kind, title: s.source.title, id: s.source.id } : null;
+	wantHandheldTracks(s);
 	// the file at once; the rest of its list when the handheld has said it (it can take a moment while it switches)
 	const ok = await browserPlay([{ p: s.path }], 0, src, pos);
 	if (ok === null) return;	// something else was picked meanwhile
@@ -574,20 +599,88 @@ export async function continueHere() {
 		if (i >= 0 && B.meta && B.meta.p === s.path && B.queue.length === 1) { B.queue = q.items; B.index = i; notify(); }
 	}).catch(() => {});
 }
-// aid: the audio track to play there (the browser can only play the first)
-export async function handoffToHandheld(aid) {
+// o.a, o.s: the audio track and subtitles to play there (this page's indexes; else the ones it plays now), sent as the
+// handheld's ids
+export async function handoffToHandheld(o) {
 	const m = B.meta; if (!m) { chooseTarget('handheld'); return; }
 	const pos = bPos(), src = B.source, idx = B.index, was = !el.paused;
+	const ids = handheldIds(o || {});
 	sendPos();
 	el.pause();	// one sound: quiet here before the handheld starts
 	try {
-		if (src && src.kind === 'playlist' && src.id && aid == null) await post('/api/play', { playlist: src.id, index: idx, t: pos.toFixed(1) });
-		else await post('/api/play', { p: m.p, t: pos.toFixed(1), aid });
+		if (src && src.kind === 'playlist' && src.id) await post('/api/play', Object.assign({ playlist: src.id, index: idx, t: pos.toFixed(1) }, ids));
+		else await post('/api/play', Object.assign({ p: m.p, t: pos.toFixed(1) }, ids));
 	} catch (e) { if (was && store.conn === 'ok') el.play().catch(() => {}); toast(e.status === 0 ? "Couldn't start it on your handheld" : errMsg(e)); return false; }
+	// the handheld's choice from now on (changed there, it's what comes back)
+	ssDel('bpTr:' + m.p);
 	browserStop();
 	chooseTarget('handheld');
 	toast('Continuing on the handheld from ' + fmtTime(pos));
 	return true;
+}
+
+/* ---- the chosen tracks across a hand-off. The page knows the file's tracks as /api/media lists them (audio in stream
+   order; subtitles: the embedded ones in stream order, then the files beside it); the handheld as mpv numbers them
+   (the same order within each kind, the files beside it after). Matched by place within the kind when both sides list
+   as many, else by label (both are the handheld's trackLabel) ---- */
+const ssGet = k => { try { return JSON.parse(sessionStorage.getItem(k) || 'null'); } catch (e) { return null; } };
+const ssSet = (k, v) => { try { sessionStorage.setItem(k, JSON.stringify(v)); } catch (e) {} };
+const ssDel = k => { try { sessionStorage.removeItem(k); } catch (e) {} };
+// this tab's choice for the file playing ({a, s}), kept while it plays here (a reload, a reconnect)
+function keepTracks(o) { if (!B.meta) return; const k = 'bpTr:' + B.meta.p; ssSet(k, Object.assign(ssGet(k) || {}, o)); }
+// the handheld's tracks for the next file this page opens, when it's the one the handheld has
+// (held: the handheld only holds it for a page, so its tracks aren't a choice: this tab's own come first)
+function wantHandheldTracks(s) { B.want = s && s.path && s.tracks ? { p: s.path, tracks: s.tracks, held: !!s.browserPlaying } : null; }
+const sameKind = (list, ext) => list.filter(x => !!x.external === ext);
+// {a, s}: this page's indexes to start p with (null: the default)
+function startTracks(p, m) {
+	const w = B.want; B.want = null;
+	const kept = ssGet('bpTr:' + p), fromHandheld = w && w.p === p && !w.held;
+	let out = { a: null, s: null };
+	if (kept && !fromHandheld) out = { a: kept.a != null ? kept.a : null, s: kept.s != null ? kept.s : null };
+	else if (w && w.p === p && m) {
+		const t = w.tracks;
+		const ai = (t.audio || []).findIndex(x => x.id === t.aid);
+		if (ai >= 0) out.a = (m.audio || []).length === t.audio.length ? ai : idxByLabel(m.audio, t.audio[ai].label);
+		if (!t.sid) out.s = -1;
+		else {
+			const tr = (t.sub || []).find(x => x.id === t.sid);
+			if (tr) {
+				const theirs = sameKind(t.sub, !!tr.external), ours = sameKind(m.subs || [], !!tr.external), k = theirs.indexOf(tr);
+				const x = ours.length === theirs.length ? ours[k] : (m.subs || []).find(y => y.label === tr.label);
+				if (x) out.s = x.i;
+			}
+		}
+	}
+	if (m && out.a != null && !(m.audio || [])[out.a]) out.a = null;
+	if (m && out.s != null && out.s >= 0 && !(m.subs || []).some(x => x.i === out.s)) out.s = null;
+	if (m && (out.a != null || out.s != null)) ssSet('bpTr:' + p, out);
+	return out;
+}
+function idxByLabel(list, label) { const i = (list || []).findIndex(x => x.label === label); return i >= 0 ? i : null; }
+// the handheld's ids for this page's tracks: {aid, sid} for /api/play
+function handheldIds(o) {
+	const m = B.meta && B.meta.media, out = {};
+	if (!m) return out;
+	const s = store.snap, t = s && s.path === B.meta.p && s.tracks ? s.tracks : null;
+	const a = o.a != null ? o.a : B.switching ? B.switching.a : playingAudio();
+	if (a >= 0 && (m.audio || [])[a]) {
+		const ta = t && t.audio || [];
+		const x = ta.length === m.audio.length ? ta[a] : ta.find(y => y.label === m.audio[a].label);
+		out.aid = x ? x.id : a + 1;
+	}
+	const si = o.s != null ? o.s : SUBS.chosen;
+	if (si < 0) out.sid = 'no';
+	else {
+		const subs = m.subs || [], x = subs.find(y => y.i === si);
+		if (x) {
+			const ours = sameKind(subs, !!x.external), k = ours.indexOf(x), theirs = t ? sameKind(t.sub || [], !!x.external) : [];
+			const y = theirs.length === ours.length ? theirs[k] : t && (t.sub || []).find(z => z.label === x.label);
+			// (no word from the handheld on this file: mpv numbers the embedded ones first, the files beside it after)
+			out.sid = y ? y.id : (x.external ? sameKind(subs, false).length : 0) + k + 1;
+		}
+	}
+	return out;
 }
 
 // collects playable [{p}] from selected paths (a folder gives its own media, in order)

@@ -56,6 +56,8 @@ namespace bp
 		// on), as loadfile's own option, never a property: the web's "Change it on the handheld". Once, then 0. A song
 		// under a filter graph takes its first track whatever this says
 		int64_t nextAid = 0;
+		// the same for the subtitles: -1 nothing asked, 0 off, else mpv's sid
+		int64_t nextSid = -1;
 		// a playlist's items (local and bpnet:// mixed, in its order: shuffled already for Shuffle play) from paths[index].
 		// Photos are dropped. A local item that isn't there is skipped, here and by next/prev/advance. A network item's
 		// subtitles and cover need its folder's listing, which the caller fetches: see netFolderWanted
