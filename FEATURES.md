@@ -125,9 +125,11 @@ folders. Playlists have a section of their own, between Files and Network.
 
 ### Adding items
 
-- In **Files** or **Network**, **X** → **Select files**, tick the files you want (**A**, or a tap), then **X** →
+- In **Files** or **Network**, **X** → **Select files**, tick the files you want (**A**, or a tap), then **Y** →
   **Add to…** and pick a playlist (or **New playlist…**). On the touch screen, a hold on a file starts this with that
-  file ticked. **B** (or **Cancel**) leaves select mode; with files ticked, press it twice.
+  file ticked. **B** goes up a folder, as in browsing, and the ticks stay (at a section's top it leaves). **X** (or
+  **Cancel**) leaves select mode from any folder; with files ticked, press it twice. The **✕** at the top left leaves
+  at once.
 - Inside a playlist, **X** → **Add files…** opens the file list, and the files you tick are added to that playlist.
   **Add folder…** adds a whole folder instead.
 - On any folder, **Y** (or a hold) → **Add to playlist…** comes first, and adds that folder's files.
@@ -136,6 +138,9 @@ folders. Playlists have a section of their own, between Files and Network.
 - The same file can be in a playlist twice. **X** → **Remove duplicates** (in the playlist's **X** menu) keeps the first
   of each.
 - A playlist holds 2,000 items at most. An add that goes past that adds what fits, and says so.
+- Editing the playlist that's playing (from the handheld or the dashboard) changes what plays next: songs added
+  after the last one play after it (**Next** reaches them), removed ones are skipped, moved ones play in their new place.
+  With Shuffle, added songs play after the rest of the round. Nothing restarts.
 
 ### Select, remove and move
 

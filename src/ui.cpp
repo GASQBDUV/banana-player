@@ -573,6 +573,8 @@ namespace bp
 			stopPressed = true;
 			return false;
 		}
+		// adding files: the header's key is a ✕ that cancels at once (B goes up a folder there)
+		if (id == BACK_ICON && page == Page::Browse && (selMode == SEL_ADD || selMode == SEL_PICK)) { selBack(p, true); return false; }
 		if (id == BACK_ICON) return pressAnyway(Button::B, p);
 		// the mini bar: the player, or its play mark
 		if (id == MINI_BAR) { goNowPlaying(p); return false; }
@@ -582,7 +584,8 @@ namespace bp
 		if (id == SEL_ALL) { selKey(Button::Select, p); return false; }
 		if (id == SEL_MOVE) { selKey(Button::Y, p); return false; }
 		if (id == SEL_ACT) { selKey(Button::X, p); return false; }
-		if (id == SEL_CANCEL) { selBack(p, true); return false; }
+		// (Cancel shows X's key, so it asks twice as X does; the header's ✕ leaves at once)
+		if (id == SEL_CANCEL) { selBack(p, false); return false; }
 		if (id == MOVE_CANCEL || id == MOVE_DONE) { moveEnd(id == MOVE_DONE, p); return false; }
 		if (id == BUSY_CANCEL) { cancelAdd(p); return false; }
 		if (id == LIKE_BTN) { likeNow(p); return false; }
