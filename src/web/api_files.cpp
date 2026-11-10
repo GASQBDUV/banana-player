@@ -689,7 +689,11 @@ namespace bp
 			int stream = -1;
 			double t = 0, start = 0;
 			if (!remuxArgs(req, res, real, stream, t)) return;
-			if (!remuxStart(real, stream, t, start, why)) return WebServer::fail(res, 422, why);
+			if (!remuxStart(real, stream, t, start, why))
+			{
+				fprintf(stderr, "remux: %s audio stream %d at %.1f refused: %s\n", real.c_str(), stream, t, why.c_str());
+				return WebServer::fail(res, 422, why);
+			}
 			JsonWriter w;
 			w.obj().key("start").num(start).end();
 			WebServer::json(res, w.out());
@@ -724,6 +728,21 @@ namespace bp
 					auto it = byTab->find(tab);
 					if (it != byTab->end() && it->second == stop) byTab->erase(it);
 				});
+		});
+
+		// the page couldn't play a Direct Stream it was given: what its browser said, for log.txt (the handheld never
+		// sees the failure itself)
+		svr.Post("/api/remux-failed", [](const httplib::Request& req, httplib::Response& res) {
+			auto clean = [](std::string v) {
+				v = v.substr(0, 300);
+				for (char& c : v)
+					if ((unsigned char)c < 32) c = ' ';
+				return v;
+			};
+			fprintf(stderr, "remux: the browser couldn't play %s (audio %s at %s): %s · %s\n", clean(req.get_param_value("p")).c_str(),
+				clean(req.get_param_value("a")).c_str(), clean(req.get_param_value("t")).c_str(), clean(req.get_param_value("why")).c_str(),
+				clean(req.get_param_value("ua")).c_str());
+			WebServer::json(res, "{\"ok\":true}");
 		});
 
 		svr.Get("/api/file", [&ws](const httplib::Request& req, httplib::Response& res) {

@@ -70,17 +70,12 @@ namespace bp
 				a = audioStream;
 				if (!videoOk(ic->streams[v]->codecpar->codec_id)) return why = "This video's format can't be streamed to a browser", false;
 				if (!audioOk(ic->streams[a]->codecpar->codec_id)) return why = "Plays on the handheld only", false;
-				AVCodecParameters* vp = ic->streams[v]->codecpar;
-				AVCodecParameters* ap = ic->streams[a]->codecpar;
-				// the headers usually say it all (mkv, mp4); a transport stream needs a look at the packets
-				if (vp->width <= 0 || vp->height <= 0 || ap->sample_rate <= 0 || ap->ch_layout.nb_channels <= 0)
-				{
-					for (unsigned i = 0; i < ic->nb_streams; i++)
-						if ((int)i != v && (int)i != a) ic->streams[i]->discard = AVDISCARD_ALL;
-					if (avformat_find_stream_info(ic, nullptr) < 0) return why = "Can't read the file", false;
-				}
+				// Always looked at, even when the headers say it all: without it a Matroska file's video packets come
+				// with no decode times and no B-frame delay (decodeTs needs it): the muxer dropped the B-frames, and
+				// Chrome's HEVC decoder (VideoToolbox) failed at once on what was left (-12909)
 				for (unsigned i = 0; i < ic->nb_streams; i++)
 					if ((int)i != v && (int)i != a) ic->streams[i]->discard = AVDISCARD_ALL;
+				if (avformat_find_stream_info(ic, nullptr) < 0) return why = "Can't read the file", false;
 				if (ic->start_time != AV_NOPTS_VALUE) startTime = double(ic->start_time) / AV_TIME_BASE;
 				intr.opening = false;
 				return true;
@@ -95,7 +90,22 @@ namespace bp
 			}
 		};
 
-		int64_t tsOf(const AVPacket* p) { return p->dts != AV_NOPTS_VALUE ? p->dts : p->pts; }
+		// one frame, in the stream's time base
+		int64_t frameTicks(const AVStream* s)
+		{
+			AVRational fr = s->avg_frame_rate.num > 0 ? s->avg_frame_rate : s->r_frame_rate.num > 0 ? s->r_frame_rate : AVRational{24, 1};
+			return std::max<int64_t>(1, av_rescale_q(1, av_inv_q(fr), s->time_base));
+		}
+		// a video packet's decode time. Matroska keeps presentation times only, and the demuxer can't always tell the
+		// decode time of the first packets after a seek: with B-frames a keyframe decodes video_delay frames before it
+		// shows (as libavformat guesses it), and the ones after it follow a frame apart
+		int64_t decodeTs(const AVPacket* p, const AVStream* s, int64_t prev)
+		{
+			if (p->dts != AV_NOPTS_VALUE) return p->dts;
+			if (prev != AV_NOPTS_VALUE) return prev + frameTicks(s);
+			if (p->pts == AV_NOPTS_VALUE) return AV_NOPTS_VALUE;
+			return p->pts - (int64_t)s->codecpar->video_delay * frameTicks(s);
+		}
 
 		struct Sink
 		{
@@ -141,9 +151,11 @@ namespace bp
 		// the first keyframe of the video from there (a few seconds of reading at most)
 		for (int n = 0; n < 4000 && !found && av_read_frame(in.ic, pkt) >= 0; n++)
 		{
-			if (pkt->stream_index == in.v && (pkt->flags & AV_PKT_FLAG_KEY) && tsOf(pkt) != AV_NOPTS_VALUE)
+			int64_t d = pkt->stream_index == in.v ? decodeTs(pkt, in.ic->streams[in.v], AV_NOPTS_VALUE) : AV_NOPTS_VALUE;
+			if ((pkt->flags & AV_PKT_FLAG_KEY) && d != AV_NOPTS_VALUE)
 			{
-				start = std::max(0.0, tsOf(pkt) * av_q2d(in.ic->streams[in.v]->time_base) - in.startTime);
+				// (where remuxRun's clock starts: its first packet's decode time)
+				start = std::max(0.0, d * av_q2d(in.ic->streams[in.v]->time_base) - in.startTime);
 				found = true;
 			}
 			av_packet_unref(pkt);
@@ -238,16 +250,20 @@ namespace bp
 		}
 
 		AVPacket* pkt = av_packet_alloc();
-		int64_t vOff = AV_NOPTS_VALUE, aOff = 0;
+		int64_t vOff = AV_NOPTS_VALUE, aOff = 0, vDts = AV_NOPTS_VALUE;
 		bool ok = true;
 		double lastT = 0;
+		int dropped = 0;	// packets the muxer refused (timestamps going backwards): logged, as a picture breaks up then
 		auto writePkt = [&](AVPacket* p, AVStream* is, AVStream* os, int64_t off) {
 			if (p->pts != AV_NOPTS_VALUE) p->pts -= off;
 			if (p->dts != AV_NOPTS_VALUE) p->dts -= off;
 			av_packet_rescale_ts(p, is->time_base, os->time_base);
 			p->stream_index = os->index;
 			p->pos = -1;
-			return av_interleaved_write_frame(oc, p) >= 0 || !sink.failed;	// a bad packet is skipped; a gone client ends it
+			if (av_interleaved_write_frame(oc, p) >= 0) return true;
+			if (sink.failed) return false;	// a gone client ends it
+			dropped++;	// a bad packet is skipped
+			return true;
 		};
 		while (ok && !cancelled())
 		{
@@ -258,15 +274,21 @@ namespace bp
 				if (vOff == AV_NOPTS_VALUE)
 				{
 					// nothing before the first keyframe: it's where remuxStart said it starts
-					if (!(pkt->flags & AV_PKT_FLAG_KEY) || tsOf(pkt) == AV_NOPTS_VALUE)
+					if (!(pkt->flags & AV_PKT_FLAG_KEY) || decodeTs(pkt, iv, AV_NOPTS_VALUE) == AV_NOPTS_VALUE)
 					{
 						av_packet_unref(pkt);
 						continue;
 					}
-					vOff = tsOf(pkt);
+					vOff = decodeTs(pkt, iv, AV_NOPTS_VALUE);
 					aOff = av_rescale_q(vOff, iv->time_base, ia->time_base);
 				}
-				if (tsOf(pkt) != AV_NOPTS_VALUE) lastT = std::max(lastT, tsOf(pkt) * av_q2d(iv->time_base));
+				// decode times always rising and never after the frame shows: a packet that breaks this is refused by
+				// the muxer, and a missing reference frame stops Chrome's HEVC decoder for good
+				int64_t d = decodeTs(pkt, iv, vDts);
+				if (vDts != AV_NOPTS_VALUE && d <= vDts) d = vDts + 1;
+				pkt->dts = vDts = d;
+				if (pkt->pts != AV_NOPTS_VALUE && pkt->pts < d) pkt->pts = d;
+				if (pkt->pts != AV_NOPTS_VALUE) lastT = std::max(lastT, pkt->pts * av_q2d(iv->time_base));
 				ok = writePkt(pkt, iv, ov, vOff);
 			}
 			else if (pkt->stream_index == in.a && vOff != AV_NOPTS_VALUE && (pkt->pts == AV_NOPTS_VALUE || pkt->pts >= aOff))
@@ -288,8 +310,8 @@ namespace bp
 		}
 		double cpu = cpuSeconds() - cpu0;
 		double wall = std::chrono::duration<double>(std::chrono::steady_clock::now() - wall0).count();
-		fprintf(stderr, "remux: %s audio stream %d from %.1f: to %.1f, %.2f s CPU in %.0f s (%s)\n", baseName(real).c_str(), audioStream, t,
-			lastT - in.startTime, cpu, wall, cancelled() ? "replaced" : sink.failed ? "client gone" : "ended");
+		fprintf(stderr, "remux: %s audio stream %d from %.1f: to %.1f, %.2f s CPU in %.0f s, %d packets dropped (%s)\n", baseName(real).c_str(),
+			audioStream, t, lastT - in.startTime, cpu, wall, dropped, cancelled() ? "replaced" : sink.failed ? "client gone" : "ended");
 		return !sink.failed;
 	}
 }

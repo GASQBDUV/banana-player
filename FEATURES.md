@@ -502,6 +502,14 @@ handheld, carries on at 1:27"):
     (ASS/SSA, inside or beside the video) are drawn in the browser with their own look, positions, effects and the
     fonts the file carries. Picture subtitles (PGS, VobSub) say **Shows on the handheld only**. **Size** and
     **Position** set how plain subtitles look in this browser; styled ones keep theirs.
+  - **On the video**, as on YouTube (inline and fullscreen, phone and computer): **CC** turns subtitles off, and on
+    again with the ones you had (in the next file: the same ones, else the same language, never signs-only first);
+    **C** on a keyboard does the same. The **gear** opens **Audio track ›**, **Subtitles ›** and **Speed ›** (0.5× to
+    2×, kept for the next file): the one playing is ticked, and the ones that can't play here are dimmed with the
+    reason (a tap on one offers the handheld). Arrows move, **Esc** or **←** go back, **Esc** closes.
+  - When a Direct Stream doesn't play, it says why (**this browser can't play this video's format in a new stream**,
+    or **the stream from your handheld broke off**), goes back to the default track, and the handheld's log keeps
+    what the browser said.
 - **Up next**, **Chapters**, **Tracks** (audio and subtitles), **Sound** (the volume, the equalizer's presets and its ten
   bands, the effects) and **Details**: on a phone three keys under the controls open them as a sheet; on a tablet
   they're a card under the player; on a computer a column beside it, while the controls are in the player bar.

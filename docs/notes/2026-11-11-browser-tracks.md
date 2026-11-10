@@ -27,6 +27,13 @@ handheld, without ever converting anything (the RK3568 decodes in software; tran
      Timestamps start at 0, so the page counts `B.remux.base + currentTime` (`bPos()`); a seek starts a new stream
      (debounced 250 ms); the `<track>` cues are moved back by the base and JASSUB gets it as `timeOffset`. The picture
      blinks about a second on a switch. Choosing the default track again goes back to the file.
+   - **Timestamps and tags:** the HEVC stream goes out tagged `hvc1` (Safari and Chrome's MSE want it; `hev1` is
+     refused). Matroska keeps presentation times only, so the remuxer always runs `avformat_find_stream_info` (for the
+     B-frame delay) and makes the video's decode times itself (`decodeTs`: missing ones from the delay and the frame
+     rate, always rising, never after the frame shows). Before that the muxer dropped the B-frames and Chrome's HEVC
+     decoder (VideoToolbox) failed at once with -12909 ("Couldn't switch the audio track here" on 10-bit x265 anime).
+     The log line counts any packet still dropped; a browser that can't play the stream posts `/api/remux-failed`,
+     logged as `remux: the browser couldn't play …` with its MediaError and user agent.
    - Offered only when the browser says it plays the pair in MP4 (`canPlayType`/`MediaSource.isTypeSupported`): video
      H.264, HEVC, VP9, AV1; audio AAC, MP3, Opus, FLAC, AC-3, E-AC-3. DTS, TrueHD, PCM and the rest are **Plays on the
      handheld only**, with **Play this one on the handheld**.

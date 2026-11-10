@@ -1,6 +1,6 @@
 // Banana Player web dashboard: the entry point (shell, app and boot). Preact + htm, no build step; the rest is in js/.
 import { html, render, useEffect, useMemo } from './vendor/htm-preact-standalone.module.js';
-import { B, SUBS, browserPlay, browserStop, continueHere, ctl, el, hereNow, setBrowserVol, setTarget, view } from './js/browser-player.js';
+import { B, SUBS, browserPlay, browserStop, continueHere, ctl, el, hereNow, setBrowserVol, setTarget, toggleCaptions, view } from './js/browser-player.js';
 import { applySnap, closeSSE, openSSE } from './js/events.js';
 import { fetchT, get, post } from './js/api.js';
 import { Q_DESK, Q_WIDE, notify, set, store, useStore } from './js/store.js';
@@ -76,7 +76,7 @@ function Toasts() {
 		${t.action && html`<svg class="tring" viewBox="0 0 22 22" aria-hidden="true"><circle cx="11" cy="11" r="9" fill="none" stroke="#3a3842" stroke-width="3" /><circle cx="11" cy="11" r="9" fill="none" stroke="var(--yellow)" stroke-width="3" stroke-dasharray="56.55" stroke-dashoffset="0" /></svg>`}</div>`)}</div>`;
 }
 function HelpOverlay() {
-	const keys = [['Space', 'Play / pause'], ['← →', 'Back 5 s / forward 10 s'], ['Shift + ← →', 'Previous / next'], ['[ ]', 'Previous / next chapter'], ['L', 'Loop'], ['↑ ↓', 'Volume'], ['/', 'Find (Files, Playlists)'], ['?', 'This help'], ['Esc', 'Close']];
+	const keys = [['Space', 'Play / pause'], ['← →', 'Back 5 s / forward 10 s'], ['Shift + ← →', 'Previous / next'], ['[ ]', 'Previous / next chapter'], ['L', 'Loop'], ['C', 'Subtitles on / off (a video in this browser)'], ['↑ ↓', 'Volume'], ['/', 'Find (Files, Playlists)'], ['?', 'This help'], ['Esc', 'Close']];
 	const close = () => set({ help: false });
 	return html`<${Modal} title="Keyboard shortcuts" onClose=${close} actions=${html`<button class="btn primary" onClick=${close}>Close</button>`}><div class="helpkeys">${keys.map(([k, d]) => html`<kbd>${k}</kbd><span>${d}</span>`)}</div></${Modal}>`;
 }
@@ -153,6 +153,7 @@ function Shell() {
 			else if ((e.key === 'ArrowLeft' || e.key === 'ArrowRight') && !slider) { e.preventDefault(); const fwd = e.key === 'ArrowRight'; if (e.shiftKey) fwd ? ctl.next() : ctl.prev(); else ctl.seekRel(fwd ? 10 : -5); }
 			else if (e.key === '[' || e.key === ']') ctl.chapterStep(e.key === ']' ? 1 : -1);
 			else if ((e.key === 'l' || e.key === 'L') && (sn || here)) ctl.loop();
+			else if ((e.key === 'c' || e.key === 'C') && here && B.meta.kind === 'video') toggleCaptions();
 			else if ((e.key === 'ArrowUp' || e.key === 'ArrowDown') && !slider && !button) {
 				e.preventDefault();
 				const cur = here ? B.vol : sn ? sn.volume : 0, nv = Math.max(0, Math.min(100, cur + (e.key === 'ArrowUp' ? 5 : -5)));

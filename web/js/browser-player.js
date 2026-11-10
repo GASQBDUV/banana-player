@@ -51,7 +51,7 @@ el.addEventListener('ended', () => {
 el.addEventListener('error', () => {
 	if (!B.active || !el.getAttribute('src')) return;
 	// the Direct Stream failed: back to the file as it is (its default sound)
-	if (B.remux) { const pos = bPos(); toast("Couldn't switch the audio track here"); directPlay(pos, true); return; }
+	if (B.remux) { remuxFailed(el.error); return; }
 	B.error = true; notify(); const m = B.meta; toast("This browser can't play this file", m && { label: 'Play on handheld', fn: () => handoffToHandheld() }, 8000); });
 function announce() {
 	const p = B.meta.p;
@@ -245,6 +245,7 @@ export const directAudio = m => Math.max(0, (m && m.audio || []).findIndex(a => 
 export function streamWhy(m, i) {
 	const a = m && m.audio && m.audio[i];
 	if (!a) return 'No such track';
+	if (B.noStream && B.meta && B.meta.media === m && B.noStream === B.meta.p && i !== directAudio(m)) return "This browser can't play this video's format in a new stream";
 	if (!VC[m.vcodec] || !typeOk(VC[m.vcodec], 'mp4a.40.2') && !typeOk(VC[m.vcodec], 'opus')) return "This video can't be streamed to this browser";
 	if (!AC[a.codec] || !typeOk(VC[m.vcodec], AC[a.codec])) return 'Plays on the handheld only';
 	return '';
@@ -263,6 +264,17 @@ export async function chooseAudio(i) {
 	if (i === playingAudio() && !B.switching) return;
 	if (i === directAudio(m)) { directPlay(bPos(), !el.paused); return; }
 	await remuxAt(i, bPos(), !el.paused);
+}
+// the Direct Stream didn't play: back to the file as it is (its default sound), saying why, and the handheld's log
+// hears what the browser said. A format it can't decode is remembered for this file (the other tracks say so)
+function remuxFailed(err) {
+	const pos = bPos(), r = B.remux, code = err ? err.code : 0;
+	const format = code === 3 || code === 4;
+	const why = format ? "This browser can't play this video's format in a new stream" : 'The stream from your handheld broke off';
+	if (format && B.meta) B.noStream = B.meta.p;
+	post('/api/remux-failed', { p: B.meta ? B.meta.p : '', a: r ? r.a : '', t: pos.toFixed(1), why: 'MediaError ' + code + ' ' + (err && err.message || ''), ua: navigator.userAgent }).catch(() => {});
+	toast("Couldn't switch the audio track: " + why.charAt(0).toLowerCase() + why.slice(1), null, 8000);
+	directPlay(pos, true);
 }
 function directPlay(pos, play) {
 	B.remux = null; B.switching = null; clearTimeout(remuxTimer);
@@ -294,7 +306,7 @@ function clearSubs() {
 	assOff();
 	[...el.querySelectorAll('track')].forEach(t => t.remove());
 	Object.values(SUBS.urls).forEach(u => URL.revokeObjectURL(u));
-	Object.assign(SUBS, { file: '', list: [], chosen: -1, urls: {}, progress: null, failed: {}, seq: SUBS.seq + 1, noAss: {}, ass: false });
+	Object.assign(SUBS, { file: '', list: [], chosen: -1, last: -1, urls: {}, progress: null, failed: {}, seq: SUBS.seq + 1, noAss: {}, ass: false });
 }
 function subsForFile(m) {
 	clearSubs();
@@ -304,10 +316,30 @@ function subsForFile(m) {
 	const sub = SUBS.list.find(x => x.i === want);
 	if (sub && sub.kind !== 'image') chooseSub(want);
 }
+// the subtitles last shown (their label), for CC: the same ones again, in this file or the next
+const SIGNS = /sign|song|karaoke|forced/i;
+function rememberSub(i) { const x = SUBS.list.find(y => y.i === i); if (x) { SUBS.last = i; lsSet('bpSubLast', x.label); } }
+// CC on the video (and the C key): off, or back on with the last ones; in a new file the same label, else the same
+// language, else the file's default, else the first that isn't signs only
+export function toggleCaptions() {
+	if (SUBS.chosen >= 0) { lsSet('bpSubOff', '1'); chooseSub(-1); return; }
+	const text = SUBS.list.filter(x => x.kind !== 'image');
+	if (!text.length) { toast(SUBS.list.length ? "This video's subtitles show on the handheld only" : 'No subtitles in this file'); return; }
+	const label = lsGet('bpSubLast') || '', lang = label.split(' · ')[0];
+	const m = B.meta && B.meta.media;
+	const pick = text.find(x => x.i === SUBS.last) || text.find(x => x.label === label)
+		|| text.find(x => lang && x.label.split(' · ')[0] === lang && !SIGNS.test(x.label)) || text.find(x => m && x.i === m.subDefault)
+		|| text.find(x => !SIGNS.test(x.label)) || text[0];
+	lsSet('bpSubOff', '0'); chooseSub(pick.i);
+}
+// playback speed (the gear's Speed): it stays for the next file, as on YouTube
+export const SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 2];
+export function setSpeed(r) { el.defaultPlaybackRate = r; el.playbackRate = r; notify(); }
 function restoreSubs() { const c = SUBS.chosen; if (c >= 0) { SUBS.chosen = -1; chooseSub(c); } }
 export async function chooseSub(i) {
 	const file = SUBS.file, seq = SUBS.seq;
 	SUBS.chosen = i; SUBS.progress = null; delete SUBS.failed[i];
+	if (i >= 0) rememberSub(i);
 	[...el.textTracks].forEach(t => t.mode = 'disabled');
 	assOff();
 	notify();

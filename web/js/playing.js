@@ -1,5 +1,5 @@
-import { html, useState, useEffect, useLayoutEffect, useRef, useMemo, useCallback } from '../vendor/htm-preact-standalone.module.js';
-import { B, CUE_SIZES, SUBS, assBox, browserPlay, chooseAudio, chooseSub, directAudio, nativeAudio, playingAudio, streamWhy, continueHere, ctl, cueStyle, el, handoffToHandheld, playParked, probe1, probeOK, setBrowserVol, setCueStyle, setTarget, sizeCues, view } from './browser-player.js';
+import { html, render, useState, useEffect, useLayoutEffect, useRef, useMemo, useCallback } from '../vendor/htm-preact-standalone.module.js';
+import { B, CUE_SIZES, SPEEDS, SUBS, assBox, setSpeed, toggleCaptions, browserPlay, chooseAudio, chooseSub, directAudio, nativeAudio, playingAudio, streamWhy, continueHere, ctl, cueStyle, el, handoffToHandheld, playParked, probe1, probeOK, setBrowserVol, setCueStyle, setTarget, sizeCues, view } from './browser-player.js';
 import { AppMenu, Art, Empty, MoreDots, Seek, coverUrl, openSheet, palOf, useHeld, useMedia, useTick } from './components.js';
 import { NO_HERE, NO_HERE_WHY, Q_DESK, Q_WIDE, lsGet, lsSet, notify, phoneNow, set, store, useStore } from './store.js';
 import { baseName, chapterTitle, dirName, fmtDate, fmtSize, fmtTime, isIOS, kindOfName, throttled, titleFor, touchOnly, userTap } from './util.js';
@@ -164,14 +164,20 @@ function Media({ v, off, immersive, onCollapse }) {
 	const fsEl = useFullscreen(), fs = !!fsEl && fsEl === box.current;
 	const full = immersive || fs;
 	const [ov, setOv] = useState(false), [pulse, setPulse] = useState(null), [rip, setRip] = useState(null);
-	const t = useRef({ last: 0, side: '', single: 0, hide: 0, n: 0 });
+	const t = useRef({ last: 0, side: '', single: 0, hide: 0, n: 0, menu: null, closedAt: 0 });
+	// the gear's menu (null, or its page: main, audio, subs, speed)
+	const [menu, setMenu0] = useState(null);
+	const setMenu = m => { t.current.menu = m; setMenu0(m); if (!m) { t.current.closedAt = Date.now(); showOv(); } };
 	useEffect(() => () => { clearTimeout(t.current.single); clearTimeout(t.current.hide); }, []);
-	// the overlay fades out after 3 s while it plays; it stays while paused
-	const showOv = () => { setOv(true); clearTimeout(t.current.hide); t.current.hide = setTimeout(() => { if (!view().paused) setOv(false); }, 3000); };
+	useEffect(() => { if (!live && menu) setMenu(null); }, [live]);
+	// the overlay fades out after 3 s while it plays; it stays while paused, and while the menu is open
+	const showOv = () => { setOv(true); clearTimeout(t.current.hide); t.current.hide = setTimeout(() => { if (!view().paused && !t.current.menu) setOv(false); }, 3000); };
 	const toggle = () => { if (off) return; const was = view().paused; ctl.toggle(); setPulse({ k: was ? 'play' : 'pause', id: ++t.current.n }); if (ov) showOv(); };
 	const seek = (side) => { if (off) return; ctl.seekRel(side === 'l' ? -5 : 10); setRip(r => ({ side, id: ++t.current.n, n: r && r.side === side && Date.now() - r.at < 900 ? r.n + 1 : 1, at: Date.now() })); };
 	const up = e => {
-		if (e.button > 0 || e.target.closest('button,.seek') || box.current.dataset.swiped) return;
+		if (e.button > 0 || e.target.closest('button,.seek,.vmenu') || box.current.dataset.swiped) return;
+		// a tap beside the open menu only closes it (as on YouTube)
+		if (t.current.menu || Date.now() - t.current.closedAt < 350) { if (t.current.menu) setMenu(null); return; }
 		const r = box.current.getBoundingClientRect(), x = (e.clientX - r.left) / r.width;
 		const side = x < 1 / 3 ? 'l' : x > 2 / 3 ? 'r' : 'c', tt = t.current, now = Date.now();
 		// a mouse: a click plays or pauses at once, a double click is fullscreen (YouTube on a computer)
@@ -186,10 +192,22 @@ function Media({ v, off, immersive, onCollapse }) {
 		tt.single = setTimeout(() => { if (live) { if (ov && !view().paused) setOv(false); else showOv(); } else toggle(); }, 260);
 	};
 	const move = e => { if (live && e.pointerType === 'mouse') showOv(); };
-	const shown = live && (ov || v.paused);
+	const shown = live && (ov || v.paused || !!menu);
+	const ccOn = SUBS.chosen >= 0, hasSubs = SUBS.list.length > 0;
+	// a small picture (a phone, the page's player): the menu floats over the page beside it, in a root of its own
+	// (out of the picture's clipping); fullscreen keeps it in the picture, the only thing showing then
+	const floatMenu = live && !!menu && !full && !!box.current && box.current.clientHeight < 420;
+	const host = useRef(null);
+	useEffect(() => {
+		if (floatMenu) {
+			if (!host.current) { host.current = document.createElement('div'); document.body.appendChild(host.current); }
+			render(html`<${VidMenu} page=${menu} setPage=${setMenu} fs=${fs} box=${box} float=${true} />`, host.current);
+		} else if (host.current) { render(null, host.current); host.current.remove(); host.current = null; }
+	});
+	useEffect(() => () => { if (host.current) { render(null, host.current); host.current.remove(); host.current = null; } }, []);
 	const cover = v.kind === 'video' ? v.path : v.cover;
 	return html`<div class=${'media ' + (live ? 'is-video' : v.kind === 'video' ? 'is-poster' : 'is-cover') + (full ? ' full' : '') + (shown ? ' ov' : '')} ref=${box}
-		onPointerUp=${up} onPointerMove=${move} onMouseLeave=${() => { if (!view().paused) setOv(false); }} role="group" aria-label=${v.title}>
+		onPointerUp=${up} onPointerMove=${move} onMouseLeave=${() => { if (!view().paused && !t.current.menu) setOv(false); }} role="group" aria-label=${v.title}>
 		${live ? html`<div class="mvideo" ref=${slot}></div>` : html`<div class=${'mart ' + trackClass(v.path)} key=${v.path}><${Art} src=${coverUrl(cover)} seed=${v.path} kind=${v.kind} k=${v.kind === 'video' ? 6 : 10} /></div>`}
 		${!live && v.kind === 'video' && html`<div class="poster-tag"><${Icon} n="card" k=${2} />Playing on your handheld</div>`}
 		${!live && v.kind === 'video' && v.paused && !v.loading && html`<div class="mpaused" aria-hidden="true"><${Icon} n="play" k=${5} /></div>`}
@@ -197,18 +215,104 @@ function Media({ v, off, immersive, onCollapse }) {
 			${full && html`<div class="mov-top">
 				${immersive && !fs ? html`<button class="ib" aria-label="Close player" onClick=${onCollapse}><${Icon} n="down" k=${2} /></button>` : html`<span style="width:12px"></span>`}
 				<div class="grow"><div class="mov-t ell">${v.title}</div>${v.artist && html`<div class="mov-a ell">${v.artist}</div>`}</div>
-				${subChip(v) != null && html`<button class="ib" aria-label=${'Subtitles: ' + subChip(v)} aria-pressed=${subChip(v) !== 'Off'} onClick=${() => { if (fs) toggleFullscreen(box.current); showTracks('sub'); }}><${Icon} n="cc" k=${2} /></button>`}</div>`}
+				</div>`}
 			<div class="mov-mid">
 				${full && html`<button class="mov-s" aria-label="Previous" onClick=${ctl.prev} disabled=${off}><${Icon} n="prev" k=${3} /></button>`}
 				<button class="mov-play" aria-label=${v.paused ? 'Play' : 'Pause'} onClick=${toggle} disabled=${off}><${Icon} n=${v.paused ? 'play' : 'pause'} k=${4} /></button>
 				${full && html`<button class="mov-s" aria-label="Next" onClick=${ctl.next} disabled=${off}><${Icon} n="next" k=${3} /></button>`}</div>
 			<div class="mov-bot">
 				${full && html`<div class="mov-seek"><${Seek} view=${v} onSeek=${ctl.seek} disabled=${off} /><${Times} v=${v} /></div>`}
-				<button class="ib mov-fs" aria-label=${fs ? 'Leave fullscreen' : 'Fullscreen'} onClick=${() => toggleFullscreen(box.current)}><${Icon} n=${fs ? 'fullscreen-exit' : 'fullscreen'} k=${2} /></button></div></div>`}
+				<div class="mov-r">
+					${hasSubs && html`<button class=${'ib mov-cc' + (ccOn ? ' on' : '')} aria-label="Subtitles" title=${'Subtitles: ' + (subChip(v) || 'Off') + ' (C)'} aria-pressed=${ccOn} onClick=${() => { toggleCaptions(); showOv(); }}><${Icon} n="cc" k=${2} /></button>`}
+					<button class=${'ib mov-gear' + (menu ? ' on' : '')} aria-label="Settings" title="Settings" aria-haspopup="menu" aria-expanded=${!!menu} onClick=${() => setMenu(menu ? null : 'main')}><${Icon} n="gear" k=${2} /></button>
+					<button class="ib mov-fs" aria-label=${fs ? 'Leave fullscreen' : 'Fullscreen'} onClick=${() => toggleFullscreen(box.current)}><${Icon} n=${fs ? 'fullscreen-exit' : 'fullscreen'} k=${2} /></button></div></div></div>`}
+			${live && menu && !floatMenu && html`<${VidMenu} page=${menu} setPage=${setMenu} fs=${fs} box=${box} />`}
 		${pulse && html`<div class="mpulse" key=${pulse.id} aria-hidden="true"><${Icon} n=${pulse.k} k=${4} /></div>`}
 		${rip && html`<div class=${'mrip ' + rip.side} key=${rip.id} aria-hidden="true"><span>${rip.side === 'l' ? '−' + 5 * rip.n + ' s' : '+' + 10 * rip.n + ' s'}</span></div>`}
 	</div>`;
 }
+/* ---- the gear's menu on the video (YouTube's): Audio track, Subtitles, Speed, each a page of its own. It lives in the
+   media box, so it shows in fullscreen too. Arrows move, Enter picks, Left or Esc go back, Esc on the first page closes */
+// "Japanese · AAC Stereo · Commentary": the title first ("Commentary"), then "Japanese · AAC Stereo"
+const trackName = l => { const p = (l || '').split(' · '); return p.length > 2 ? [p.slice(2).join(' · '), p[0] + ' · ' + p[1]] : [p[0], p[1] || '']; };
+const speedName = r => r === 1 ? 'Normal' : r + '×';
+// (its rows: components of their own, so a redraw keeps the focus on them)
+function VmBack({ title, setPage }) {
+	return html`<button class="vm-item vm-back" onClick=${() => setPage('main')}><${Icon} n="left" k=${2} /><span class="grow">${title}</span></button>`;
+}
+function VmRow({ on, label, sub, dim, onClick }) {
+	return html`<button class=${'vm-item' + (dim ? ' dim' : '')} role="menuitemradio" aria-checked=${!!on} aria-disabled=${dim ? 'true' : undefined} onClick=${onClick}>
+		<span class="vm-tick">${on && html`<${Icon} n="check" k=${2} />`}</span><span class="grow"><span class="vm-l">${label}</span>${sub && html`<span class="vm-s">${sub}</span>`}</span></button>`;
+}
+function VmNav({ k, label, val, show, setPage }) {
+	if (show === false) return null;
+	return html`<button class="vm-item vm-nav" role="menuitem" aria-haspopup="menu" onClick=${() => setPage(k)}>
+		<span class="grow">${label}</span><span class="vm-v ell">${val}</span><${Icon} n="right" k=${2} /></button>`;
+}
+function VidMenu({ page, setPage, fs, box, float }) {
+	useStore();
+	const ref = useRef(), [pos, setPos] = useState('');
+	// floating: beside the gear, on the side with more room
+	useLayoutEffect(() => {
+		if (!float) return;
+		const f = () => {
+			const g = box.current && (box.current.querySelector('.mov-gear') || box.current); if (!g) return;
+			const r = g.getBoundingClientRect(), above = r.top - 12, below = innerHeight - r.bottom - 12;
+			const right = 'right:' + Math.max(8, innerWidth - r.right) + 'px;';
+			setPos(right + (below >= above ? `top:${r.bottom + 4}px;max-height:${below}px` : `bottom:${innerHeight - r.top + 4}px;max-height:${above}px`));
+		};
+		f(); addEventListener('resize', f); return () => removeEventListener('resize', f);
+	}, [float]);
+	const m = B.meta && B.meta.media, audio = m && m.audio || [];
+	const native = nativeAudio(), playing = playingAudio(), def = directAudio(m), switching = B.switching && B.switching.a;
+	const why = i => native || i === def ? '' : streamWhy(m, i);
+	const subs = SUBS.list, cur = subs.find(x => x.i === SUBS.chosen);
+	const rate = el.playbackRate || 1;
+	useLayoutEffect(() => { const b = ref.current && ref.current.querySelector('.vm-item:not([aria-disabled="true"])'); if (b) b.focus({ preventScroll: true }); }, [page]);
+	useEffect(() => {
+		// a tap anywhere else closes it (the media's own tap handler sees that and does nothing more)
+		const f = e => { if (ref.current && !ref.current.contains(e.target) && !e.target.closest('.mov-gear')) setPage(null); };
+		document.addEventListener('pointerdown', f, true);
+		return () => document.removeEventListener('pointerdown', f, true);
+	}, []);
+	const key = e => {
+		const items = [...ref.current.querySelectorAll('.vm-item')], i = items.indexOf(document.activeElement);
+		if (e.key === 'Escape' || (e.key === 'ArrowLeft' && page !== 'main')) {
+			e.preventDefault(); e.stopPropagation();
+			if (page !== 'main') setPage('main'); else { setPage(null); const g = box.current && box.current.querySelector('.mov-gear'); if (g) g.focus(); }
+		} else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+			e.preventDefault(); e.stopPropagation();
+			const n = items.length, down = e.key === 'ArrowDown';
+			if (n) items[i < 0 ? (down ? 0 : n - 1) : (i + (down ? 1 : -1) + n) % n].focus();
+		} else if (e.key === 'ArrowRight' || e.key === 'ArrowLeft' || e.key === ' ') e.stopPropagation();
+	};
+	let body;
+	if (page === 'audio') {
+		const pick = (a, i) => {
+			if (why(i)) { toast(trackName(a.label)[0] + ': ' + why(i), { label: 'Play on handheld', fn: () => handoffToHandheld(a.i + 1) }, 8000); return; }
+			chooseAudio(i); setPage(null);
+		};
+		body = html`<${VmBack} setPage=${setPage} title="Audio track" />${audio.map((a, i) => { const [l, c] = trackName(a.label); return html`<${VmRow} on=${switching != null ? i === switching : i === playing} label=${l}
+			sub=${why(i) || (switching === i ? 'Switching…' : c)} dim=${!!why(i)} onClick=${() => pick(a, i)} />`; })}`;
+	} else if (page === 'subs') {
+		const pick = i => { lsSet('bpSubOff', i < 0 ? '1' : '0'); chooseSub(i); setPage(null); };
+		body = html`<${VmBack} setPage=${setPage} title="Subtitles" /><${VmRow} on=${SUBS.chosen < 0} label="Off" onClick=${() => pick(-1)} />
+			${subs.map(x => { const [l] = trackName(x.label), pic = x.kind === 'image';
+				const sub = pic ? 'Shows on the handheld only' : x.i === SUBS.chosen && SUBS.progress != null ? 'Preparing… ' + Math.round(SUBS.progress * 100) + '%'
+					: SUBS.failed[x.i] || [trackName(x.label)[1], x.external ? 'beside the video' : ''].filter(Boolean).join(' · ');
+				return html`<${VmRow} on=${x.i === SUBS.chosen} label=${l} sub=${sub} dim=${pic} onClick=${() => pic ? toast(l + ': shows on the handheld only (picture subtitles)', { label: 'Watch on handheld', fn: () => handoffToHandheld() }, 8000) : pick(x.i)} />`; })}
+			<button class="vm-item vm-more" role="menuitem" onClick=${() => { setPage(null); if (fs) toggleFullscreen(box.current); showTracks('sub'); }}><span class="vm-tick"></span><span class="grow">Size and position…</span></button>`;
+	} else if (page === 'speed') {
+		body = html`<${VmBack} setPage=${setPage} title="Speed" />${SPEEDS.map(r => html`<${VmRow} on=${Math.abs(rate - r) < .01} label=${speedName(r)} onClick=${() => { setSpeed(r); setPage(null); }} />`)}`;
+	} else {
+		const aCur = audio[switching != null ? switching : playing];
+		body = html`<${VmNav} setPage=${setPage} k="audio" label="Audio track" val=${aCur ? trackName(aCur.label)[0] : '—'} show=${audio.length > 1} />
+			<${VmNav} setPage=${setPage} k="subs" label="Subtitles" val=${cur ? trackName(cur.label)[0] : subs.length ? 'Off' : 'None'} show=${subs.length > 0} />
+			<${VmNav} setPage=${setPage} k="speed" label="Speed" val=${speedName(Math.round(rate * 100) / 100)} />`;
+	}
+	return html`<div class=${'vmenu box surface' + (float ? ' float' : '')} style=${pos} role="menu" aria-label="Settings" ref=${ref} onKeyDown=${key} onPointerUp=${e => e.stopPropagation()}>${body}</div>`;
+}
+
 // a soft glow behind the player, tinted by the cover (blurred), or by the generated cover's colour
 function Glow({ v }) {
 	const src = v.kind === 'audio' ? coverUrl(v.cover) : '';
@@ -330,7 +434,7 @@ function FullPlayer({ v, off, other, sn, tabs, tab }) {
 	// a swipe down on the header or the media folds the player away; it follows the finger
 	const sw = useRef(null);
 	const down = e => {
-		if (e.pointerType === 'mouse' || e.target.closest('.seek,.sheet2,.sh-scrim,.np-ctl,input,select,.volpop') || immersive || s.sheetOpen) return;
+		if (e.pointerType === 'mouse' || e.target.closest('.seek,.sheet2,.sh-scrim,.np-ctl,input,select,.volpop,.vmenu') || immersive || s.sheetOpen) return;
 		sw.current = { y: e.clientY, x: e.clientX, t: Date.now(), dy: 0, on: false, box: e.target.closest('.media') };
 	};
 	const move = e => {
