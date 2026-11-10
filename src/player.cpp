@@ -503,6 +503,7 @@ namespace bp
 		std::string alang = opts.lang;
 		if (settings.rememberAudio && !resume.lastAudioLang.empty()) alang = resume.lastAudioLang + (alang.empty() ? "" : "," + alang);
 		prop("alang", alang);
+		alangPref = alang;
 
 		wantSid = 0;
 		std::string sid = "auto";
@@ -823,7 +824,7 @@ namespace bp
 				if (t.type == type && t.id == id) return false;
 			return true;
 		};
-		if (wantAid > 0 && missing(TrackType::Audio, wantAid)) prop("aid", "auto");
+		if (wantAid > 0 && missing(TrackType::Audio, wantAid)) prop("aid", songAid(0));
 		if (wantSid > 0 && missing(TrackType::Sub, wantSid)) prop("sid", "auto");
 		if (isAudio && (settings.musicShow == SHOW_ART || settings.musicShow == SHOW_BOTH)) applyAudioDisplay();
 		updateOverlay();
@@ -874,6 +875,29 @@ namespace bp
 			std::chrono::steady_clock::now().time_since_epoch()).count();
 	}
 
+	std::string Player::songAid(int64_t prefer) const
+	{
+		if (prefer > 0) return std::to_string(prefer);
+		std::vector<const Track*> audio;
+		for (auto& t : tracks)
+			if (t.type == TrackType::Audio) audio.push_back(&t);
+		if (audio.empty()) return "auto";
+		auto lower = [](std::string v) { for (auto& c : v) c = (char)tolower((unsigned char)c); return v; };
+		for (size_t a = 0; a <= alangPref.size();)
+		{
+			size_t b = alangPref.find(',', a);
+			if (b == std::string::npos) b = alangPref.size();
+			std::string want = lower(alangPref.substr(a, b - a));
+			if (!want.empty())
+				for (const Track* t : audio)
+					if (lower(t->lang) == want) return std::to_string(t->id);
+			a = b + 1;
+		}
+		for (const Track* t : audio)
+			if (t->isDefault) return std::to_string(t->id);
+		return std::to_string(audio.front()->id);
+	}
+
 	void Player::checkAudio()
 	{
 		// a file with sound that came out silent: the sound device wasn't free when mpv opened it (and mpv doesn't
@@ -894,7 +918,7 @@ namespace bp
 			else
 			{
 				prop("lavfi-complex", "");
-				prop("aid", "auto");
+				prop("aid", songAid(0));
 			}
 			audioCheckAt = ticks() + 1500;
 			return;
@@ -908,7 +932,7 @@ namespace bp
 			audioChecks++;
 			fprintf(stderr, "banana-player: no audio track chosen; choosing it again (try %d)\n", audioChecks);
 			syncEq(true);	// (a track chosen rebuilds the chain from af)
-			prop("aid", wantAid ? std::to_string(wantAid) : "auto");
+			prop("aid", songAid(wantAid));
 			audioCheckAt = ticks() + 1500;
 			return;
 		}
@@ -1882,7 +1906,7 @@ namespace bp
 		if (graph.empty() && had)
 		{
 			// a graph taken off leaves no track chosen: the song's sound and its art back
-			prop("aid", seenAid > 0 ? std::to_string(seenAid) : "auto");
+			prop("aid", songAid(seenAid));
 			// by its id: "auto" while playing doesn't pick the art again
 			int64_t art = 0;
 			for (auto& t : tracks)

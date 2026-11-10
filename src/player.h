@@ -383,6 +383,11 @@ namespace bp
 		PlayHistory played;
 		int recentSer = 0;
 		int64_t wantAid = 0, wantSid = 0;
+		std::string alangPref;	// the alang set for this file (the remembered language first)
+		// the song's audio track to choose again, by its id: prefer, else the first in alangPref's languages, else the
+		// file's default, else the first; "auto" only with no audio track ("auto" set again when it's already the value
+		// chooses nothing, and mpv can be left with the cover art alone: a silent song)
+		std::string songAid(int64_t prefer) const;
 		// the tracks playing, as last seen while the file was open: at its end mpv has dropped its track list
 		int64_t seenAid = -1, seenSid = -1;
 		uint64_t audioCheckAt = 0;
