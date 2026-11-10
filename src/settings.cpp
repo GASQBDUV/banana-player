@@ -66,7 +66,12 @@ namespace bp
 	// lookup a pixel. The bars run from the top down both sides, mirrored, SEGMENTS a side
 	static const int BARS_W = 256, BARS_H = 128, PALETTE = 16, SEGMENTS = 40;
 	static const double BAR_FROM = 84, BAR_TO = 200, RING = 76, CENTRE_Y = 274;
-	static const char* CIRCLE_MAPS[2] = {"circle2-x.pgm", "circle2-y.pgm"};
+	// the share of the measured spectrum the ring shows: showfreqs runs to half the sample rate, and its top ninth
+	// (16-24 kHz at 44.1/48 kHz, as Peaks cuts) has next to nothing in music, so the bars at the bottom never moved
+	static const double SHOWN = 8.0 / 9;
+	static const int SHOWN_W = (int)(BARS_W * SHOWN);
+	// a new name whenever the tables change: they're cached by size
+	static const char* CIRCLE_MAPS[2] = {"circle3-x.pgm", "circle3-y.pgm"};
 
 	bool writeCircleMaps(const std::string& dir)
 	{
@@ -88,7 +93,7 @@ namespace bp
 				if (r >= BAR_FROM && r <= BAR_TO && seg - std::floor(seg) < 0.6)
 				{
 					// a bar: its frequency by the angle, its height by the distance out
-					mx = (int)((std::floor(seg) + 0.5) / SEGMENTS * BARS_W);
+					mx = (int)((std::floor(seg) + 0.5) / SEGMENTS * SHOWN_W);
 					my = (int)std::lround((BARS_H - 1) * (1 - (r - BAR_FROM) / (BAR_TO - BAR_FROM)));
 				}
 				else
@@ -137,7 +142,7 @@ namespace bp
 		std::string xm, ym;
 		lavfiPath(dir + "/" + CIRCLE_MAPS[0], xm);
 		lavfiPath(dir + "/" + CIRCLE_MAPS[1], ym);
-		std::string bars = std::to_string(BARS_W) + "x" + std::to_string(BARS_H);
+		std::string bars = std::to_string(BARS_W) + "x" + std::to_string(BARS_H), sw = std::to_string(SHOWN_W);
 		// cyan (left: the low notes, at the top) to blue-purple to pink (the high, at the bottom), multiplied into
 		// the white bars; the ring a pale blue, fading over the palette's columns
 		// The still inputs (the gradient, the palette, the tables) are pictures that end, never loops: blend, hstack
@@ -149,7 +154,7 @@ namespace bp
 			"[aid1] asplit [ao] [a]; "
 			"[a] aformat=sample_rates=44100|48000:channel_layouts=mono,showfreqs=s=" + bars + ":mode=bar:cmode=combined:ascale=log:fscale=log:win_size=1024:rate=30:colors=white|white,format=gbrp [bars]; "
 			"nullsrc=s=" + bars + ":r=1:d=1,format=gbrp,"
-			"geq=r='59+196*clip(2*X/W-1,0,1)':g='232-140*clip(2*X/W,0,1)-13*clip(2*X/W-1,0,1)':b='224+31*clip(2*X/W,0,1)-39*clip(2*X/W-1,0,1)' [grad]; "
+			"geq=r='59+196*clip(2*X/" + sw + "-1,0,1)':g='232-140*clip(2*X/" + sw + ",0,1)-13*clip(2*X/" + sw + "-1,0,1)':b='224+31*clip(2*X/" + sw + ",0,1)-39*clip(2*X/" + sw + "-1,0,1)' [grad]; "
 			"[bars] [grad] blend=all_mode=multiply [cbars]; "
 			"nullsrc=s=" + std::to_string(PALETTE) + "x" + std::to_string(BARS_H) + ":r=1:d=1,format=gbrp,"
 			"geq=r='207*exp(-pow(X/4,2))':g='232*exp(-pow(X/4,2))':b='255*exp(-pow(X/4,2))' [pal]; "

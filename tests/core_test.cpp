@@ -367,16 +367,16 @@ static void testSettings()
 		// no source that never ends: past the song's end it would flood mpv (its clock stopped, gigabytes taken)
 		CHECK_EQ(g.find("loop="), std::string::npos);
 		CHECK_EQ(visualizerGraph(VIS_CIRCLE, false, cdir).find("loop="), std::string::npos);
-		CHECK_EQ(g.find(std::string("movie='") + cdir + "/circle2-x.pgm'") != std::string::npos, true);
+		CHECK_EQ(g.find(std::string("movie='") + cdir + "/circle3-x.pgm'") != std::string::npos, true);
 		// the middle is black (the palette's last column), straight up from it a bar's lowest step
-		std::ifstream in(std::string(cdir) + "/circle2-x.pgm", std::ios::binary);
+		std::ifstream in(std::string(cdir) + "/circle3-x.pgm", std::ios::binary);
 		std::string pgm((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
 		size_t head = pgm.size() - (size_t)CIRCLE_BOX * CIRCLE_BOX * 2;
 		auto at = [&](int x, int y) { size_t i = head + ((size_t)(y - CIRCLE_Y) * CIRCLE_BOX + x - CIRCLE_X) * 2; return (unsigned char)pgm[i] << 8 | (unsigned char)pgm[i + 1]; };
 		CHECK_EQ(at(CIRCLE_W / 2, 274), 256 + 15);			// the middle: black
 		CHECK_EQ(at(CIRCLE_W / 2 - 1, 274 - 90) < 256, true);	// straight up: a bar
 		CHECK_EQ(at(CIRCLE_X + 5, CIRCLE_Y + 5), 256 + 15);	// the square's corner: black
-		for (const char* f : {"/circle2-x.pgm", "/circle2-y.pgm"}) unlink((std::string(cdir) + f).c_str());
+		for (const char* f : {"/circle3-x.pgm", "/circle3-y.pgm"}) unlink((std::string(cdir) + f).c_str());
 		rmdir(cdir);
 	}
 	CHECK_EQ(parseSettings("visualizer = circle\n").visualizer, (int)VIS_CIRCLE);
