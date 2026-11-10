@@ -66,7 +66,7 @@ Moved out of `CLAUDE.md`, which keeps the one-line rules and the map; the reason
   `video-out-params` of the last file (or the idle window) can't tell.
 - **Chapters** come by `observe_property` (`chapter-list`, `chapter`), as the track list does; `chapterTarget` in bpcore
   computes each L2/R2 jump, a pending chapter covers quick repeated presses, and the L2/R2 card shares `osd-overlay` id 2 with the volume card.
-- **`Ui`** is the whole bottom panel (its definitions are split over `src/ui*.cpp` by area: see CLAUDE.md's map): pages (Main, Tracks (Audio & Subtitles tabs), Chapters, Settings, Browse, Info, About, Exit, Sound (Equalizer & Effects tabs)), START's tabbed
+- **`Ui`** is the whole bottom panel (its definitions are split over `src/ui*.cpp` by area: see "Where things live" below): pages (Main, Tracks (Audio & Subtitles tabs), Chapters, Settings, Browse, Info, About, Exit, Sound (Equalizer & Effects tabs)), START's tabbed
   menu (`inMenu`: Playing (`Page::Playing`, while a song or video plays: Like, Add to playlist…; `menuTabs`), Settings, About; no Quit: quick settings and F + START quit), the Options menu (X), Lock, Screen off. The browser's first page is **Home**
   (`browseDir` `HOMEDIR`, `drawHome`, `homeKey`, `homePointer`): the Recent strip (`recent`, built by `listRecent` from the
   history and resume.tsv's positions and `#duration` lines; cards `CARD_W` wide, `STRIDE` apart, the focused one kept in
@@ -218,4 +218,89 @@ Web app (`web/app.js` is the entry: shell, App, debug hook; `web/js/` the module
 No build step: ES modules served as they are. A name another file needs is `export`ed where it is declared; a `let` is only
 assigned in its own module (others read it). `store.js` must not import from other app modules (cycles that touch it
 at load time hit the temporal dead zone).
+
+
+## The rules in full (as CLAUDE.md had them on 2026-11-10)
+
+CLAUDE.md now keeps one line per rule; this is the full text it had, kept here word for word.
+
+
+- **Never wait for mpv on the main thread while a file opens** (no `mpv_set_property`/`mpv_command`/`mpv_get_property`
+  there: mpv waits for the top panel's draw and gives up after 200 ms, several times a file). `prop()` and commands are
+  async; the track list, tags and chapters come by `observe_property`; `fileReady()` waits for the track list; read
+  (`get`) only once a file has started or on the Info page. mpv's own Lua scripts stay off.
+- **A file's own choices (`start`, `aid`, `sid`) go as `loadfile`'s per-file options**, never as properties set before it
+  (an `aid` the next file lacks silences it for good). `alang`/`slang` stay global. `checkAudio()` re-picks a lost track.
+  `loading()` is true from `load()` till `PLAYBACK_RESTART`; stale `video-params` can't tell.
+- **Music graphs** (`lavfi-complex`): clear before setting `aid`/`sid`; taking a graph off leaves no audio (restore
+  `aid`); set `vid` by id. A graph's picture never ends, so `checkSongEnd()` ends songs. A graph's still inputs are single
+  frames, never `loop=-1` (floods mpv; memory grows, the handheld freezes); test with a memory watchdog. Every visual
+  branch starts with `aformat=sample_rates=44100|48000`, makes ≤30 frames/s, and converts no frame (no per-frame
+  `format=` but `rgb0`, no `colorkey`). Keep them cheap: time a new graph on the handheld if you can, and against
+  Art+viz Bars (~0.85 ms/frame on the Mac, ~4 on the handheld). Circle reads `remap` tables written by `graphFor()`.
+- **Equalizer and effect** are one `af` after the graph: `@bpin` (to 48 kHz, always), `@bpeq`, `@bpfx`, built by
+  `syncEq`/`fxPart`. Band edits go by `af-command`; anything that rebuilds the chain needs `syncEq(true)` first.
+- **Ui redraws only when `signature()` changes:** any new state that affects drawing goes into it. Layout is fixed
+  640×480 units scaled by `sx`/`sy`. Colours and radii come from `src/theme.h`; a new box goes through `fillRound`/
+  `drawBox`/`drawLevel`/`fillRoundBand`, not `fill`. A new path check goes through `pseudoDir()` (PLROOT, PLDIR, FORMDIR,
+  FINDNET are pseudo-dirs). `dropTouch()` swallows only a finger still down.
+- **Settings:** a new switch goes in `Settings` plus the `REMEMBER` table in `settings.cpp`; in `src/ui_internal.h` keep
+  `REMEMBER`/`REMEMBER_LABELS`, `TOGGLES` and the row ids (`TOGGLE_ROW`, `PAN_ROW`, … in `ui.h`) in step, and place the row
+  in a group in `settingRows()` (+ `settingHelp()`).
+- **Threads:** background threads (`SleepWatch`, `BottomTouch`, `LevelWatch`, mpv callbacks, web server, `NetWorker`)
+  never touch `Player`/`Ui`: they push SDL user events (`evMpv`, `evRender`, `evTouch`, `evLevel`, `evNet`, `evWeb`).
+  Never block on a server in a destructor. The Updater and `WebServer` are never destroyed.
+- **Playlists:** Liked (`.liked.m3u`) is built in: only the heart adds to it; every other edit path refuses it
+  (`isBuiltinFile`). Edits are debounced 1 s and flushed on leaving and quit. Photos have their own playlist, no
+  history, no resume; they play through mpv (scaled to 4096 px at most).
+- **Network:** a place is `bpnet://<server-id>/<path>`, never with credentials; passwords sealed by `secret.*`; libsmb2
+  async calls only; names resolved at each connect (no DNS/mDNS on BananaOS).
+- **Web security gate** (`server.cpp`, before routing): private remote address, Host an IP literal or localhost, `X-BP: 1`
+  and matching Origin on non-GET, `bp_s` session cookie on every `/api/*` but login. Paths are virtual
+  `<rootIndex>/<rel>` via `resolveVirtual`; the deny list holds the state dir (`servers.key`), `/data/home`,
+  `/data/banana`, `/data/store`. Server threads reach the player only through `WebServer::call` (`evWeb`; async calls).
+  The web app is plain ES modules: export a name where it is declared, assign a `let` only in its own module, and keep
+  `store.js` free of app imports. `?debug` exposes `window.__bp` (tests use it). The glyph sprite is generated
+  (`tools/make-sprite.py`); web-only glyphs are inline in `index.html`. `web/style.css` copies `theme.h` by hand.
+- **Playing in the browser:** the handheld holds a paused copy of the page's item (the Session's `HhLoad` with
+  `hold`), never moved per report (only the session's Seek/SetOutput seek it); its first play there does `ao-reload`;
+  iPhone/iPad play in the page too (`NO_HERE` false since 0.5.5). `store.target` is derived from the Session's `pref`.
+- **Tracks in the browser** (docs/notes/2026-11-11-browser-tracks.md): `/api/subs` (WebVTT), `/api/ass` (the whole ASS
+  script for JASSUB, vendored in `web/vendor/jassub/`, loaded only when a styled track is chosen) and `/api/fonts` +
+  `/api/font` (Matroska font attachments) in `subs.*`; a non-default audio track is a Direct Stream (`remux.*`:
+  `/api/remux-start` → `{start}`, `/api/remux` fMP4 from that keyframe, one per tab). The page's clock is then
+  `B.remux.base + currentTime`: use `bPos()`/`seekTo()`, never `el.currentTime`. The bundle's FFmpeg needs the mp4 muxer.
+- **Leaving is not stopping** (docs/notes/2026-11-10-background-playback.md): `press`/`pointer` returning true is
+  `main`'s `leave()`, a screen change (what plays goes on behind the browser, `Ui::bgPlay`); stopping is
+  `stopPlaying()` (`takeStopPressed`, `takeStopRequest`, the end of the list), which changes screens only when
+  `Ui::playerShown()`. "Back to Main" goes through `home()`/`showPlayer()`, never `p.playing()` alone. Any Stop clears
+  the browser hand-off (`Ui::stopped`) without telling the page; the page announces only to a snapshot with a path.
+  A photo opened over a song parks it (`Ui::park`); the mini bar (`drawMiniBar`, `miniBarShown`) offers it back.
+- **Fonts:** SDL_ttf has no fallback (`Ui::runs()` picks per run); libass uses the bundle's `fonts.conf` (player's fonts
+  only). The icon's 32×32 grid lives in both `packaging/icon/make-icon.py` and `src/logo.h`: change both.
+- **Code style:** tabs; comments say why, not what. Screenshots/README use Blender's *Sintel* (CC BY 3.0); no
+  copyrighted material.
+
+
+## The map as CLAUDE.md had it (2026-11-10)
+
+- `src/main.cpp`: SDL, both windows, the one event loop (browser vs playing, scripted steps, web calls). `src/player.cpp`:
+  libmpv, playlist, resume/history/settings, graphs, ASS overlays. Library code with no window is `bpcore`
+  (tests in `tests/core_test.cpp`): keep window/mpv-handle code out of it.
+- **Ui** (class in `src/ui.h`; shared names in `src/ui_internal.h`, glyphs in `src/ui_glyphs.h`): `ui.cpp` core (init,
+  `press`, `pointer`, `act`, `tick`, `signature`), `ui_draw.cpp` primitives and page pieces, `ui_main.cpp` playing screen
+  and photos, `ui_home.cpp` Home, `ui_browse.cpp` the file list and sections, `ui_forms.cpp` connection form and keyboard,
+  `ui_playlists.cpp` playlists/select/picker, `ui_settings.cpp`, `ui_menus.cpp` (START, quick settings, popups, Info,
+  Like), `ui_sound.cpp` (Display, Sound), `ui_web.cpp`. A table of what is in each: `docs/architecture.md`.
+- Web: `src/web/` (server, API), `web/app.js` (entry) + `web/js/*.js` (ES modules, no build step), `web/style.css`,
+  `web/vendor/`; `cmake/EmbedWeb.cmake` embeds every file under `web/` into the binary.
+- Network: `net*.cpp`, `netstore`, `networker`, `netstream`, `discovery`. Updater: `updater.*`, `update.cpp`.
+- Session (`docs/design/session.md`): `session.*` (bpcore) is the one playback state and its pure reducer `apply()`
+  (invariants and a fuzz test in core-test; `matchTrack` also in `web/js/match.js`, both run `tests/session_vectors.txt`).
+  `session_host.*` (`SessionHost::get()`) owns it and runs the effects on mpv once per loop pass (`run()`,
+  coalesced). Opens (main's `routed()`), Step, Ended, Stop, the output (`out`), the selected output (`pref`: only
+  SetOutput, an Open that names where, or a tab gone 10 s move it), the track picks, photos and Woke all go through
+  it; a page sends intents to `/api/intent` and renders from `state.session` (`onSession`/`renderLoad`). While the
+  handheld itself is the output mpv is the clock and reports back (`pass()`). Any new way to play on the handheld
+  while a page is the output goes through `takeOver()` (else the I2 repair pauses it).
 

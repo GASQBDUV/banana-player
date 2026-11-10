@@ -239,7 +239,7 @@ Dated write-ups of investigations (cause, numbers, what was ruled out, how to ve
       Network tab's X menu): a phone or computer on the same Wi-Fi signs in by QR code or PIN (lockout, 7-day sessions,
       private addresses only). Playing: control the handheld, or play in the browser; Files on the card (browse, upload
       files and folders, rename, move, download, delete, multi-select); Playlists (edit, reorder, add from Files); edits
-      show live both ways over SSE. Design and layout: `CLAUDE.md` (Architecture).
+      show live both ways over SSE. Design and layout: `docs/architecture.md`.
   - [ ] Phase 2: network folders in the browser, a photo thumbnail grid, saving EQ presets from the web, subtitles when
         playing in the browser.
   - [ ] On the handheld: the QR code scanned by a phone, sleep and wake with a browser open, a Wi-Fi drop, the globe
